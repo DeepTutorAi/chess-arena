@@ -32,12 +32,20 @@ npm run deploy     # build + push ขึ้น GitHub Pages (gh-pages branch)
 
 ## ต่อสู้ Remote (AI ตัวนอก)
 
-1. เปิดโหมด **ต่อสู้ Remote** → **สร้างห้อง**
+1. เปิดโหมด **ต่อสู้ Remote** → **สร้างห้อง** (หรือใช้สคริปต์ `scripts/arena-host.mjs` รันเอนจินสนามจากเทอร์มินัลแทนการเปิด tab)
 2. ใส่ GitHub Token ของคุณ (scope `gist` — เก็บเฉพาะใน localStorage ของเบราว์เซอร์)
 3. เลือกว่าสนามนี้เล่นเป็นฝ่ายขาว/ดำ/สุ่ม แล้วสร้างห้อง
 4. ระบบจะคัดลอก URL ห้องให้ — **ส่ง URL นี้ให้ AI คู่แข่ง**
 5. คู่แข่งใช้โปรโตคอลใน `docs/agent-battle.md` (มี client ตัวอย่าง `scripts/agent-client.mjs`) อ่านห้องและเดิน
 6. สนามจะ poll ห้องทุก 2.5 วินาที ซิงก์กระดานอัตโนมัติ และเอนจินจะตอบกลับ
+
+### รันเอนจินสนามจากเทอร์มินัล (ไม่ต้องเปิด tab ทิ้งไว้)
+
+```bash
+node scripts/arena-host.mjs <gistId> <token> <w|b> [movetimeMs]
+```
+
+โหลด Stockfish 18 ใน Node แล้ว poll ห้องทุก 2.5 วิ — เมื่อถึงตาฝ่ายสนามจะคำนวณและเขียนท่าลงห้องให้อัตโนมัติ (ใช้ CAS เดียวกับ agent-client ป้องกันชนกัน)
 
 > หมายเหตุ: GitHub API ไม่คิดค่าใช้จ่าย แต่ poll บ่อยๆ จะติด rate limit (60 ครั้ง/ชม. แบบไม่ล็อกอิน) — ถ้าเป็นห้องสาธารณะที่ไม่มี token แนะนำ poll ≥ 2.5 วินาที (ค่าเริ่มต้น)
 
@@ -53,6 +61,7 @@ src/ui.js             DOM helper
 src/main.js           bootstrap + ไดอะลอก
 scripts/copy-engine.mjs   คัดลอกเอนจินเข้า public/
 scripts/agent-client.mjs  client ตัวอย่างสำหรับ AI ภายนอก
+scripts/arena-host.mjs    รันเอนจินสนามจากเทอร์มินัล (ไม่ต้องเปิด tab)
 docs/agent-battle.md      โปรโตคอลการประลอง (สำหรับ AI คู่แข่ง)
 ```
 

@@ -32,6 +32,7 @@
 | `turn` | `"w"` หรือ `"b"` — ฝ่ายที่ถึงตา |
 | `lastMove` / `lastMoveSan` | ท่าล่าสุด (UCI / SAN) หรือ `null` |
 | `white` / `black` | `{ name, kind, source }` ข้อมูลผู้เล่นแต่ละฝ่าย |
+| `arenaSide` | `"w"` หรือ `"b"` — ฝ่ายที่เอนจิน Chess Arena จะเล่นให้อัตโนมัติ (มีก็ต่อเมื่อสนามเป็นเจ้าบ้าน) |
 | `result` | `"1-0"`, `"0-1"`, `"1/2-1/2"` หรือ `null` |
 | `moves` | ประวัติท่าเดินแบบ UCI เรียงตามลำดับ (`["e2e4", "e7e5", ...]`) |
 | `updatedAt` | ISO timestamp ของการเขียนครั้งล่าสุด |
@@ -79,7 +80,6 @@ Token ต้องการ scope `gist` เท่านั้น
 ```bash
 node scripts/agent-client.mjs <gistId> <token> <white|black|watch> [--move e2e4] [--random] [--poll 2500]
 ```
-
 - `--move e2e4` — เดินท่าเดียวแล้วจบ (exit 0 = เดินสำเร็จ, 2 = ไม่ใช่ตาคุณ, 3 = ท่าไม่ถูกกฎหมาย)
 - `--random` — โหมดอัตโนมัติ: เดินท่าสุ่มเมื่อถึงตา (เอาไปแทน `decideMove()` ด้วยเอนจินของคุณเองได้)
 - `watch` — ดูอย่างเดียว

@@ -52,7 +52,13 @@ async function readState() {
   });
   if (!res.ok) throw new Error(`read gist failed (HTTP ${res.status})`);
   const gist = await res.json();
-  return JSON.parse(gist.files['state.json'].content);
+  let file = gist.files?.['state.json'];
+  if (!file) {
+    const jsonFiles = Object.values(gist.files ?? {}).filter((f) => f?.filename?.endsWith('.json'));
+    if (jsonFiles.length === 1) file = jsonFiles[0];
+  }
+  if (!file) throw new Error('room has no state.json');
+  return JSON.parse(file.content);
 }
 
 async function writeState(state) {
