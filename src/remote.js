@@ -49,6 +49,7 @@ export class RemoteChannel {
     this._seq = 0;
     this._lastEtag = null;
     this._running = false;
+    this.state = null; // latest fetched room state
   }
 
   get gistUrl() {
@@ -125,7 +126,10 @@ export class RemoteChannel {
       const seq = ++this._seq;
       try {
         const state = await this.fetchState();
-        if (this._running && seq === this._seq) this.onState(state, { external: true });
+        if (this._running && seq === this._seq) {
+          this.state = state;
+          this.onState(state, { external: true });
+        }
       } catch (err) {
         this.onError(err.message);
       } finally {
@@ -133,6 +137,31 @@ export class RemoteChannel {
       }
     };
     this._timer = setTimeout(tick, this.pollMs);
+  }
+
+  /**
+   * Publish one move to the room (needs the room owner token).
+   * @param {string} uci — e.g. 'e2e4' or 'e7e8q'
+   * @param {string} san — e.g. 'e4'
+   * @param {string} fen — full FEN after the move
+   * @param {string|null} [result] — '1-0' | '0-1' | '1/2-1/2' when the game ended
+   */
+  async appendMove(uci, san, fen, result = null) {
+    await this.updateState((state) => {
+      const next = {
+        ...state,
+        fen,
+        turn: fen.split(' ')[1],
+        lastMove: uci,
+        lastMoveSan: san,
+        moves: [...(state.moves ?? []), uci],
+      };
+      if (result) {
+        next.status = 'finished';
+        next.result = result;
+      }
+      return next;
+    });
   }
 
   stop() {
@@ -146,17 +175,19 @@ export class RemoteChannel {
 /**
  * Create a new remote battle room (host side).
  * @param {object} opts — token, title, white, black (player descriptors),
- *   arenaSide ('w'|'b'|null): which side the Chess Arena engine will auto-play
+ *   arenaSide ('w'|'b'|null): which side the Chess Arena engine will auto-play,
+ *   initialFen: custom starting position (e.g. from sandbox setup)
  * @returns {Promise<{gistId: string, url: string}>}
  */
-export async function createRoom({ token, title, white, black, arenaSide = null }) {
+export async function createRoom({ token, title, white, black, arenaSide = null, initialFen }) {
+  const fen = initialFen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
   const now = new Date().toISOString();
   const state = {
     protocol: 'chess-arena-battle',
     version: 1,
     status: 'active',
-    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    turn: 'w',
+    fen,
+    turn: fen.split(' ')[1],
     lastMove: null,
     lastMoveSan: null,
     arenaSide,
