@@ -231,13 +231,20 @@ function openModeDialog(mode) {
 
     const joinWrap = ui.el('div', 'dlg-section');
     joinWrap.append(ui.el('div', 'dlg-section-title', 'เข้าร่วมห้องที่มีอยู่'));
+    joinWrap.append(
+      ui.el(
+        'p',
+        'dlg-hint',
+        'ใส่ token = รับบทเจ้าบ้าน: เอนจินของสนามจะเล่นฝ่ายของมันให้อัตโนมัติ (ตาม arenaSide ในห้อง) — ไม่ใส่ = ดูอย่างเดียว (poll ที่ไม่มี token จะติด rate limit ของ GitHub เร็วมาก)'
+      )
+    );
     const gistField = ui.el('label', 'field');
     gistField.append(ui.el('span', 'field-label', 'URL หรือ ID ของ Gist'));
     const gistInput = ui.el('input');
     gistInput.placeholder = 'https://gist.github.com/… หรือ gist id';
     gistField.appendChild(gistInput);
     joinWrap.appendChild(gistField);
-    const tokJoin = tokenField('GitHub Token (ไม่จำเป็นถ้าดูอย่างเดียว)');
+    const tokJoin = tokenField('GitHub Token (ต้องใช้เมื่อเอนจินเล่นอัตโนมัติ)');
     joinWrap.appendChild(tokJoin.wrap);
     joinWrap.appendChild(
       dlgButtons([
@@ -300,3 +307,6 @@ ui.refs.btnNew.onclick = () => controller.newGame();
 
 ui.setPlayers({ name: 'ฝ่ายดำ' }, { name: 'ฝ่ายขาว' });
 openModeDialog(MODES.HUMAN_VS_AI);
+
+// Debug/testing hook (dev aid; harmless in production).
+window.__arena = { controller, ui, ground };

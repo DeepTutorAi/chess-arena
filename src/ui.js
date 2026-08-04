@@ -179,6 +179,33 @@ export class UI {
     };
   }
 
+  // ---- game over popup ---------------------------------------------------
+  /**
+   * Show the end-of-game dialog with a restart button.
+   * @param {string} title — e.g. "หมากรุก! ฝ่ายดำชนะ"
+   * @param {string} [detail] — draw reason or result code
+   * @param {Function} onNewGame — restart callback
+   */
+  showGameOver(title, detail = '', onNewGame) {
+    const body = this.el('div', 'gameover');
+    const big = this.el('div', 'gameover-title', title);
+    const sub = this.el('div', 'gameover-detail', detail);
+    body.append(big, sub);
+    const row = this.el('div', 'dlg-actions');
+    const again = this.el('button', 'btn primary', 'เริ่มเกมใหม่');
+    again.onclick = () => {
+      overlay.close();
+      onNewGame?.();
+    };
+    const close = this.el('button', 'btn', 'ปิด');
+    close.onclick = () => overlay.close();
+    row.append(again, close);
+    body.appendChild(row);
+    const overlay = this.openModal('จบเกม', body);
+    overlay.body.querySelector('.btn.primary').focus();
+    return overlay;
+  }
+
   el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;

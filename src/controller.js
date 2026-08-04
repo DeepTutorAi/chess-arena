@@ -49,6 +49,7 @@ export class Controller {
     this.remoteGistUrl = null;
     this.remoteState = null;
     this.remoteBusy = false;
+    this._engineTurnMoveCount = null;
     this.claimedSide = null; // remote guest: side this user claims ('w'|'b'|null)
     this.engineSide = null; // remote: side this arena's engine plays ('w'|'b'|null)
     this.humanSide = null; // human-vs-ai: side the user plays
@@ -59,6 +60,7 @@ export class Controller {
 
     this._aiTimer = null;
     this._lastGameHash = '';
+    this._overPopupShown = false;
   }
 
   // ------------------------------------------------------------------ public
@@ -71,6 +73,7 @@ export class Controller {
     this.orientation = 'white';
     this.viewerMode = false;
     this.engineBusy = false;
+    this._overPopupShown = false;
 
     this.ui.resetMoves();
     this.ui.clearLog();
@@ -253,10 +256,11 @@ export class Controller {
       const { gistId: id, url } = await createRoom({
         token,
         title,
+        arenaSide: this.engineSide,
         white: {
           name: ENGINE_NAME,
           kind: 'engine',
-          source: `stockfish 18 lite single (chess arena)`,
+          source: 'stockfish 18 lite single (chess arena)',
         },
         black: {
           name: GUEST_NAME,
@@ -267,26 +271,41 @@ export class Controller {
       gistId = id;
       this.remoteGistUrl = url;
       this.ui.log(`สร้างห้องแล้ว: ${url}`, 'sys');
-    } else {
-      this.engineSide = null; // guest/spectator: engine stays idle unless side claimed
     }
 
     this.viewerMode = true;
     const state = await this._openRemote(token, gistId);
+
+    // "เริ่มเกมใหม่" on this mode re-joins the same room (never creates a new one).
+    this._lastOpts = { action: 'join', gistId, token };
+
+    if (action === 'join') {
+      // Joining with a token lets this tab take over hosting: the arena engine
+      // auto-plays the side the room declares (state.arenaSide). Without a
+      // token this tab is a pure spectator.
+      this.engineSide = token && state.arenaSide ? state.arenaSide : null;
+      if (this.engineSide) {
+        this.ui.log(
+          `รับบทเจ้าบ้าน: เอนจินจะเล่นฝ่าย${this.engineSide === 'w' ? 'ขาว' : 'ดำ'} — ส่ง URL ให้คู่แข่ง: ${this.remote.gistUrl}`,
+          'sys'
+        );
+      }
+    }
+
     this.ui.setPlayers(
       { name: `${state.black?.name ?? 'ฝ่ายดำ'}` },
       { name: `${state.white?.name ?? 'ฝ่ายขาว'}` }
     );
     this.ui.setStatus(
       this.engineSide
-        ? `เอนจินสนามเล่นฝ่าย${this.engineSide === 'w' ? 'ขาว' : 'ดำ'} · รอคู่แข่ง AI เข้ามา…`
-        : 'โหมดผู้ชม/ร่วมเล่น · กำลังซิงก์…',
+        ? `เอนจินสนามเล่นฝ่าย${this.engineSide === 'w' ? 'ขาว' : 'ดำ'} · กำลังประลองกับคู่แข่ง`
+        : 'โหมดผู้ชม · กำลังซิงก์…',
       ''
     );
     this.ui.log(
       this.engineSide
         ? `รอการเดินจากฝ่าย${this.engineSide === 'w' ? 'ดำ' : 'ขาว'} (คู่แข่ง AI)…`
-        : 'รอ state จากห้อง…',
+        : 'ดูอย่างเดียว (ผู้ชม) — ไม่มีการเดินอัตโนมัติ',
       'sys'
     );
     if (this.engineSide) {
@@ -325,17 +344,6 @@ export class Controller {
     // chess.js uses 'w'/'b'; chessground expects 'white'/'black'.
     const cgTurn = turn === 'w' ? 'white' : 'black';
     const inCheck = this.game.inCheck();
-    let checkSq = null;
-    if (inCheck) {
-      outer: for (const row of this.game.board()) {
-        for (const sq of row) {
-          if (sq && sq.type === 'k' && sq.color === turn) {
-            checkSq = sq.square;
-            break outer;
-          }
-        }
-      }
-    }
     const hist = this.game.history({ verbose: true });
     const last = hist.length ? hist[hist.length - 1] : null;
 
@@ -350,7 +358,9 @@ export class Controller {
       fen: this.game.fen(),
       orientation: this.orientation,
       turnColor: cgTurn,
-      check: checkSq,
+      // chessground expects the COLOR of the side in check (it locates the
+      // king square itself), not the square key.
+      check: inCheck ? cgTurn : undefined,
       lastMove: last ? [last.from, last.to] : undefined,
       movable: {
         color: humanCanMove ? cgTurn : false,
@@ -403,6 +413,10 @@ export class Controller {
       this.ui.log(`จบเกม: ${text}`, 'sys');
       if (this.mode === MODES.AI_VS_AI) {
         this._stopAiLoop();
+      }
+      if (!this._overPopupShown) {
+        this._overPopupShown = true;
+        this.ui.showGameOver(text, `ผล: ${code}`, () => this.newGame());
       }
       return;
     }
@@ -607,6 +621,7 @@ export class Controller {
     if (!state || state.status !== 'active') return;
     if (this.engineSide && state.turn === this.engineSide) {
       this.remoteBusy = true;
+      this._engineTurnMoveCount = state.moves?.length ?? 0;
       this.ui.setStatus('เอนจินสนามกำลังคิด…', 'think');
       this.engine.setPosition(this.game.fen());
       this.engine.go({ movetime: 900 });
@@ -632,9 +647,15 @@ export class Controller {
   async _remotePublishMove(move) {
     if (!this.remote) return;
     const uci = move.from + move.to + (move.promotion ?? '');
+    const expected = this._engineTurnMoveCount;
+    this._engineTurnMoveCount = null;
     try {
       const over = this._isOver();
       await this.remote.updateState((s) => {
+        // Never publish a move computed against a stale room state.
+        if (expected != null && (s.moves?.length ?? 0) !== expected) {
+          throw new Error('ห้องเปลี่ยนระหว่างคิด — ข้ามการส่งท่า');
+        }
         const next = {
           ...s,
           fen: this.game.fen(),

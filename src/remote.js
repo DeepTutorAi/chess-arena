@@ -145,10 +145,11 @@ export class RemoteChannel {
 
 /**
  * Create a new remote battle room (host side).
- * @param {object} opts — token, title, white, black (player descriptors)
+ * @param {object} opts — token, title, white, black (player descriptors),
+ *   arenaSide ('w'|'b'|null): which side the Chess Arena engine will auto-play
  * @returns {Promise<{gistId: string, url: string}>}
  */
-export async function createRoom({ token, title, white, black }) {
+export async function createRoom({ token, title, white, black, arenaSide = null }) {
   const now = new Date().toISOString();
   const state = {
     protocol: 'chess-arena-battle',
@@ -158,6 +159,7 @@ export async function createRoom({ token, title, white, black }) {
     turn: 'w',
     lastMove: null,
     lastMoveSan: null,
+    arenaSide,
     white,
     black,
     result: null,
