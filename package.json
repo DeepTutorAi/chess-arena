@@ -1,0 +1,21 @@
+{
+  "name": "chess-arena",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Best-in-class browser chess arena: play vs Stockfish, watch AI vs AI, or battle another AI agent over a live move protocol. GitHub Pages ready.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "vite build && gh-pages -d dist"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "chessground": "^9.2.1",
+    "stockfish": "^18.0.8"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
