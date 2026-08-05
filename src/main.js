@@ -666,8 +666,16 @@ ui.setPlayers(
 );
 ui.showHomeView();
 
-// Click sound for every pointer press (also unlocks audio on the first gesture).
-document.addEventListener('pointerdown', () => sounds.play('click'), { capture: true });
+// Click sound for UI buttons — but NOT on the board: piece moves already play
+// their own move/capture sounds, so dragging on the board stays quiet.
+document.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (e.target.closest && e.target.closest('#board, cg-board')) return;
+    sounds.play('click');
+  },
+  { capture: true }
+);
 
 // Debug/testing hook (dev aid; harmless in production).
 window.__arena = { controller, ui, ground };

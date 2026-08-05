@@ -26,7 +26,7 @@ export class UI {
         <section id="home-view" class="home-view">
           <div class="park-hero-container">
             <div class="park-logo-wrap">
-              <img src="/assets/chess_arena_3d_logo.jpg" alt="Chess Arena 3D" class="park-logo-3d-img" />
+              <img src="./assets/chess_arena_3d_logo.jpg" alt="Chess Arena 3D" class="park-logo-3d-img" />
               <p class="park-logo-sub">BROWSER CHESS ARENA 2026</p>
             </div>
             

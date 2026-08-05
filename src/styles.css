@@ -129,7 +129,7 @@ body {
   margin: 0 auto;
   min-height: calc(100vh - 52px);
   background: linear-gradient(180deg, rgba(24, 22, 20, 0.75) 0%, rgba(24, 22, 20, 0.95) 100%),
-    url('/assets/chess_park_3d_bg.jpg') center/cover no-repeat;
+    url('../assets/chess_park_3d_bg.jpg') center/cover no-repeat;
 }
 
 .park-hero-container {
