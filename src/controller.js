@@ -78,6 +78,7 @@ export class Controller {
     this._lastOpts = { ...opts };
     this._overPopupShown = false;
     this._isTimeout = false;
+    this._lowTimePlayed = false; // low-time warning fires once per game
     this._timeoutLoser = null;
 
     const initialFen = opts.initialFen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
@@ -383,8 +384,11 @@ export class Controller {
     this.ui.setClock('top', ChessClock.formatTime(topMs), currentTurn === topColor, topMs <= 20000);
     this.ui.setClock('bottom', ChessClock.formatTime(bottomMs), currentTurn === bottomColor, bottomMs <= 20000);
 
-    // Low-time warning (cooldown inside the sound manager so it doesn't rattle).
-    if (topMs <= 20000 || bottomMs <= 20000) sounds.playLowTime();
+    // Low-time warning — once per game, when the clock first turns red (≤20s).
+    if ((topMs <= 20000 || bottomMs <= 20000) && !this._lowTimePlayed) {
+      this._lowTimePlayed = true;
+      sounds.playLowTime();
+    }
   }
 
   _onClockTimeout(loser) {
@@ -868,8 +872,9 @@ export class Controller {
     const over = this._isOver();
     if (over) {
       this._announceGameOver();
-    } else {
-      // move / capture / check feedback for every move (human, bot, remote)
+    } else if (this.mode !== MODES.ANALYZE) {
+      // move / capture / check feedback (human, bot, remote) — silent in
+      // sandbox / custom (analyze) mode.
       if (move.captured) sounds.play('capture');
       else sounds.play('move');
       if (this.game.inCheck()) sounds.play('check');
@@ -914,13 +919,14 @@ export class Controller {
     const ms = tc?.initialMs ?? 0;
     let base;
     let search;
-    if (ms <= 0 || ms >= 8 * 60000) { base = 7000; search = 1500; }
-    else if (ms >= 4 * 60000) { base = 5000; search = 800; }
-    else { base = 2800; search = 450; }
+    if (ms <= 0 || ms >= 8 * 60000) { base = 7000; search = 1500; }   // unlimited / 8-30min
+    else if (ms >= 4 * 60000) { base = 5000; search = 800; }          // 4-7min
+    else if (ms >= 60000) { base = 2000; search = 450; }              // 1-5min: snappier
+    else { base = 1200; search = 250; }                               // <1min: fastest
 
-    // Opening: the first 3 plies come quick (~1-3s) whatever the time control.
+    // Opening: the first 3 plies come quick (~0.6-1.6s) whatever the control.
     if (this.game.history().length < 3) {
-      return { delay: 1000 + Math.floor(Math.random() * 2001), search };
+      return { delay: 600 + Math.floor(Math.random() * 1001), search };
     }
 
     let factor = 1;

@@ -365,7 +365,7 @@ function openModeDialog(targetMode = null) {
         const slider = ui.el('input');
         slider.type = 'range';
         slider.min = '1';
-        slider.max = '8';
+        slider.max = '11';
         slider.step = '1';
         slider.value = String(value);
         wrap.appendChild(slider);
@@ -666,13 +666,13 @@ ui.setPlayers(
 );
 ui.showHomeView();
 
-// Click sound for UI buttons — but NOT on the board: piece moves already play
-// their own move/capture sounds, so dragging on the board stays quiet.
+// Click sound ONLY on actual buttons (not the board, not empty space).
+// Piece moves already play their own move/capture sounds, so dragging stays
+// quiet; the board itself has no buttons, so it is excluded automatically.
 document.addEventListener(
   'pointerdown',
   (e) => {
-    if (e.target.closest && e.target.closest('#board, cg-board')) return;
-    sounds.play('click');
+    if (e.target.closest && e.target.closest('button')) sounds.play('click');
   },
   { capture: true }
 );
