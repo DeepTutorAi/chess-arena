@@ -1,4 +1,5 @@
 import { Chess } from 'chess.js';
+import { advanceAfkAfterMove, createAfkState, toPublicAfk } from './afk-state.js';
 
 export const ONLINE_PROTOCOL = 'chess-arena-online';
 export const ONLINE_VERSION = 1;
@@ -42,6 +43,10 @@ function finishByTimeout(state, loser) {
   next.updatedAt = next.clock.activeSince + (loser === 'w' ? next.clock.whiteMs : next.clock.blackMs);
   next.clock[loser === 'w' ? 'whiteMs' : 'blackMs'] = 0;
   next.clock.activeSince = null;
+  if (next.afk) {
+    next.afk.openingDeadlineAt = null;
+    next.afk.episode = null;
+  }
   return next;
 }
 
@@ -90,6 +95,7 @@ export function createGameState(input, now = Date.now()) {
     hostColor,
     guestColor,
     clock,
+    afk: null,
     createdAt: now,
     updatedAt: now,
     expiresAt: input.expiresAt,
@@ -109,6 +115,7 @@ export function joinGameState(state, guestName, now = Date.now(), guestAvatar = 
   next.revision += 1;
   next.updatedAt = now;
   if (next.clock) next.clock.activeSince = now;
+  next.afk = createAfkState(next.timeControlId, now);
   return { ok: true, state: next };
 }
 
@@ -151,6 +158,10 @@ export function applyGameCommand(state, actor, command, now = Date.now()) {
     next.revision += 1;
     next.updatedAt = now;
     if (next.clock) next.clock.activeSince = null;
+    if (next.afk) {
+      next.afk.openingDeadlineAt = null;
+      next.afk.episode = null;
+    }
     return { ok: true, state: next };
   }
 
@@ -186,6 +197,7 @@ export function applyGameCommand(state, actor, command, now = Date.now()) {
     next.clock[moverKey] = Math.max(0, next.clock[moverKey] - elapsed) + next.clock.incrementMs;
     next.clock.activeSince = now;
   }
+  Object.assign(next, advanceAfkAfterMove(next, now));
 
   const outcome = gameOutcome(game);
   if (outcome) {
@@ -193,6 +205,10 @@ export function applyGameCommand(state, actor, command, now = Date.now()) {
     next.result = outcome.result;
     next.reason = outcome.reason;
     if (next.clock) next.clock.activeSince = null;
+    if (next.afk) {
+      next.afk.openingDeadlineAt = null;
+      next.afk.episode = null;
+    }
   }
 
   return { ok: true, state: next };
@@ -229,6 +245,7 @@ export function toPublicState(state, connections = {}) {
     reason: state.reason,
     players: publicPlayers,
     clock: state.clock ? copy(state.clock) : null,
+    afk: toPublicAfk(state),
     expiresAt: state.expiresAt,
   };
 }

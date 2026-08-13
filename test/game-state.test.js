@@ -44,6 +44,7 @@ test('createGameState creates a waiting canonical position without starting the 
   });
 
   assert.equal(state.status, 'waiting');
+  assert.equal(state.afk, null);
   assert.equal(state.revision, 0);
   assert.equal(state.fen, START_FEN);
   assert.deepEqual(state.players, {
@@ -62,6 +63,7 @@ test('createGameState creates a waiting canonical position without starting the 
 test('joinGameState claims the guest seat once and starts a timed game', () => {
   const waiting = createWaiting({
     hostColor: 'b',
+    timeControlId: 'bullet_1_0',
     timeControl: { initialMs: 60_000, incrementMs: 1_000 },
   });
 
@@ -72,6 +74,8 @@ test('joinGameState claims the guest seat once and starts a timed game', () => {
   assert.equal(joined.state.players.w.name, 'Guest');
   assert.equal(joined.state.players.w.avatar, 'rook');
   assert.equal(joined.state.clock.activeSince, 5_000);
+  assert.equal(joined.state.afk.openingDeadlineAt, 20_000);
+  assert.deepEqual(joined.state.afk.strikes, { w: 0, b: 0 });
 
   const second = joinGameState(joined.state, 'Other', 6_000);
   assert.deepEqual(second, {
@@ -97,7 +101,41 @@ test('applyGameCommand accepts a legal move and derives canonical state', () => 
   assert.equal(result.state.lastMove, 'e2e4');
   assert.equal(result.state.lastMoveSan, 'e4');
   assert.deepEqual(result.state.moves, ['e2e4']);
+  assert.equal(result.state.afk.openingDeadlineAt, 43_000);
   assert.equal(state.fen, before.fen, 'the input state must not be mutated');
+});
+
+test('the second legal move permanently clears opening AFK authority', () => {
+  let state = createActive({
+    timeControlId: 'unlimited',
+    timeControl: null,
+  }, 2_000);
+  let moved = applyGameCommand(
+    state,
+    { role: 'host', color: 'w' },
+    { type: 'move', from: 'e2', to: 'e4', expectedRevision: 1 },
+    3_000,
+  );
+  assert.equal(moved.ok, true);
+  state = moved.state;
+  assert.equal(state.afk.openingDeadlineAt, 43_000);
+
+  moved = applyGameCommand(
+    state,
+    { role: 'guest', color: 'b' },
+    { type: 'move', from: 'e7', to: 'e5', expectedRevision: 2 },
+    4_000,
+  );
+  assert.equal(moved.ok, true);
+  assert.equal(moved.state.afk.openingDeadlineAt, null);
+
+  moved = applyGameCommand(
+    moved.state,
+    { role: 'host', color: 'w' },
+    { type: 'move', from: 'g1', to: 'f3', expectedRevision: 3 },
+    5_000,
+  );
+  assert.equal(moved.state.afk.openingDeadlineAt, null);
 });
 
 test('applyGameCommand rejects an illegal move without changing state', () => {
@@ -214,5 +252,10 @@ test('toPublicState exposes connection flags without private authority data', ()
   assert.equal(view.players.b.avatar, 'pawns');
   assert.equal(view.visibility, 'public');
   assert.equal(view.allowSpectators, true);
+  assert.deepEqual(view.afk, {
+    strikes: { w: 0, b: 0 },
+    countdown: { color: 'w', cause: 'opening', deadlineAt: 42_000 },
+  });
+  assert.equal(JSON.stringify(view.afk).includes('lastHeartbeatAt'), false);
   assert.equal('capabilities' in view, false);
 });

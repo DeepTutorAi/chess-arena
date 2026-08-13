@@ -51,6 +51,10 @@ function validState(overrides = {}) {
     },
     spectators: [{ name: 'Viewer', avatar: 'bishop' }],
     spectatorCount: 1,
+    afk: {
+      strikes: { w: 0, b: 0 },
+      countdown: { color: 'w', cause: 'opening', deadlineAt: 20_000 },
+    },
     clock: null,
     expiresAt: 99_999,
     ...overrides,
@@ -171,6 +175,10 @@ test('validateServerMessage accepts canonical snapshots and rejects malformed au
   assert.equal(validateServerMessage(validState({ spectators: [{ name: 'Viewer', avatar: 'unknown' }] })).ok, false);
   assert.equal(validateServerMessage(validState({ spectatorCount: 2 })).ok, false);
   assert.equal(validateServerMessage(validState({ visibility: 'secret' })).ok, false);
+  assert.equal(validateServerMessage(validState({ afk: { strikes: { w: -1, b: 0 }, countdown: null } })).ok, false);
+  assert.equal(validateServerMessage(validState({ afk: { strikes: { w: 0, b: 0 }, countdown: { color: 'w', cause: 'idle', deadlineAt: 20_000 } } })).ok, false);
+  assert.equal(validateServerMessage(validState({ afk: { strikes: { w: 0, b: 0 }, countdown: null, lastHeartbeatAt: 1 } })).ok, false);
+  assert.equal(validateServerMessage(validState({ afk: { strikes: { w: 0, b: 0 }, countdown: { color: 'w', cause: 'opening', deadlineAt: 1.5 } } })).ok, false);
   assert.deepEqual(validateServerMessage({ type: 'error', code: 'wrong_turn', message: 'wait', revision: 2 }), {
     ok: true,
     value: { type: 'error', code: 'wrong_turn', message: 'wait', revision: 2 },

@@ -29,6 +29,23 @@ function validProfile(value, { nullable = false } = {}) {
     && AVATARS.includes(value.avatar);
 }
 
+function hasOnlyKeys(value, allowed) {
+  return isRecord(value) && Object.keys(value).every((key) => allowed.includes(key));
+}
+
+function validPublicAfk(value) {
+  if (value === null) return true;
+  if (!hasOnlyKeys(value, ['strikes', 'countdown'])
+    || !hasOnlyKeys(value.strikes, ['w', 'b'])
+    || !['w', 'b'].every((color) => Number.isSafeInteger(value.strikes[color])
+      && value.strikes[color] >= 0 && value.strikes[color] <= 2)) return false;
+  if (value.countdown === null) return true;
+  return hasOnlyKeys(value.countdown, ['color', 'cause', 'deadlineAt'])
+    && ['w', 'b'].includes(value.countdown.color)
+    && ['opening', 'hidden', 'heartbeat', 'inactivity'].includes(value.countdown.cause)
+    && Number.isSafeInteger(value.countdown.deadlineAt);
+}
+
 function validLobbyRoom(value) {
   if (!isRecord(value)) return false;
   const allowed = [
@@ -176,7 +193,8 @@ export function validateServerMessage(value) {
     || value.spectators.length > 50
     || !value.spectators.every((profile) => validProfile(profile))
     || !Number.isSafeInteger(value.spectatorCount)
-    || value.spectatorCount !== value.spectators.length) {
+    || value.spectatorCount !== value.spectators.length
+    || !validPublicAfk(value.afk)) {
     return { ok: false, error: 'invalid_message' };
   }
   return { ok: true, value };
