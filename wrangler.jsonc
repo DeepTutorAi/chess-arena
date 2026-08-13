@@ -14,11 +14,19 @@
       {
         "name": "ROOMS",
         "class_name": "ChessRoom"
+      },
+      {
+        "name": "LOBBY",
+        "class_name": "LobbyRegistry"
       }
     ]
   },
   "exports": {
     "ChessRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "LobbyRegistry": {
       "type": "durable-object",
       "storage": "sqlite"
     }

@@ -1,8 +1,9 @@
 import { Chess } from 'chess.js';
 
 import { createGameState } from './game-state.js';
-import { parseCreateRequest, parseJoinRequest, TIME_CONTROLS } from './protocol.js';
+import { parseCreateRequest, parseJoinRequest, parseLobbyQuery, TIME_CONTROLS } from './protocol.js';
 export { ChessRoom } from './room.js';
+export { LobbyRegistry } from './lobby-registry.js';
 
 const MAX_BODY_BYTES = 8_192;
 const ROOM_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -74,6 +75,10 @@ function roomStub(env, id) {
   return env.ROOMS.get(env.ROOMS.idFromName(id));
 }
 
+function lobbyStub(env) {
+  return env.LOBBY.get(env.LOBBY.idFromName('global'));
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin') ?? '';
@@ -84,6 +89,16 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
 
     const url = new URL(request.url);
+    if (request.method === 'GET' && url.pathname === '/api/lobby') {
+      const parsed = parseLobbyQuery(url);
+      if (!parsed.ok) return json({ error: parsed.code, message: parsed.message }, 400, origin);
+      const listUrl = new URL('http://lobby/list');
+      for (const [key, value] of Object.entries(parsed.value)) {
+        if (value !== undefined) listUrl.searchParams.set(key, value);
+      }
+      return withCors(await lobbyStub(env).fetch(listUrl), origin);
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/rooms') {
       const body = await readJson(request, origin);
       if (body.response) return body.response;
