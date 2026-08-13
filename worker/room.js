@@ -15,6 +15,8 @@ const SECRETS_KEY = 'secrets';
 const SPECTATOR_SESSIONS_KEY = 'spectatorSessions';
 const MAX_ACTIVE_SPECTATORS = 50;
 const MAX_SPECTATOR_SESSIONS = 100;
+const ISSUANCE_WINDOW_MS = 10_000;
+const MAX_ISSUANCE_ATTEMPTS = 60;
 
 function json(value, status = 200) {
   return Response.json(value, { status });
@@ -25,6 +27,7 @@ export class ChessRoom extends DurableObject {
     super(ctx, env);
     this.env = env;
     this.registrySyncPromise = null;
+    this.issuanceAttempts = [];
   }
 
   async fetch(request) {
@@ -113,6 +116,7 @@ export class ChessRoom extends DurableObject {
   }
 
   async joinPublic(request) {
+    if (!this.consumeIssuanceAttempt()) return this.rateLimited();
     const [state, secrets] = await Promise.all([
       this.ctx.storage.get(ROOM_KEY),
       this.ctx.storage.get(SECRETS_KEY),
@@ -146,6 +150,7 @@ export class ChessRoom extends DurableObject {
   }
 
   async watch(request) {
+    if (!this.consumeIssuanceAttempt()) return this.rateLimited();
     const [state, secrets, sessions = {}] = await Promise.all([
       this.ctx.storage.get(ROOM_KEY),
       this.ctx.storage.get(SECRETS_KEY),
@@ -184,6 +189,20 @@ export class ChessRoom extends DurableObject {
       role: 'spectator',
       color: null,
       state: this.publicState(state),
+    });
+  }
+
+  consumeIssuanceAttempt(now = Date.now()) {
+    this.issuanceAttempts = this.issuanceAttempts.filter((timestamp) => now - timestamp < ISSUANCE_WINDOW_MS);
+    if (this.issuanceAttempts.length >= MAX_ISSUANCE_ATTEMPTS) return false;
+    this.issuanceAttempts.push(now);
+    return true;
+  }
+
+  rateLimited() {
+    return new Response(JSON.stringify({ error: 'rate_limited' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '10' },
     });
   }
 

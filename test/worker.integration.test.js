@@ -214,6 +214,20 @@ describe('online room Worker', () => {
     expect(bodies.find((body) => body.role === 'guest').state.revision).toBe(1);
   });
 
+  it('bounds repeated public session issuance attempts per room', async () => {
+    const created = await createRoom({ title: `Throttle ${crypto.randomUUID()}` });
+    const statuses = [];
+    for (let index = 0; index < 61; index += 1) {
+      const response = await exports.default.fetch(jsonRequest(
+        `http://worker.test/api/rooms/${created.body.roomId}/join-public`,
+        'POST',
+        { playerName: `Guest ${index}`, avatar: 'rook' },
+      ));
+      statuses.push(response.status);
+    }
+    expect(statuses.at(-1)).toBe(429);
+  });
+
   it('gives spectators live presence while rejecting every game mutation', async () => {
     const created = await createRoom({ title: `Spectator ${crypto.randomUUID()}`, color: 'w' });
     const joinedResponse = await exports.default.fetch(jsonRequest(
