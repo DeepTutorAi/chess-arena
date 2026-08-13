@@ -1,7 +1,14 @@
 import { Chess } from 'chess.js';
 
 import { createGameState } from './game-state.js';
-import { parseCreateRequest, parseJoinRequest, parseLobbyQuery, TIME_CONTROLS } from './protocol.js';
+import {
+  parseCreateRequest,
+  parseJoinRequest,
+  parseLobbyQuery,
+  parsePublicJoinRequest,
+  parseWatchRequest,
+  TIME_CONTROLS,
+} from './protocol.js';
 export { ChessRoom } from './room.js';
 export { LobbyRegistry } from './lobby-registry.js';
 
@@ -121,7 +128,11 @@ export default {
         roomId: id,
         title: parsed.value.title,
         hostName: parsed.value.playerName,
+        hostAvatar: parsed.value.avatar,
         hostColor,
+        visibility: parsed.value.visibility,
+        allowSpectators: parsed.value.allowSpectators,
+        timeControlId: parsed.value.timeControlId,
         initialFen,
         timeControl: TIME_CONTROLS[parsed.value.timeControlId],
         expiresAt: now + ROOM_TTL_MS,
@@ -144,6 +155,34 @@ export default {
       const parsed = parseJoinRequest(body.value);
       if (!parsed.ok) return json({ error: parsed.code, message: parsed.message }, 400, origin);
       const response = await roomStub(env, joinMatch[1]).fetch('http://room/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...parsed.value, now: Date.now() }),
+      });
+      return withCors(response, origin);
+    }
+
+    const publicJoinMatch = url.pathname.match(/^\/api\/rooms\/([a-z2-7]{16})\/join-public$/u);
+    if (request.method === 'POST' && publicJoinMatch) {
+      const body = await readJson(request, origin);
+      if (body.response) return body.response;
+      const parsed = parsePublicJoinRequest(body.value);
+      if (!parsed.ok) return json({ error: parsed.code, message: parsed.message }, 400, origin);
+      const response = await roomStub(env, publicJoinMatch[1]).fetch('http://room/join-public', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...parsed.value, now: Date.now() }),
+      });
+      return withCors(response, origin);
+    }
+
+    const watchMatch = url.pathname.match(/^\/api\/rooms\/([a-z2-7]{16})\/watch$/u);
+    if (request.method === 'POST' && watchMatch) {
+      const body = await readJson(request, origin);
+      if (body.response) return body.response;
+      const parsed = parseWatchRequest(body.value);
+      if (!parsed.ok) return json({ error: parsed.code, message: parsed.message }, 400, origin);
+      const response = await roomStub(env, watchMatch[1]).fetch('http://room/watch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...parsed.value, now: Date.now() }),
