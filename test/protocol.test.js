@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseCreateRequest, parseJoinRequest, parseSocketCommand } from '../worker/protocol.js';
+import {
+  AVATARS,
+  parseCreateRequest,
+  parseJoinRequest,
+  parseLobbyQuery,
+  parsePublicJoinRequest,
+  parseSocketCommand,
+  parseWatchRequest,
+} from '../worker/protocol.js';
 
 test('parseCreateRequest normalizes valid player-controlled room settings', () => {
   const result = parseCreateRequest({
@@ -19,6 +27,9 @@ test('parseCreateRequest normalizes valid player-controlled room settings', () =
       color: 'random',
       timeControlId: 'blitz_5_0',
       initialFen: undefined,
+      visibility: 'public',
+      allowSpectators: true,
+      avatar: 'knight',
     },
   });
 });
@@ -29,8 +40,40 @@ test('parseCreateRequest rejects malformed and authority-claiming input', () => 
   assert.equal(parseCreateRequest({ playerName: 'A', color: 'green' }).ok, false);
   assert.equal(parseCreateRequest({ playerName: 'A', fen: 'client owned' }).ok, false);
   assert.equal(parseCreateRequest({ playerName: 'A', result: '1-0' }).ok, false);
+  assert.equal(parseCreateRequest({ playerName: 'A', avatar: 'dragon' }).ok, false);
+  assert.equal(parseCreateRequest({ playerName: 'A', visibility: 'friends' }).ok, false);
   assert.equal(parseCreateRequest({ playerName: 'A'.repeat(41) }).ok, false);
   assert.equal(parseCreateRequest({ playerName: 'A', title: 'T'.repeat(81) }).ok, false);
+});
+
+test('public join and watch requests accept bounded guest profiles only', () => {
+  assert.deepEqual(AVATARS, ['knight', 'king', 'rook', 'bishop', 'pawns', 'shield']);
+  assert.deepEqual(parsePublicJoinRequest({ playerName: ' Bob ', avatar: 'rook' }), {
+    ok: true,
+    value: { playerName: 'Bob', avatar: 'rook' },
+  });
+  assert.equal(parsePublicJoinRequest({ playerName: 'Bob', avatar: 'url:https://example.test' }).ok, false);
+  assert.equal(parsePublicJoinRequest({ playerName: 'Bob', avatar: 'rook', color: 'b' }).ok, false);
+
+  const watchToken = 'W'.repeat(43);
+  assert.deepEqual(parseWatchRequest({ playerName: 'Viewer', avatar: 'bishop' }), {
+    ok: true,
+    value: { playerName: 'Viewer', avatar: 'bishop', watchInviteToken: undefined },
+  });
+  assert.equal(parseWatchRequest({ playerName: 'Viewer', avatar: 'bishop', watchInviteToken: watchToken }).ok, true);
+  assert.equal(parseWatchRequest({ playerName: 'Viewer', avatar: 'bishop', watchInviteToken: 'short' }).ok, false);
+});
+
+test('lobby query accepts bounded filters and rejects malformed discovery input', () => {
+  assert.deepEqual(parseLobbyQuery(new URL('https://example.test/api/lobby?status=open&time=blitz&search=%20Friday%20')), {
+    ok: true,
+    value: { status: 'open', time: 'blitz', search: 'Friday', cursor: undefined },
+  });
+  assert.equal(parseLobbyQuery(new URL('https://example.test/api/lobby?status=private')).ok, false);
+  assert.equal(parseLobbyQuery(new URL('https://example.test/api/lobby?time=weekly')).ok, false);
+  assert.equal(parseLobbyQuery(new URL(`https://example.test/api/lobby?search=${'x'.repeat(61)}`)).ok, false);
+  assert.equal(parseLobbyQuery(new URL('https://example.test/api/lobby?cursor=not%20opaque%21')).ok, false);
+  assert.equal(parseLobbyQuery(new URL('https://example.test/api/lobby?unknown=1')).ok, false);
 });
 
 test('parseJoinRequest accepts only a player name and capability', () => {

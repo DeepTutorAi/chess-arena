@@ -51,10 +51,11 @@ export function createGameState(input, now = Date.now()) {
   const hostColor = input.hostColor === 'b' ? 'b' : 'w';
   const guestColor = hostColor === 'w' ? 'b' : 'w';
   const players = {
-    w: { role: hostColor === 'w' ? 'host' : 'guest', name: null },
-    b: { role: hostColor === 'b' ? 'host' : 'guest', name: null },
+    w: { role: hostColor === 'w' ? 'host' : 'guest', name: null, avatar: null },
+    b: { role: hostColor === 'b' ? 'host' : 'guest', name: null, avatar: null },
   };
   players[hostColor].name = input.hostName;
+  players[hostColor].avatar = input.hostAvatar ?? 'knight';
 
   const tc = input.timeControl;
   const clock = tc
@@ -72,6 +73,9 @@ export function createGameState(input, now = Date.now()) {
     version: ONLINE_VERSION,
     roomId: input.roomId,
     title: input.title,
+    visibility: input.visibility ?? 'public',
+    allowSpectators: input.allowSpectators ?? true,
+    timeControlId: input.timeControlId ?? 'unlimited',
     revision: 0,
     status: 'waiting',
     initialFen,
@@ -92,7 +96,7 @@ export function createGameState(input, now = Date.now()) {
   };
 }
 
-export function joinGameState(state, guestName, now = Date.now()) {
+export function joinGameState(state, guestName, now = Date.now(), guestAvatar = 'pawns') {
   if (now >= state.expiresAt) return error('room_expired', 'ห้องนี้หมดอายุแล้ว');
   if (state.status !== 'waiting' || state.players[state.guestColor].name) {
     return error('room_full', 'ห้องนี้มีผู้เล่นครบแล้ว');
@@ -100,6 +104,7 @@ export function joinGameState(state, guestName, now = Date.now()) {
 
   const next = copy(state);
   next.players[next.guestColor].name = String(guestName).trim();
+  next.players[next.guestColor].avatar = guestAvatar;
   next.status = 'active';
   next.revision += 1;
   next.updatedAt = now;
@@ -199,6 +204,7 @@ export function toPublicState(state, connections = {}) {
     const player = state.players[color];
     publicPlayers[color] = {
       name: player.name,
+      avatar: player.avatar ?? null,
       connected: Boolean(connections[player.role]),
     };
   }
@@ -209,6 +215,8 @@ export function toPublicState(state, connections = {}) {
     type: 'state',
     roomId: state.roomId,
     title: state.title,
+    visibility: state.visibility ?? 'public',
+    allowSpectators: state.allowSpectators ?? true,
     revision: state.revision,
     status: state.status,
     initialFen: state.initialFen,

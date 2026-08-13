@@ -9,6 +9,11 @@ export const TIME_CONTROLS = Object.freeze({
   classical_30_0: { initialMs: 1_800_000, incrementMs: 0 },
 });
 
+export const AVATARS = Object.freeze(['knight', 'king', 'rook', 'bishop', 'pawns', 'shield']);
+export const VISIBILITIES = Object.freeze(['public', 'private']);
+export const LOBBY_STATUSES = Object.freeze(['all', 'open', 'watch']);
+export const LOBBY_TIMES = Object.freeze(['all', 'bullet', 'blitz', 'rapid', 'unlimited']);
+
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const SQUARE_PATTERN = /^[a-h][1-8]$/u;
 
@@ -36,7 +41,10 @@ function boundedText(value, max, { required = true } = {}) {
 }
 
 export function parseCreateRequest(value) {
-  const allowed = ['playerName', 'title', 'color', 'timeControlId', 'initialFen'];
+  const allowed = [
+    'playerName', 'title', 'color', 'timeControlId', 'initialFen',
+    'visibility', 'allowSpectators', 'avatar',
+  ];
   if (!isRecord(value) || !hasOnlyKeys(value, allowed)) return invalid();
 
   const playerName = boundedText(value.playerName, 40);
@@ -44,15 +52,66 @@ export function parseCreateRequest(value) {
   const initialFen = boundedText(value.initialFen, 128, { required: false });
   const color = value.color ?? 'random';
   const timeControlId = value.timeControlId ?? 'unlimited';
+  const visibility = value.visibility ?? 'public';
+  const allowSpectators = value.allowSpectators ?? true;
+  const avatar = value.avatar ?? 'knight';
 
   if (playerName === null || title === null || initialFen === null) return invalid();
   if (!['w', 'b', 'random'].includes(color)) return invalid('สีที่เลือกไม่ถูกต้อง');
   if (!Object.hasOwn(TIME_CONTROLS, timeControlId)) return invalid('รูปแบบเวลาไม่ถูกต้อง');
+  if (!VISIBILITIES.includes(visibility)) return invalid('การมองเห็นห้องไม่ถูกต้อง');
+  if (typeof allowSpectators !== 'boolean') return invalid('การตั้งค่าผู้ชมไม่ถูกต้อง');
+  if (!AVATARS.includes(avatar)) return invalid('รูปประจำตัวไม่ถูกต้อง');
 
   return {
     ok: true,
-    value: { playerName, title, color, timeControlId, initialFen },
+    value: {
+      playerName, title, color, timeControlId, initialFen, visibility, allowSpectators, avatar,
+    },
   };
+}
+
+function parseProfileRequest(value, { allowWatchInvite = false } = {}) {
+  const allowed = allowWatchInvite ? ['playerName', 'avatar', 'watchInviteToken'] : ['playerName', 'avatar'];
+  if (!isRecord(value) || !hasOnlyKeys(value, allowed)) return invalid();
+  const playerName = boundedText(value.playerName, 40);
+  const avatar = value.avatar ?? 'pawns';
+  const watchInviteToken = value.watchInviteToken;
+  if (playerName === null || !AVATARS.includes(avatar)) return invalid();
+  if (watchInviteToken !== undefined
+    && (typeof watchInviteToken !== 'string' || !CAPABILITY_PATTERN.test(watchInviteToken))) {
+    return invalid();
+  }
+  return {
+    ok: true,
+    value: {
+      playerName,
+      avatar,
+      ...(allowWatchInvite ? { watchInviteToken } : {}),
+    },
+  };
+}
+
+export function parsePublicJoinRequest(value) {
+  return parseProfileRequest(value);
+}
+
+export function parseWatchRequest(value) {
+  return parseProfileRequest(value, { allowWatchInvite: true });
+}
+
+export function parseLobbyQuery(url) {
+  if (!(url instanceof URL)) return invalid();
+  if ([...url.searchParams.keys()].some((key) => !['status', 'time', 'search', 'cursor'].includes(key))) {
+    return invalid();
+  }
+  const status = url.searchParams.get('status') ?? 'all';
+  const time = url.searchParams.get('time') ?? 'all';
+  const search = boundedText(url.searchParams.get('search') ?? '', 60, { required: false });
+  const cursor = url.searchParams.get('cursor') ?? undefined;
+  if (!LOBBY_STATUSES.includes(status) || !LOBBY_TIMES.includes(time) || search === null) return invalid();
+  if (cursor !== undefined && !/^[A-Za-z0-9_-]{1,120}$/u.test(cursor)) return invalid('เคอร์เซอร์ไม่ถูกต้อง');
+  return { ok: true, value: { status, time, search, cursor } };
 }
 
 export function parseJoinRequest(value) {

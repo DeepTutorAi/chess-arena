@@ -18,6 +18,10 @@ function createWaiting(overrides = {}) {
       title: 'Friday chess',
       hostName: 'Host',
       hostColor: 'w',
+      hostAvatar: 'knight',
+      visibility: 'public',
+      allowSpectators: true,
+      timeControlId: 'unlimited',
       initialFen: START_FEN,
       timeControl: null,
       expiresAt: 86_401_000,
@@ -43,8 +47,8 @@ test('createGameState creates a waiting canonical position without starting the 
   assert.equal(state.revision, 0);
   assert.equal(state.fen, START_FEN);
   assert.deepEqual(state.players, {
-    w: { role: 'host', name: 'Host' },
-    b: { role: 'guest', name: null },
+    w: { role: 'host', name: 'Host', avatar: 'knight' },
+    b: { role: 'guest', name: null, avatar: null },
   });
   assert.deepEqual(state.clock, {
     initialMs: 300_000,
@@ -61,11 +65,12 @@ test('joinGameState claims the guest seat once and starts a timed game', () => {
     timeControl: { initialMs: 60_000, incrementMs: 1_000 },
   });
 
-  const joined = joinGameState(waiting, ' Guest ', 5_000);
+  const joined = joinGameState(waiting, ' Guest ', 5_000, 'rook');
   assert.equal(joined.ok, true);
   assert.equal(joined.state.status, 'active');
   assert.equal(joined.state.revision, 1);
   assert.equal(joined.state.players.w.name, 'Guest');
+  assert.equal(joined.state.players.w.avatar, 'rook');
   assert.equal(joined.state.clock.activeSince, 5_000);
 
   const second = joinGameState(joined.state, 'Other', 6_000);
@@ -205,5 +210,9 @@ test('toPublicState exposes connection flags without private authority data', ()
   assert.equal(view.type, 'state');
   assert.equal(view.players.w.connected, true);
   assert.equal(view.players.b.connected, false);
+  assert.equal(view.players.w.avatar, 'knight');
+  assert.equal(view.players.b.avatar, 'pawns');
+  assert.equal(view.visibility, 'public');
+  assert.equal(view.allowSpectators, true);
   assert.equal('capabilities' in view, false);
 });
