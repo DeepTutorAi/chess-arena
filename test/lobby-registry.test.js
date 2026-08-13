@@ -77,11 +77,16 @@ describe('LobbyRegistry', () => {
     await registryRequest('/upsert', 'POST', projection('ffffffffffffffff', {
       title: 'No Audience', status: 'active', guest: { name: 'Cara', avatar: 'shield' }, openColor: null, allowSpectators: false, updatedAt: 4_000,
     }));
+    await registryRequest('/upsert', 'POST', projection('gggggggggggggggg', {
+      title: 'Finished Table', status: 'finished', guest: { name: 'Done', avatar: 'pawns' }, openColor: null, updatedAt: 7_000,
+    }));
 
     expect((await (await registryRequest('/list?status=open&time=rapid&search=alice')).json()).rooms)
       .toEqual([expect.objectContaining({ roomId: 'dddddddddddddddd' })]);
     expect((await (await registryRequest('/list?status=watch&time=all&search=')).json()).rooms)
       .toEqual([expect.objectContaining({ roomId: 'eeeeeeeeeeeeeeee' })]);
+    expect((await (await registryRequest('/list?status=all&time=all&search=')).json()).rooms)
+      .not.toContainEqual(expect.objectContaining({ roomId: 'gggggggggggggggg' }));
   });
 
   it('paginates deterministically, removes records, and omits expired records', async () => {

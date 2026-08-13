@@ -167,7 +167,7 @@ export class LobbyRegistry extends DurableObject {
     const now = Date.now();
     this.ctx.storage.sql.exec('DELETE FROM rooms WHERE expires_at <= ?', now);
 
-    const conditions = ['expires_at > ?'];
+    const conditions = ['expires_at > ?', "status != 'finished'"];
     const params = [now];
     if (parsed.value.status === 'open') conditions.push("status = 'waiting'");
     if (parsed.value.status === 'watch') conditions.push("status = 'active' AND allow_spectators = 1");

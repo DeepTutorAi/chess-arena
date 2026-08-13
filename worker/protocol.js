@@ -139,6 +139,12 @@ export function parseSocketCommand(input) {
     return { ok: true, value: { type: value.type } };
   }
 
+  if (value.type === 'presence' || value.type === 'heartbeat') {
+    if (!hasOnlyKeys(value, ['type', 'visibility'])
+      || !['visible', 'hidden'].includes(value.visibility)) return invalid();
+    return { ok: true, value: { type: value.type, visibility: value.visibility } };
+  }
+
   if (value.type === 'resign') {
     if (!hasOnlyKeys(value, ['type', 'expectedRevision'])) return invalid();
     if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) return invalid();

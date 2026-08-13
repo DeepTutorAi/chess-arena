@@ -9,6 +9,13 @@ import {
   toPublicState,
 } from './game-state.js';
 import { parseSocketCommand } from './protocol.js';
+import {
+  applyPlayerHeartbeat,
+  applyPlayerPresence,
+  nextAfkDeadline,
+  realizeAfk,
+  toPublicAfk,
+} from './afk-state.js';
 
 const ROOM_KEY = 'room';
 const SECRETS_KEY = 'secrets';
@@ -276,10 +283,20 @@ export class ChessRoom extends DurableObject {
       return;
     }
 
-    const state = await this.ctx.storage.get(ROOM_KEY);
+    let state = await this.ctx.storage.get(ROOM_KEY);
     if (!state) {
       this.sendError(socket, 'room_missing', 'ไม่พบห้องนี้');
       return;
+    }
+
+    const now = Date.now();
+    const dueAfk = realizeAfk(state, now);
+    if (dueAfk.changed) {
+      state = dueAfk.state;
+      await this.ctx.storage.put(ROOM_KEY, state);
+      await this.scheduleAlarm(state);
+      this.broadcast(state);
+      if (state.status === 'finished') this.queueRegistrySync(state);
     }
     if (parsed.value.type === 'sync') {
       socket.send(JSON.stringify(this.publicState(state)));
@@ -291,12 +308,32 @@ export class ChessRoom extends DurableObject {
       return;
     }
 
-    const result = applyGameCommand(state, attachment, parsed.value, Date.now());
+    if (dueAfk.changed && state.status === 'finished') {
+      this.sendError(socket, 'time_expired', 'เวลานับถอยหลัง AFK หมดแล้ว', state.revision);
+      return;
+    }
+
+    if (parsed.value.type === 'presence' || parsed.value.type === 'heartbeat') {
+      const result = parsed.value.type === 'presence'
+        ? applyPlayerPresence(state, attachment.color, parsed.value.visibility, now)
+        : applyPlayerHeartbeat(state, attachment.color, parsed.value.visibility, now);
+      if (!result.changed) return;
+      const publicChanged = JSON.stringify(toPublicAfk(state)) !== JSON.stringify(toPublicAfk(result.state))
+        || result.state.status !== state.status;
+      await this.ctx.storage.put(ROOM_KEY, result.state);
+      await this.scheduleAlarm(result.state);
+      if (publicChanged) this.broadcast(result.state);
+      if (result.state.status === 'finished') this.queueRegistrySync(result.state);
+      return;
+    }
+
+    const result = applyGameCommand(state, attachment, parsed.value, now);
     if (!result.ok) {
       if (result.state) {
         await this.ctx.storage.put(ROOM_KEY, result.state);
         await this.scheduleAlarm(result.state);
         this.broadcast(result.state);
+        this.queueRegistrySync(result.state);
       }
       this.sendError(socket, result.error.code, result.error.message, state.revision);
       return;
@@ -335,7 +372,8 @@ export class ChessRoom extends DurableObject {
       return;
     }
 
-    const timeout = realizeTimeout(state, now);
+    const afk = realizeAfk(state, now);
+    const timeout = afk.changed ? afk : realizeTimeout(state, now);
     if (timeout.changed) {
       await this.ctx.storage.put(ROOM_KEY, timeout.state);
       this.broadcast(timeout.state);
@@ -403,16 +441,23 @@ export class ChessRoom extends DurableObject {
   }
 
   queueRegistrySync(state) {
-    if (state.visibility !== 'public' || this.registrySyncPromise) return;
-    this.registrySyncPromise = Promise.resolve()
-      .then(() => this.syncRegistry(state))
+    if (state.visibility !== 'public') return;
+    const pending = (this.registrySyncPromise ?? Promise.resolve())
       .catch(() => undefined)
-      .finally(() => { this.registrySyncPromise = null; });
-    this.ctx.waitUntil(this.registrySyncPromise);
+      .then(() => this.syncRegistry(state))
+      .catch(() => undefined);
+    this.registrySyncPromise = pending;
+    this.ctx.waitUntil(pending.finally(() => {
+      if (this.registrySyncPromise === pending) this.registrySyncPromise = null;
+    }));
   }
 
   async syncRegistry(state) {
     if (state.visibility !== 'public') return;
+    if (state.status === 'finished') {
+      await this.removeFromRegistry(state.roomId);
+      return;
+    }
     const stub = this.env.LOBBY.get(this.env.LOBBY.idFromName('global'));
     const response = await stub.fetch('http://lobby/upsert', {
       method: 'POST',
@@ -451,11 +496,11 @@ export class ChessRoom extends DurableObject {
       await this.ctx.storage.setAlarm(state.expiresAt);
       return;
     }
+    const deadlines = [state.expiresAt, nextAfkDeadline(state)];
     if (state.status === 'active' && state.clock && state.clock.activeSince !== null) {
       const remaining = state.turn === 'w' ? state.clock.whiteMs : state.clock.blackMs;
-      await this.ctx.storage.setAlarm(Math.min(state.expiresAt, state.clock.activeSince + remaining));
-      return;
+      deadlines.push(state.clock.activeSince + remaining);
     }
-    await this.ctx.storage.setAlarm(state.expiresAt);
+    await this.ctx.storage.setAlarm(Math.min(...deadlines.filter(Number.isSafeInteger)));
   }
 }

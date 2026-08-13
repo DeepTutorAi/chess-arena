@@ -99,6 +99,15 @@ test('parseSocketCommand accepts move, resign, sync, and ping commands', () => {
   assert.equal(parseSocketCommand({ type: 'resign', expectedRevision: 4 }).ok, true);
   assert.deepEqual(parseSocketCommand({ type: 'sync' }), { ok: true, value: { type: 'sync' } });
   assert.deepEqual(parseSocketCommand({ type: 'ping' }), { ok: true, value: { type: 'ping' } });
+  assert.deepEqual(parseSocketCommand({ type: 'presence', visibility: 'visible' }), {
+    ok: true, value: { type: 'presence', visibility: 'visible' },
+  });
+  assert.deepEqual(parseSocketCommand({ type: 'presence', visibility: 'hidden' }), {
+    ok: true, value: { type: 'presence', visibility: 'hidden' },
+  });
+  assert.deepEqual(parseSocketCommand({ type: 'heartbeat', visibility: 'visible' }), {
+    ok: true, value: { type: 'heartbeat', visibility: 'visible' },
+  });
 });
 
 test('parseSocketCommand rejects invalid moves and client-owned canonical fields', () => {
@@ -108,5 +117,9 @@ test('parseSocketCommand rejects invalid moves and client-owned canonical fields
   assert.equal(parseSocketCommand({ type: 'move', from: 'e2', to: 'e4', expectedRevision: -1 }).ok, false);
   assert.equal(parseSocketCommand({ type: 'move', from: 'e2', to: 'e4', expectedRevision: 1, fen: 'fake' }).ok, false);
   assert.equal(parseSocketCommand({ type: 'resign', expectedRevision: 1, result: '1-0' }).ok, false);
+  assert.equal(parseSocketCommand({ type: 'presence', visibility: 'away' }).ok, false);
+  assert.equal(parseSocketCommand({ type: 'presence', visibility: 'hidden', color: 'w' }).ok, false);
+  assert.equal(parseSocketCommand({ type: 'heartbeat', visibility: 'visible', now: 1 }).ok, false);
+  assert.equal(parseSocketCommand({ type: 'heartbeat', visibility: 'visible', strikes: 2 }).ok, false);
   assert.equal(parseSocketCommand({ type: 'unknown' }).ok, false);
 });
