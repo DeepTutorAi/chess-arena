@@ -13,7 +13,9 @@ test('spectator eye button opens an accessible profile panel and restores focus'
   document.body.appendChild(root);
   const ui = new UI(root);
 
+  ui.setActionStrip({ undo: false, resign: true });
   ui.setOnlineRole('host');
+  assert.equal(ui.refs.btnUndo.classList.contains('hidden'), true, 'role styling must not re-enable disabled online actions');
   ui.setSpectators({
     visible: true,
     spectators: [

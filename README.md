@@ -4,7 +4,7 @@
 
 - **เล่น vs AI** — สู้กับเอนจิน **Stockfish 18** (ตัวที่ chess.com ใช้) ระดับปรับได้ 1–8
 - **AI vs AI** — เปิดชม Stockfish ปะทะ Stockfish เอง
-- **เล่นออนไลน์** — สร้างห้อง ส่งลิงก์ให้ผู้เล่นอีกคน และให้ Cloudflare Durable Object ตรวจตาเดินทุกครั้ง
+- **เล่นออนไลน์** — เปิด Lobby เลือกหลายห้อง กด Join/Watch ได้ทันที หรือสร้างห้องส่วนตัวด้วยลิงก์แยกสิทธิ์
 - **ต่อสู้ Remote Agent (Legacy)** — AI ภายนอกยังใช้โปรโตคอล Gist ผ่านสคริปต์ใน `scripts/` ได้ตาม `docs/agent-battle.md`; player UI ไม่ขอ GitHub Token แล้ว
 - **วิเคราะห์** — กระดานฝึกเดินเล่นเองทั้งสองสี
 
@@ -16,7 +16,7 @@
 | กติกาหมากรุก | [chess.js](https://github.com/jhlywa/chess.js) 1.4 | SAN, FEN, ตรวจผลเสมอ/แพ้ชนะ |
 | เอนจิน | [stockfish](https://github.com/nmrugg/stockfish.js) 18 (lite single) | รันในเบราว์เซอร์ **ไม่ต้องใช้ header พิเศษ** — ใช้กับ GitHub Pages ได้ |
 | Build | Vite 7 | Static SPA, `base: './'` รองรับ subpath |
-| ห้องผู้เล่นออนไลน์ | Cloudflare Workers + SQLite Durable Objects | WebSocket, one-time invite, server-authoritative chess.js |
+| ห้องผู้เล่นออนไลน์ | Cloudflare Workers + SQLite Durable Objects | Public lobby, private capabilities, spectators, WebSocket, server-authoritative chess.js |
 
 ## รัน
 
@@ -42,7 +42,16 @@ $env:VITE_ONLINE_API_URL="http://localhost:8787"
 npm run dev
 ```
 
-เปิดเว็บ กด **CREATE GAME → Play Online** ใส่ชื่อและสร้างห้อง จากนั้นส่งลิงก์เชิญให้ผู้เล่นอีกคน ลิงก์มี invite capability อยู่หลัง `#invite=` และใช้ claim ที่นั่ง guest ได้ครั้งเดียว หลัง join แล้วแต่ละ browser จะเก็บ session capability เฉพาะห้องนั้นเพื่อ reconnect
+เปิดเว็บแล้วใช้ระบบออนไลน์ดังนี้:
+
+1. กด **JOIN GAME** เพื่อเปิด Live Tournament Lobby ซึ่งอ่านรายการห้องสาธารณะจาก Worker จริง
+2. ใส่ชื่อและเลือกตราหมากรุก จากนั้นกด **JOIN** บนห้องที่ยังว่าง หรือ **WATCH** บนเกมที่กำลังแข่ง
+3. กด **CREATE ROOM** เพื่อสร้างห้อง โดยเลือกได้ว่าเป็น **Public** หรือ **Private** และอนุญาตผู้ชมหรือไม่
+4. ห้อง Public จะปรากฏใน Lobby อัตโนมัติ ผู้เล่นคนที่สองไม่ต้องรับลิงก์และไม่ต้องใช้ GitHub Token
+5. ห้อง Private จะไม่ถูกแสดงใน Lobby เจ้าของกด **แชร์** ในหน้าเกมเพื่อคัดลอกลิงก์ผู้เล่นหรือผู้ชม ซึ่งเป็นคนละ capability กัน (`#invite=` กับ `#watch=`)
+6. ในเกมที่เปิดผู้ชม ปุ่มรูปตาจะแสดงจำนวนผู้ชมที่เชื่อมต่อจริงและเปิดรายชื่อ/ตราประจำตัวได้ ผู้ชมรับ state สดแต่เดินหมาก ยอมแพ้ หรือยึดที่นั่งผู้เล่นไม่ได้
+
+ห้องที่เคยเข้าใน browser เดิมจะอยู่ในส่วน **Recent / Reconnect** เพื่อกลับเข้า session เดิม รายการนี้เป็นประวัติ local เท่านั้น ส่วนสถานะห้องและเกมมาจาก Durable Object เสมอ ชื่อและตราที่เลือกเป็น guest profile ภายในห้อง ไม่ใช่บัญชีผู้ใช้ เรตติ้ง หรือการยืนยันตัวตน
 
 ถ้า deploy frontend และ Worker ที่ origin เดียวกันตาม `wrangler.jsonc` ปัจจุบัน ไม่ต้องเพิ่ม production origin ใน `ALLOWED_ORIGINS` เพราะ Worker อนุญาต same-origin โดยตรง หากแยก frontend ไปอยู่อีกโดเมนจึงค่อยเพิ่ม origin นั้น แล้วรัน:
 
@@ -88,6 +97,7 @@ src/config.js         ค่าคงที่: ระดับ, ความเ
 src/engine.js         UCI client (Worker wrapper)
 src/controller.js     state machine ของทุกโหมด
 src/online.js         client ห้องผู้เล่นออนไลน์ (HTTP + WebSocket)
+src/lobby.js          Live Lobby: cards, filters, Join/Watch และ reconnect
 worker/               Worker router, Durable Object, authoritative chess domain
 wrangler.jsonc        Cloudflare Worker/SQLite Durable Object configuration
 src/remote.js         โปรโตคอล Remote Agent เดิม (GitHub Gist)

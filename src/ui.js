@@ -385,8 +385,10 @@ export class UI {
   }
 
   setOnlineRole(role) {
-    this.refs.btnResign.classList.toggle('hidden', role === 'spectator');
-    this.refs.btnUndo.classList.toggle('hidden', role === 'spectator');
+    if (role === 'spectator') {
+      this.refs.btnResign.classList.add('hidden');
+      this.refs.btnUndo.classList.add('hidden');
+    }
   }
 
   setShareVisible(visible) {
