@@ -44,7 +44,7 @@ npm run dev
 
 เปิดเว็บ กด **CREATE GAME → Play Online** ใส่ชื่อและสร้างห้อง จากนั้นส่งลิงก์เชิญให้ผู้เล่นอีกคน ลิงก์มี invite capability อยู่หลัง `#invite=` และใช้ claim ที่นั่ง guest ได้ครั้งเดียว หลัง join แล้วแต่ละ browser จะเก็บ session capability เฉพาะห้องนั้นเพื่อ reconnect
 
-ก่อน deploy ให้เปลี่ยน `ALLOWED_ORIGINS` ใน `wrangler.jsonc` เป็น origin ของเว็บจริง แล้วรัน:
+ถ้า deploy frontend และ Worker ที่ origin เดียวกันตาม `wrangler.jsonc` ปัจจุบัน ไม่ต้องเพิ่ม production origin ใน `ALLOWED_ORIGINS` เพราะ Worker อนุญาต same-origin โดยตรง หากแยก frontend ไปอยู่อีกโดเมนจึงค่อยเพิ่ม origin นั้น แล้วรัน:
 
 ```bash
 npx wrangler login
