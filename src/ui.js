@@ -172,6 +172,14 @@ export class UI {
                 </div>
               </div>
 
+              <div id="afk-warning" class="afk-warning hidden" role="status" aria-live="polite" aria-atomic="true">
+                <div class="afk-warning-copy">
+                  <strong id="afk-warning-title"></strong>
+                  <span id="afk-warning-detail"></span>
+                </div>
+                <span id="afk-warning-countdown" class="afk-warning-countdown"></span>
+              </div>
+
               <div class="sidebar-content">
                 <div id="moves-container" class="moves-container">
                   <div id="moves" class="moves-list"></div>
@@ -299,6 +307,10 @@ export class UI {
       spectatorPanel: $('#spectator-panel'),
       spectatorClose: $('#spectator-close'),
       spectatorList: $('#spectator-list'),
+      afkWarning: $('#afk-warning'),
+      afkWarningTitle: $('#afk-warning-title'),
+      afkWarningDetail: $('#afk-warning-detail'),
+      afkWarningCountdown: $('#afk-warning-countdown'),
       modalRoot: $('#modal-root'),
 
       // Sandbox Editor refs (Right panel)
@@ -415,6 +427,20 @@ export class UI {
       );
       this.refs.spectatorList.appendChild(item);
     }
+  }
+
+  setAfkWarning({ visible = false, title = '', detail = '', remainingSeconds = 0, danger = false } = {}) {
+    this.refs.afkWarning.classList.toggle('hidden', !visible);
+    this.refs.afkWarning.classList.toggle('danger', visible && danger);
+    if (!visible) {
+      this.refs.afkWarningTitle.textContent = '';
+      this.refs.afkWarningDetail.textContent = '';
+      this.refs.afkWarningCountdown.textContent = '';
+      return;
+    }
+    this.refs.afkWarningTitle.textContent = title;
+    this.refs.afkWarningDetail.textContent = detail;
+    this.refs.afkWarningCountdown.textContent = String(Math.max(0, remainingSeconds));
   }
 
   _setSpectatorPanel(open, { restoreFocus = true } = {}) {

@@ -211,6 +211,9 @@ export class OnlineRoomClient {
     onConnectionState = () => {},
     setTimeoutImpl = globalThis.setTimeout,
     clearTimeoutImpl = globalThis.clearTimeout,
+    setIntervalImpl = globalThis.setInterval,
+    clearIntervalImpl = globalThis.clearInterval,
+    documentImpl = globalThis.document,
     maxReconnectAttempts = ONLINE_RECONNECT_MAX_ATTEMPTS,
   } = {}) {
     this.apiUrl = apiUrl.replace(/\/+$/u, '');
@@ -220,8 +223,11 @@ export class OnlineRoomClient {
     this.onState = onState;
     this.onError = onError;
     this.onConnectionState = onConnectionState;
-    this.setTimeoutImpl = setTimeoutImpl;
-    this.clearTimeoutImpl = clearTimeoutImpl;
+    this.setTimeoutImpl = typeof setTimeoutImpl === 'function' ? setTimeoutImpl.bind(globalThis) : setTimeoutImpl;
+    this.clearTimeoutImpl = typeof clearTimeoutImpl === 'function' ? clearTimeoutImpl.bind(globalThis) : clearTimeoutImpl;
+    this.setIntervalImpl = typeof setIntervalImpl === 'function' ? setIntervalImpl.bind(globalThis) : setIntervalImpl;
+    this.clearIntervalImpl = typeof clearIntervalImpl === 'function' ? clearIntervalImpl.bind(globalThis) : clearIntervalImpl;
+    this.documentImpl = documentImpl;
     this.maxReconnectAttempts = maxReconnectAttempts;
     this.roomId = null;
     this.session = null;
@@ -229,6 +235,8 @@ export class OnlineRoomClient {
     this.socket = null;
     this.reconnectAttempts = 0;
     this.reconnectTimer = null;
+    this.heartbeatTimer = null;
+    this.visibilityHandler = null;
     this.stopped = false;
   }
 
@@ -324,6 +332,7 @@ export class OnlineRoomClient {
       throw new Error('ยังไม่มีข้อมูลสำหรับเชื่อมต่อห้อง');
     }
     this.stopped = false;
+    this.stopPresenceReporting();
     const url = new URL(`${this.apiUrl}/api/rooms/${this.roomId}/socket`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new this.WebSocketImpl(url.toString(), [
@@ -337,6 +346,7 @@ export class OnlineRoomClient {
       if (this.socket !== socket) return;
       this.reconnectAttempts = 0;
       this.onConnectionState('connected');
+      this.startPresenceReporting(socket);
     });
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return;
@@ -364,6 +374,7 @@ export class OnlineRoomClient {
     });
     socket.addEventListener('close', () => {
       if (this.socket !== socket || this.stopped) return;
+      this.stopPresenceReporting();
       this.scheduleReconnect();
     });
     return socket;
@@ -406,8 +417,38 @@ export class OnlineRoomClient {
     this.send({ type: 'sync' });
   }
 
+  startPresenceReporting(socket) {
+    if (this.session?.role === 'spectator' || !this.documentImpl) return;
+    const visibility = () => this.documentImpl.visibilityState === 'hidden' ? 'hidden' : 'visible';
+    const sendIfCurrent = (command) => {
+      if (this.socket === socket && socket.readyState === this.WebSocketImpl.OPEN) {
+        socket.send(JSON.stringify(command));
+      }
+    };
+    this.visibilityHandler = () => {
+      const current = visibility();
+      sendIfCurrent({ type: 'presence', visibility: current });
+      if (current === 'visible') sendIfCurrent({ type: 'sync' });
+    };
+    this.documentImpl.addEventListener('visibilitychange', this.visibilityHandler);
+    sendIfCurrent({ type: 'presence', visibility: visibility() });
+    this.heartbeatTimer = this.setIntervalImpl(() => {
+      sendIfCurrent({ type: 'heartbeat', visibility: visibility() });
+    }, 10_000);
+  }
+
+  stopPresenceReporting() {
+    if (this.heartbeatTimer !== null) this.clearIntervalImpl(this.heartbeatTimer);
+    this.heartbeatTimer = null;
+    if (this.visibilityHandler && this.documentImpl) {
+      this.documentImpl.removeEventListener('visibilitychange', this.visibilityHandler);
+    }
+    this.visibilityHandler = null;
+  }
+
   stop() {
     this.stopped = true;
+    this.stopPresenceReporting();
     if (this.reconnectTimer !== null) this.clearTimeoutImpl(this.reconnectTimer);
     this.reconnectTimer = null;
     const socket = this.socket;

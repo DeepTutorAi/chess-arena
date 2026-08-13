@@ -221,6 +221,102 @@ test('OnlineRoomClient authenticates with a WebSocket subprotocol, never the URL
   assert.deepEqual(socket.protocols, ['chess.v1', `session.${TOKEN}`]);
 });
 
+test('OnlineRoomClient reports player visibility and heartbeat while connected, then cleans up', () => {
+  const sent = [];
+  const intervals = new Map();
+  const listeners = new Map();
+  const documentImpl = {
+    visibilityState: 'visible',
+    addEventListener(type, callback) { listeners.set(type, callback); },
+    removeEventListener(type, callback) {
+      if (listeners.get(type) === callback) listeners.delete(type);
+    },
+  };
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor() { this.readyState = 0; this.listeners = new Map(); }
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    send(value) { sent.push(JSON.parse(value)); }
+    close() {}
+    open() { this.readyState = FakeWebSocket.OPEN; this.listeners.get('open')?.(); }
+  }
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.workers.dev',
+    WebSocketImpl: FakeWebSocket,
+    storage: memoryStorage(),
+    documentImpl,
+    setIntervalImpl(callback, delay) { intervals.set(1, { callback, delay }); return 1; },
+    clearIntervalImpl(id) { intervals.delete(id); },
+  });
+  client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
+  const socket = client.connect();
+  socket.open();
+
+  assert.deepEqual(sent, [{ type: 'presence', visibility: 'visible' }]);
+  assert.equal(intervals.get(1).delay, 10_000);
+  intervals.get(1).callback();
+  documentImpl.visibilityState = 'hidden';
+  listeners.get('visibilitychange')();
+  assert.deepEqual(sent.slice(1), [
+    { type: 'heartbeat', visibility: 'visible' },
+    { type: 'presence', visibility: 'hidden' },
+  ]);
+
+  client.stop();
+  assert.equal(intervals.size, 0);
+  assert.equal(listeners.has('visibilitychange'), false);
+});
+
+test('OnlineRoomClient never sends player presence for spectators', () => {
+  const sent = [];
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor() { this.readyState = 1; this.listeners = new Map(); }
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    send(value) { sent.push(value); }
+    close() {}
+  }
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.workers.dev',
+    WebSocketImpl: FakeWebSocket,
+    storage: memoryStorage(),
+    documentImpl: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
+    setIntervalImpl() { throw new Error('spectators must not start heartbeat'); },
+  });
+  client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'spectator', color: null });
+  const socket = client.connect();
+  socket.listeners.get('open')();
+  assert.deepEqual(sent, []);
+});
+
+test('OnlineRoomClient preserves the browser receiver for native timer functions', () => {
+  let intervalReceiver;
+  let clearReceiver;
+  function strictSetInterval() { intervalReceiver = this; return 7; }
+  function strictClearInterval() { clearReceiver = this; }
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor() { this.readyState = 1; this.listeners = new Map(); }
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    send() {}
+    close() {}
+  }
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.workers.dev',
+    WebSocketImpl: FakeWebSocket,
+    storage: memoryStorage(),
+    documentImpl: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
+    setIntervalImpl: strictSetInterval,
+    clearIntervalImpl: strictClearInterval,
+  });
+  client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
+  const socket = client.connect();
+  socket.listeners.get('open')();
+  client.stop();
+  assert.equal(intervalReceiver, globalThis);
+  assert.equal(clearReceiver, globalThis);
+});
+
 test('OnlineRoomClient invokes browser fetch with the global receiver', async () => {
   let receiver;
   async function strictFetch() {

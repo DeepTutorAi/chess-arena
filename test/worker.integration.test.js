@@ -477,7 +477,8 @@ describe('online room Worker', () => {
   });
 
   it('caps connected spectator presence at fifty profiles', async () => {
-    const created = await createRoom({ title: `Capacity ${crypto.randomUUID()}` });
+    const title = `Capacity ${crypto.randomUUID()}`;
+    const created = await createRoom({ title });
     const sockets = [];
     for (let index = 0; index < 50; index += 1) {
       const watched = await exports.default.fetch(jsonRequest(
@@ -500,7 +501,10 @@ describe('online room Worker', () => {
     ));
     expect(overflow.status).toBe(409);
     expect(await overflow.json()).toEqual({ error: 'spectator_limit' });
+    const closed = sockets.map((socket) => new Promise((resolve) => {
+      socket.addEventListener('close', resolve, { once: true });
+    }));
     for (const socket of sockets) socket.close(1000, 'done');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await Promise.all(closed);
   }, 15_000);
 });

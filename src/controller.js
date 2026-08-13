@@ -47,6 +47,7 @@ export class Controller {
     this.onlineConnectionState = 'disconnected';
     this.ui.setShareVisible?.(false);
     this._onlineClockTimer = null;
+    this._onlineAfkTimer = null;
     this.clock = null;
 
     this.engineReady = false;
@@ -578,6 +579,8 @@ export class Controller {
     if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
     if (this.online) { this.online.stop(); this.online = null; }
     if (this._onlineClockTimer) { clearInterval(this._onlineClockTimer); this._onlineClockTimer = null; }
+    if (this._onlineAfkTimer) { clearInterval(this._onlineAfkTimer); this._onlineAfkTimer = null; }
+    this.ui.setAfkWarning?.({ visible: false });
     this.onlineState = null;
     this.onlineRoomId = null;
     this.onlineInviteToken = null;
@@ -827,6 +830,7 @@ export class Controller {
     this._syncBoard();
     this._renderMoves();
     this._renderOnlineClock(state);
+    this._renderOnlineAfk(state);
 
     if (state.status === 'waiting') {
       this.ui.setStatus(this.onlineRole === 'spectator' ? 'กำลังชมโต๊ะที่รอผู้เล่น' : 'ห้องพร้อมแล้ว — รอผู้เล่นจาก Lobby', 'busy');
@@ -868,18 +872,61 @@ export class Controller {
     if (state.status === 'active') this._onlineClockTimer = setInterval(render, 250);
   }
 
+  _renderOnlineAfk(state) {
+    if (this._onlineAfkTimer) clearInterval(this._onlineAfkTimer);
+    this._onlineAfkTimer = null;
+    const countdown = state.afk?.countdown;
+    if (!countdown || state.status !== 'active') {
+      this.ui.setAfkWarning?.({ visible: false });
+      return;
+    }
+    const affectedName = state.players[countdown.color]?.name || (countdown.color === 'w' ? 'ฝ่ายขาว' : 'ฝ่ายดำ');
+    const isSelf = countdown.color === this.onlineSide;
+    const causes = {
+      opening: 'ยังไม่เดินหมากในช่วงเปิดเกม',
+      hidden: 'ออกจากแท็บระหว่างตาของตนเอง',
+      heartbeat: 'ขาดการเชื่อมต่อกับห้อง',
+      inactivity: 'ยังไม่เดินหมากเกิน 4 นาที',
+    };
+    const strikes = state.afk.strikes[countdown.color];
+    const detail = countdown.cause === 'opening'
+      ? causes.opening
+      : `${causes[countdown.cause]} · คำเตือน ${strikes}/2`;
+    const render = () => {
+      const remainingSeconds = Math.max(0, Math.ceil((countdown.deadlineAt - Date.now()) / 1_000));
+      this.ui.setAfkWarning?.({
+        visible: true,
+        title: isSelf ? 'คุณกำลังถูกนับ AFK' : `${affectedName} กำลังถูกนับ AFK`,
+        detail,
+        remainingSeconds,
+        danger: remainingSeconds <= 10,
+      });
+    };
+    render();
+    this._onlineAfkTimer = setInterval(render, 250);
+  }
+
   _announceOnlineResult(state) {
     if (this._overPopupShown) return;
     this._overPopupShown = true;
     const draw = state.result === '1/2-1/2';
     const won = !draw && ((state.result === '1-0' && this.onlineSide === 'w') || (state.result === '0-1' && this.onlineSide === 'b'));
-    const title = draw ? 'เสมอกัน' : won ? 'คุณชนะ' : 'คุณแพ้';
-    const reasons = { checkmate: 'รุกฆาต', draw: 'เสมอตามกติกา', resignation: 'มีผู้เล่นยอมแพ้', timeout: 'หมดเวลา' };
+    const title = this.onlineRole === 'spectator' ? 'เกมจบแล้ว' : draw ? 'เสมอกัน' : won ? 'คุณชนะ' : 'คุณแพ้';
+    const reasons = {
+      checkmate: 'รุกฆาต',
+      draw: 'เสมอตามกติกา',
+      resignation: 'มีผู้เล่นยอมแพ้',
+      timeout: 'หมดเวลา',
+      opening_afk_timeout: 'ไม่เดินหมากทันเวลาในช่วงเปิดเกม',
+      unlimited_afk_timeout: 'หมดเวลานับถอยหลัง AFK',
+      unlimited_afk_strikes: 'AFK ครบ 3 ครั้ง',
+    };
     const detail = `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
     this.ui.setStatus(`จบเกม · ${title}`, 'done');
     this.ui.log(`จบเกมออนไลน์: ${title} — ${detail}`, 'sys');
     this.ui.showGameOver(title, detail, () => this.goHome(), () => this.goHome());
-    sounds.play(draw ? 'draw' : won ? 'victory' : 'lose');
+    const afkResult = ['opening_afk_timeout', 'unlimited_afk_timeout', 'unlimited_afk_strikes'].includes(state.reason);
+    sounds.play(afkResult ? 'afk' : draw ? 'draw' : won ? 'victory' : 'lose');
   }
 
   // ------------------------------------------------------------------ internal flow

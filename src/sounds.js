@@ -14,6 +14,7 @@ const FILES = {
   victory: ['victory1.mp3', 'victory2.mp3'], // played together
   draw: 'stalemate.mp3',
   lowtime: 'lowtime.mp3',
+  afk: 'afk-timeout.mp3',
   click: 'click.mp3',
 };
 

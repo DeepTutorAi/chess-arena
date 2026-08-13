@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
 
 import { Controller, MODES } from '../src/controller.js';
+import { sounds } from '../src/sounds.js';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const ROOM_ID = 'abcdefgh23456722';
@@ -39,6 +40,7 @@ function stateAfter(moves = [], overrides = {}) {
     spectators: [],
     spectatorCount: 0,
     clock: null,
+    afk: null,
     expiresAt: Date.now() + 60_000,
     ...overrides,
   };
@@ -50,6 +52,8 @@ function makeHarness() {
     log(message, level) { calls.logs.push([message, level]); },
     renderMoves(moves) { calls.renderedMoves = moves; },
     setPlayers(top, bottom) { calls.players = [top, bottom]; },
+    setAfkWarning(value) { calls.afk = value; },
+    showGameOver(title, detail) { calls.gameOver = [title, detail]; },
   }, {
     get(target, key) {
       if (key in target) return target[key];
@@ -162,4 +166,76 @@ test('spectator mode renders canonical snapshots with a locked board and no resi
   assert.equal(calls.moves.length, 0);
   controller.resign();
   assert.equal(calls.resigned, undefined);
+});
+
+test('online AFK snapshots render the authoritative countdown and clear it on recovery', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+
+  controller._onOnlineState(stateAfter([], {
+    revision: 2,
+    afk: {
+      strikes: { w: 1, b: 0 },
+      countdown: { color: 'w', cause: 'hidden', deadlineAt: Date.now() + 40_000 },
+    },
+  }));
+  assert.equal(calls.afk.visible, true);
+  assert.match(calls.afk.title, /คุณกำลังถูกนับ AFK/u);
+  assert.ok(calls.afk.remainingSeconds >= 39 && calls.afk.remainingSeconds <= 40);
+
+  controller._onOnlineState(stateAfter([], {
+    revision: 3,
+    afk: { strikes: { w: 1, b: 0 }, countdown: null },
+  }));
+  assert.deepEqual(calls.afk, { visible: false });
+  controller.dispose();
+});
+
+test('all AFK adjudications use the AFK sound and explain the popup result', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const played = [];
+  const originalPlay = sounds.play;
+  sounds.play = (name) => played.push(name);
+  t.after(() => { sounds.play = originalPlay; });
+
+  for (const [reason, expectedDetail] of [
+    ['opening_afk_timeout', 'ไม่เดินหมากทันเวลาในช่วงเปิดเกม'],
+    ['unlimited_afk_timeout', 'หมดเวลานับถอยหลัง AFK'],
+    ['unlimited_afk_strikes', 'AFK ครบ 3 ครั้ง'],
+  ]) {
+    const { controller, calls } = makeHarness();
+    await controller.start(MODES.ONLINE, {
+      action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+    });
+    controller._onOnlineState(stateAfter([], {
+      revision: 2,
+      status: 'finished',
+      result: '0-1',
+      reason,
+      afk: { strikes: { w: 2, b: 0 }, countdown: null },
+    }));
+    assert.equal(calls.gameOver[0], 'คุณแพ้');
+    assert.match(calls.gameOver[1], new RegExp(expectedDetail, 'u'));
+    controller.dispose();
+  }
+  assert.deepEqual(played, ['afk', 'afk', 'afk']);
+});
+
+test('spectators see a neutral result title instead of being called the loser', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+  const { controller, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'watch', roomId: ROOM_ID, playerName: 'Viewer', avatar: 'bishop',
+  });
+  controller._onOnlineState(stateAfter([], {
+    revision: 2, status: 'finished', result: '1-0', reason: 'opening_afk_timeout', afk: null,
+  }));
+  assert.equal(calls.gameOver[0], 'เกมจบแล้ว');
+  controller.dispose();
 });
