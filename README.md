@@ -62,6 +62,8 @@ npx wrangler deploy
 
 `wrangler deploy` จะส่งทั้ง Worker และไฟล์หน้าเว็บใน `dist/` ขึ้น origin เดียวกัน หน้า production จึงใช้ URL ปัจจุบันเป็น API ได้ทันทีโดยไม่ต้องตั้ง `VITE_ONLINE_API_URL` ตัวแปรนี้ยังใช้สำหรับ local dev หรือกรณีที่แยก frontend/backend คนละ origin เท่านั้น ไม่มี Cloudflare credential หรือ session/invite capability ใดถูกกำหนดเป็น `VITE_*`
 
+> ข้อจำกัด deployment ปัจจุบัน: `public/engine/stockfish-18-lite-single.wasm` มีขนาดประมาณ 7.3 MB ซึ่งเกินเพดาน static asset เดี่ยว 5 MB ของ Workers Assets ดังนั้น `wrangler deploy` แบบรวมทุกโหมดจะถูกปฏิเสธจนกว่าจะย้ายไฟล์ engine ไป object storage/CDN ที่เหมาะสมหรือใช้ build ที่เล็กกว่า ระบบ Lobby/Join/Watch และเกมออนไลน์ไม่พึ่งไฟล์นี้และทดสอบ deploy แยกได้ แต่ห้ามถือว่า preview ที่ตัด engine ออกพิสูจน์โหมดเล่นกับ AI
+
 คำสั่งตรวจสอบ:
 
 ```bash
