@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "chess-arena-online",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-08-11",
+  "assets": {
+    "directory": "./dist",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "ChessRoom"
+      }
+    ]
+  },
+  "exports": {
+    "ChessRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "vars": {
+    "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"
+  }
+}

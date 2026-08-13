@@ -13,7 +13,6 @@ export const ENGINE_HINT_URL = './engine/stockfish-18-lite-single.js';
 
 export const ENGINE_NAME = 'Stockfish 18 (Lite)';
 export const HUMAN_NAME = 'คุณ';
-export const GUEST_NAME = 'คู่แข่ง AI';
 
 // Human vs AI — strength mapping (level 1..8 -> UCI Skill Level 1..20 & Elo).
 export const LEVELS = [
@@ -30,11 +29,10 @@ export const LEVELS = [
   { level: 11, elo: 2800, skill: 20, depth: 18, movetime: 2800, label: '2800 (กรังด์มาสเตอร์)' },
 ];
 
-// Remote (agent battle) polling interval, ms.
-export const REMOTE_POLL_MS = 2500;
-
-// Max moves kept in the remote room state (trim old history to keep gist small).
-export const REMOTE_MAX_MOVES = 512;
+// Player-facing WebSocket rooms use bounded retries. The room-scoped session
+// capability is persisted separately by src/online.js.
+export const ONLINE_RECONNECT_BASE_MS = 500;
+export const ONLINE_RECONNECT_MAX_ATTEMPTS = 5;
 
 // Time controls for Chess Arena (Bullet, Blitz, Rapid, Classical, Unlimited)
 export const TIME_CONTROLS = [
@@ -59,10 +57,6 @@ export const SANDBOX_PRESETS = [
 
 // Room Storage Store for Real Online Room Discovery
 const ROOMS_KEY = 'chess-arena-rooms-store';
-
-// GitHub token (gist scope) the user pastes for creating/writing battle rooms.
-// Kept only in this browser, like the README promises.
-export const GITHUB_TOKEN_KEY = 'chess-arena-github-token';
 
 export function getRooms() {
   try {

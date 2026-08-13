@@ -9,10 +9,12 @@ import './styles.css';
 
 import { UI } from './ui.js';
 import { Controller, MODES } from './controller.js';
-import { LEVELS, TIME_CONTROLS, GITHUB_TOKEN_KEY, getRooms } from './config.js';
+import { LEVELS, TIME_CONTROLS, HUMAN_NAME, getRooms, saveRoom } from './config.js';
+import { buildInviteUrl, getOnlineApiUrl, parseInviteLocation } from './online.js';
 import { sounds } from './sounds.js';
 
 const ui = new UI(document.getElementById('app'));
+const PLAYER_NAME_KEY = 'chess-arena-player-name';
 
 // ---- promotion picker -----------------------------------------------------
 
@@ -151,84 +153,143 @@ function dlgButtons(...items) {
   return row;
 }
 
-// CLEAN LOBBY WITH BACK TO MENU BUTTON & DYNAMIC REAL ONLINE ROOMS
-function openJoinDialog() {
+// ROOM LOBBY WITH BACK TO MENU BUTTON
+function openJoinDialog(prefillInvite = null) {
   const overlay = ui.el('div', 'join-lobby-overlay');
   overlay.innerHTML = `
     <div class="lobby-topbar">
       <button class="lobby-back-btn" id="lobby-back-btn">
         <span>🏠</span> กลับหน้าเมนู
       </button>
-      <div style="font-size:18px; font-weight:900; color:var(--accent);">Chess Arena Online Lobby</div>
+      <div style="font-size:18px; font-weight:900; color:var(--accent);">Chess Arena Online</div>
     </div>
 
-    <div style="margin-bottom:20px;">
-      <h2 style="margin:0 0 6px; font-size:22px; font-weight:900;">ห้องประลองออนไลน์ (Live Online Rooms)</h2>
-      <p style="margin:0; color:var(--muted); font-size:13px;">กดเลือกห้องด้านล่างเพื่อเข้าร่วมประลองทันที (1-Click Join):</p>
+    <div class="online-join-panel">
+      <h2>เข้าห้องด้วยลิงก์เชิญ</h2>
+      <p>วางลิงก์ที่เจ้าของห้องส่งมา ผู้เล่นไม่ต้องใช้ GitHub Token</p>
+      <label class="field">
+        <span class="field-label">ชื่อที่แสดง</span>
+        <input id="online-join-name" maxlength="40" autocomplete="nickname" />
+      </label>
+      <label class="field">
+        <span class="field-label">ลิงก์เชิญ</span>
+        <input id="online-invite-url" type="url" inputmode="url" autocomplete="off" placeholder="https://.../?room=...#invite=..." />
+      </label>
+      <div class="online-join-actions">
+        <button class="btn primary" id="online-join-btn">เข้าร่วมห้อง</button>
+        <span id="online-join-status" role="status"></span>
+      </div>
+    </div>
+
+    <div class="lobby-saved-heading">
+      <h2>ห้องที่เคยเปิดในเบราว์เซอร์นี้</h2>
+      <p>รายการนี้เป็นทางลัดในเครื่องเท่านั้น สถานะสดจะอ่านจากเซิร์ฟเวอร์เมื่อเชื่อมต่อ</p>
     </div>
 
     <div class="lobby-cards-grid" id="lobby-cards-container"></div>
   `;
 
   const container = overlay.querySelector('#lobby-cards-container');
+  const nameInput = overlay.querySelector('#online-join-name');
+  const inviteInput = overlay.querySelector('#online-invite-url');
+  const joinButton = overlay.querySelector('#online-join-btn');
+  const joinStatus = overlay.querySelector('#online-join-status');
+  const apiReady = Boolean(getOnlineApiUrl());
 
-  // Fetch real rooms from Room Store
+  nameInput.value = localStorage.getItem(PLAYER_NAME_KEY) || '';
+  if (prefillInvite) inviteInput.value = window.location.href;
+  if (!apiReady) {
+    joinButton.disabled = true;
+    joinStatus.textContent = 'ยังไม่ได้ตั้งค่า VITE_ONLINE_API_URL';
+  }
+
+  joinButton.onclick = async () => {
+    const playerName = nameInput.value.trim();
+    if (!playerName) {
+      joinStatus.textContent = 'กรุณาใส่ชื่อที่แสดง';
+      nameInput.focus();
+      return;
+    }
+    const invite = parseInviteLocation({ href: inviteInput.value.trim() });
+    if (!invite) {
+      joinStatus.textContent = 'ลิงก์เชิญไม่ถูกต้องหรือไม่ครบ';
+      inviteInput.focus();
+      return;
+    }
+    joinButton.disabled = true;
+    joinStatus.textContent = 'กำลังเข้าร่วมห้อง…';
+    try {
+      localStorage.setItem(PLAYER_NAME_KEY, playerName);
+      await controller.start(MODES.ONLINE, { action: 'join', playerName, ...invite });
+      saveRoom({
+        id: invite.roomId,
+        roomId: invite.roomId,
+        kind: 'online',
+        title: controller.onlineState?.title || 'ห้องออนไลน์',
+        hostName: controller.onlineState?.players?.[controller.onlineSide === 'w' ? 'b' : 'w']?.name || 'ผู้เล่นออนไลน์',
+        status: controller.onlineState?.status || 'ACTIVE',
+        createdAt: Date.now(),
+      });
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.hash = '';
+      history.replaceState(null, '', cleanUrl);
+      overlay.remove();
+    } catch (err) {
+      joinButton.disabled = false;
+      joinStatus.textContent = err.message;
+    }
+  };
+
+  // Room Store is local-only; never invent a room when it is empty.
   const storedRooms = getRooms();
-  const activeGistUrl = controller.remoteGistUrl;
-  const isHost = Boolean(activeGistUrl);
+  const displayRooms = Array.isArray(storedRooms)
+    ? storedRooms.filter((room) => room.kind === 'online' && room.roomId)
+    : [];
 
-  const displayRooms = storedRooms.length > 0
-    ? storedRooms
-    : [
-        {
-          id: 'ankidun_room_1',
-          gistId: 'ankidun_room_1',
-          title: 'ANKIDUN Dares You: Respect the Gambit',
-          hostName: 'ANKIDUN',
-          status: 'WAITING',
-        },
-      ];
+  if (displayRooms.length === 0) {
+    const emptyState = ui.el('div', 'lobby-empty-state');
+    emptyState.append(
+      ui.el('div', 'lobby-empty-icon', '♞'),
+      ui.el('h3', null, 'ยังไม่มีประวัติห้องออนไลน์'),
+      ui.el('p', null, 'สร้างห้องใหม่ หรือวางลิงก์เชิญด้านบน')
+    );
+    container.appendChild(emptyState);
+  }
 
   for (const r of displayRooms) {
-    const roomIsMine = isHost || r.hostName === 'คุณ';
+    const title = String(r.title ?? '').trim() || 'ห้องไม่มีชื่อ';
+    const hostName = String(r.hostName ?? '').trim() || 'ไม่ทราบชื่อ';
+    const status = String(r.status ?? '').trim().toUpperCase();
     const card = ui.el('div', 'exact-room-card');
     card.innerHTML = `
       <div class="exact-card-header">
-        <span>${r.title}</span>
-        <span class="heart-icon">♡</span>
+        <span class="room-card-title"></span>
+        <span class="room-status-badge"></span>
       </div>
       <div class="exact-card-body">
-        <div class="exact-card-mini-board">
-          <div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div>
-          <div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div>
-          <div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div>
-          <div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div><div class="sq-b"></div><div class="sq-w"></div>
-        </div>
-        <div class="exact-card-match-details">
-          <div class="exact-card-match-vs">
-            <div class="exact-card-avatar" style="background:#4a2840;">🔥</div>
-            <span class="exact-vs-text">vs</span>
-            <div class="exact-card-avatar">👤</div>
-          </div>
-          <button class="exact-card-action-btn ${roomIsMine ? 'waiting' : 'join'}">
-            ${roomIsMine ? 'WAITING' : 'JOIN'}
-          </button>
+        <div class="room-card-details">
+          <div class="room-card-host"></div>
+          <div class="room-card-source">ทางลัดในเบราว์เซอร์นี้ · ตรวจสถานะเมื่อเชื่อมต่อ</div>
+          <button class="exact-card-action-btn join"></button>
         </div>
       </div>
     `;
 
+    card.querySelector('.room-card-title').textContent = title;
+    card.querySelector('.room-status-badge').textContent = status ? `SAVED · ${status}` : 'SAVED ROOM';
+    card.querySelector('.room-card-host').textContent = `เจ้าของห้อง: ${hostName}`;
+
     const joinBtn = card.querySelector('.exact-card-action-btn');
-    joinBtn.onclick = () => {
-      if (roomIsMine) {
-        ui.log('คุณเป็นเจ้าของห้องนี้ — กำลังรอคู่แข่งเข้าร่วม', 'sys');
-        return;
+    joinBtn.textContent = 'กลับเข้าห้อง';
+    joinBtn.onclick = async () => {
+      joinBtn.disabled = true;
+      try {
+        await controller.start(MODES.ONLINE, { action: 'resume', roomId: r.roomId });
+        overlay.remove();
+      } catch (err) {
+        joinBtn.disabled = false;
+        ui.log(`กลับเข้าห้องล้มเหลว: ${err.message}`, 'err');
       }
-      overlay.remove();
-      controller.start(MODES.REMOTE, {
-        action: 'join',
-        gistId: r.gistId || r.id,
-        token: localStorage.getItem(GITHUB_TOKEN_KEY) ?? '',
-      });
     };
 
     container.appendChild(card);
@@ -252,10 +313,10 @@ function openModeDialog(targetMode = null) {
 
     const options = [
       {
-        mode: MODES.REMOTE,
+        mode: MODES.ONLINE,
         icon: '⚡',
-        title: 'Play Online (ออนไลน์ / Remote)',
-        desc: 'สร้างห้องประลองหรือต่อสู้กับ AI / ผู้เล่นอื่นออนไลน์',
+        title: 'Play Online (ผู้เล่นสองคน)',
+        desc: 'สร้างห้อง ส่งลิงก์เชิญ และเล่นผ่านเซิร์ฟเวอร์โดยไม่ใช้ GitHub Token',
       },
       {
         mode: MODES.HUMAN_VS_AI,
@@ -403,71 +464,93 @@ function openModeDialog(targetMode = null) {
           true,
         ])
       );
-    } else if (mode === MODES.REMOTE) {
+    } else if (mode === MODES.ONLINE) {
       body.append(
         ui.el(
           'p',
           'dlg-hint',
-          'สร้างห้องประลองออนไลน์เพื่อประลองกับผู้เล่นอื่นหรือ AI'
+          getOnlineApiUrl()
+            ? 'สร้างห้องแล้วส่งลิงก์เชิญให้คู่แข่ง เซิร์ฟเวอร์จะตรวจตาเดินทุกครั้ง'
+            : 'ยังไม่ได้ตั้งค่า VITE_ONLINE_API_URL — ต้องรันหรือ deploy Worker ก่อนสร้างห้อง'
         )
       );
 
-      body.append(ui.el('div', 'field-label', 'เอนจินสนามเล่นเป็น'));
-      body.appendChild(colorRadios('rm-color'));
+      const nameField = ui.el('label', 'field');
+      nameField.append(ui.el('span', 'field-label', 'ชื่อที่แสดง'));
+      const nameInput = ui.el('input');
+      nameInput.maxLength = 40;
+      nameInput.autocomplete = 'nickname';
+      nameInput.value = localStorage.getItem(PLAYER_NAME_KEY) || '';
+      nameField.appendChild(nameInput);
+      body.appendChild(nameField);
 
-      const tokenField = ui.el('label', 'field');
-      tokenField.append(
-        ui.el(
-          'span',
-          'field-label',
-          'GitHub Token (scope gist — เก็บเฉพาะในเบราว์เซอร์นี้)'
-        )
-      );
-      const tokenInput = ui.el('input');
-      tokenInput.type = 'password';
-      tokenInput.placeholder = 'ghp_xxxxxxxxxxxx';
-      tokenInput.autocomplete = 'off';
-      tokenInput.value = localStorage.getItem(GITHUB_TOKEN_KEY) ?? '';
-      tokenField.appendChild(tokenInput);
-      body.appendChild(tokenField);
+      body.append(ui.el('div', 'field-label', 'คุณต้องการเล่นเป็น'));
+      body.appendChild(colorRadios('online-color'));
 
       const titleField = ui.el('label', 'field');
-      titleField.append(ui.el('span', 'field-label', 'ชื่อการประลอง'));
+      titleField.append(ui.el('span', 'field-label', 'ชื่อห้อง'));
       const titleInput = ui.el('input');
-      titleInput.value = 'การประลอง AI Arena';
+      titleInput.maxLength = 80;
+      titleInput.value = 'ห้องประลอง Chess Arena';
       titleField.appendChild(titleInput);
       body.appendChild(titleField);
 
       body.append(ui.el('div', 'field-label', 'ตั้งค่าเวลา (Time Control)'));
-      body.appendChild(timeControlRadios('rm-tc'));
+      body.appendChild(timeControlRadios('online-tc'));
 
-      body.appendChild(
-        dlgButtons([
-          'สร้างห้องประลอง',
-          async () => {
-            const color = body.querySelector('input[name="rm-color"]:checked').value;
-            const tcId = body.querySelector('input[name="rm-tc"]:checked').value;
-            const token = tokenInput.value.trim();
-            if (token) localStorage.setItem(GITHUB_TOKEN_KEY, token);
-            modal.close();
-            try {
-              await controller.start(MODES.REMOTE, {
-                action: 'create',
-                engineColor: color,
-                timeControlId: tcId,
-                token,
-                title: titleInput.value.trim() || 'การประลอง AI Arena',
-              });
-              const url = controller.remoteGistUrl;
-              if (url) navigator.clipboard?.writeText(url).catch(() => {});
-              ui.log(`ห้องพร้อมประลองออนไลน์!`, 'sys');
-            } catch (err) {
-              ui.log(`สร้างห้องล้มเหลว: ${err.message}`, 'err');
-            }
-          },
-          true,
-        ])
-      );
+      const createButton = ui.el('button', 'btn primary', 'สร้างห้องและคัดลอกลิงก์');
+      const createStatus = ui.el('span', 'online-create-status');
+      createStatus.setAttribute('role', 'status');
+      createButton.disabled = !getOnlineApiUrl();
+      if (createButton.disabled) createStatus.textContent = 'ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ห้องออนไลน์';
+      createButton.onclick = async () => {
+        const playerName = nameInput.value.trim();
+        if (!playerName) {
+          ui.log('กรุณาใส่ชื่อที่แสดงก่อนสร้างห้อง', 'err');
+          nameInput.focus();
+          return;
+        }
+        createButton.disabled = true;
+        createStatus.textContent = 'กำลังสร้างห้อง…';
+        try {
+          const color = body.querySelector('input[name="online-color"]:checked').value;
+          const tcId = body.querySelector('input[name="online-tc"]:checked').value;
+          const roomTitle = titleInput.value.trim() || 'ห้องประลอง Chess Arena';
+          localStorage.setItem(PLAYER_NAME_KEY, playerName);
+          await controller.start(MODES.ONLINE, {
+            action: 'create', playerName, color, timeControlId: tcId, title: roomTitle,
+          });
+          const inviteUrl = buildInviteUrl(
+            window.location,
+            controller.onlineRoomId,
+            controller.onlineInviteToken,
+          );
+          saveRoom({
+            id: controller.onlineRoomId,
+            roomId: controller.onlineRoomId,
+            kind: 'online',
+            title: roomTitle,
+            hostName: playerName,
+            createdAt: Date.now(),
+            status: 'WAITING',
+          });
+          modal.close();
+          try {
+            await navigator.clipboard.writeText(inviteUrl);
+            ui.log('สร้างห้องแล้วและคัดลอกลิงก์เชิญเรียบร้อย', 'sys');
+          } catch {
+            window.prompt('คัดลอกลิงก์เชิญนี้แล้วส่งให้คู่แข่ง', inviteUrl);
+            ui.log('สร้างห้องแล้ว — กรุณาคัดลอกลิงก์เชิญจากหน้าต่างที่เปิด', 'sys');
+          }
+        } catch (err) {
+          createButton.disabled = false;
+          createStatus.textContent = err.message;
+          ui.log(`สร้างห้องล้มเหลว: ${err.message}`, 'err');
+        }
+      };
+      const createActions = ui.el('div', 'dlg-actions');
+      createActions.append(createButton, createStatus);
+      body.appendChild(createActions);
     }
   };
 
@@ -550,13 +633,6 @@ function setupSandboxLeftPanel() {
     }
   });
 
-  // Room token (needed to create / write battle rooms); kept in this browser
-  ui.refs.sbTokenInput.value = localStorage.getItem(GITHUB_TOKEN_KEY) ?? '';
-  ui.refs.sbTokenInput.addEventListener('input', () => {
-    const token = ui.refs.sbTokenInput.value.trim();
-    if (token) localStorage.setItem(GITHUB_TOKEN_KEY, token);
-  });
-
   // Mode Toggle Logic
   modeBtns.forEach((btn) => {
     btn.onclick = () => {
@@ -573,7 +649,6 @@ function setupSandboxLeftPanel() {
         ui.refs.sbSettingBot.classList.add('hidden');
         ui.refs.sbSettingColor.classList.add('hidden');
         ui.refs.sbSettingAiva.classList.add('hidden');
-        ui.refs.sbSettingToken.classList.add('hidden');
         ui.log('เลือกโหมด: Solo ฝึกซ้อม (เดินได้ทั้ง 2 ฝ่าย)', 'sys');
       } else {
         // Select mode
@@ -587,20 +662,17 @@ function setupSandboxLeftPanel() {
           ui.refs.sbColorLabel.textContent = 'คุณเล่นเป็นฝ่าย';
           ui.refs.sbSettingColor.classList.remove('hidden');
           ui.refs.sbSettingAiva.classList.add('hidden');
-          ui.refs.sbSettingToken.classList.add('hidden');
           ui.log('เลือกโหมด: 🤖 เล่นกับบอท (Stockfish)', 'sys');
-        } else if (mode === 'remote') {
+        } else if (mode === 'online') {
           ui.refs.sbSettingBot.classList.add('hidden');
-          ui.refs.sbColorLabel.textContent = 'เอนจินสนาม (คนสร้างห้อง) เล่นเป็นฝ่าย';
+          ui.refs.sbColorLabel.textContent = 'คุณเล่นเป็นฝ่าย';
           ui.refs.sbSettingColor.classList.remove('hidden');
           ui.refs.sbSettingAiva.classList.add('hidden');
-          ui.refs.sbSettingToken.classList.remove('hidden');
           ui.log('เลือกโหมด: ⚡ เล่นออนไลน์', 'sys');
         } else {
           ui.refs.sbSettingBot.classList.add('hidden');
           ui.refs.sbSettingColor.classList.add('hidden');
           ui.refs.sbSettingAiva.classList.remove('hidden');
-          ui.refs.sbSettingToken.classList.add('hidden');
           ui.log('เลือกโหมด: ⚔️ AI vs AI Arena', 'sys');
         }
       }
@@ -651,12 +723,9 @@ function setupSandboxLeftPanel() {
 
 setupSandboxLeftPanel();
 
-// ---- AUTO JOIN VIA URL QUERY / HASH ----------------------------------------
-const urlParams = new URLSearchParams(window.location.search);
-const roomArg = urlParams.get('room') || window.location.hash.replace('#', '');
-if (roomArg && roomArg.length > 5) {
-  controller.start(MODES.REMOTE, { action: 'join', gistId: roomArg });
-}
+// ---- ONLINE INVITE / RECONNECT FROM URL -----------------------------------
+const pendingInvite = parseInviteLocation(window.location);
+const resumeRoomArg = new URLSearchParams(window.location.search).get('room');
 
 // ---- boot --------------------------------------------------------------------
 
@@ -665,6 +734,15 @@ ui.setPlayers(
   { name: 'คุณ', avatar: '👤' }
 );
 ui.showHomeView();
+
+if (pendingInvite) {
+  queueMicrotask(() => openJoinDialog(pendingInvite));
+} else if (resumeRoomArg) {
+  queueMicrotask(() => {
+    controller.start(MODES.ONLINE, { action: 'resume', roomId: resumeRoomArg })
+      .catch(() => openJoinDialog());
+  });
+}
 
 // Click sound ONLY on actual buttons (not the board, not empty space).
 // Piece moves already play their own move/capture sounds, so dragging stays

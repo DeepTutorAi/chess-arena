@@ -3,31 +3,27 @@
 
 import { Chess } from 'chess.js';
 import { Stockfish } from './engine.js';
-import { createRoom, RemoteChannel } from './remote.js';
+import { OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
 import { sounds } from './sounds.js';
 import {
   ENGINE_NAME,
   HUMAN_NAME,
-  GUEST_NAME,
   LEVELS,
-  REMOTE_POLL_MS,
   TIME_CONTROLS,
   DEFAULT_TIME_CONTROL,
-  GITHUB_TOKEN_KEY,
   ENGINE_HINT_URL,
-  saveRoom,
 } from './config.js';
 
 export const MODES = {
   HUMAN_VS_AI: 'hva',
   AI_VS_AI: 'aiva',
-  REMOTE: 'remote',
+  ONLINE: 'online',
   ANALYZE: 'analyze',
 };
 
 export class Controller {
-  constructor({ ui, ground, onPromotion }) {
+  constructor({ ui, ground, onPromotion, onlineClientFactory = (options) => new OnlineRoomClient(options) }) {
     this.ui = ui;
     this.ground = ground;
     this.onPromotion = onPromotion;
@@ -36,7 +32,14 @@ export class Controller {
     this.mode = null;
     this.engine = null;
     this.engineBlack = null;
-    this.remote = null;
+    this.online = null;
+    this.onlineClientFactory = onlineClientFactory;
+    this.onlineState = null;
+    this.onlineRoomId = null;
+    this.onlineInviteToken = null;
+    this.onlineSide = null;
+    this.onlineConnectionState = 'disconnected';
+    this._onlineClockTimer = null;
     this.clock = null;
 
     this.engineReady = false;
@@ -49,7 +52,6 @@ export class Controller {
     this.levelIndex = 3; // level 4
     this.humanSide = 'w';
     this.engineSide = 'b';
-    this.remoteGistUrl = null;
     this.timeControlId = DEFAULT_TIME_CONTROL;
 
     this._isTimeout = false;
@@ -62,7 +64,7 @@ export class Controller {
     this.sandboxSetup = false;
     this.sandboxTool = 'move';       // 'move' | 'replace'
     this.sandboxPiece = 'q';         // 'q' | 'r' | 'b' | 'n' | 'p' | 'delete'
-    this.sandboxTargetMode = null;   // null (Solo) | 'hva' | 'aiva' | 'remote'
+    this.sandboxTargetMode = null;   // null (Solo) | 'hva' | 'aiva' | 'online'
     this.sandboxSelectedLevel = 4;   // default Elo 1400
     this.sandboxSelectedTc = DEFAULT_TIME_CONTROL;
     this.sandboxSelectedColor = 'random'; // creator side: 'random' | 'w' | 'b'
@@ -94,10 +96,14 @@ export class Controller {
     this.ui.setEngineInfo('bottom', '');
 
     this.timeControlId = opts.timeControlId ?? DEFAULT_TIME_CONTROL;
-    const tcConfig = TIME_CONTROLS.find((t) => t.id === this.timeControlId) ?? TIME_CONTROLS[0];
-    this._initClock(tcConfig);
-    // The clock was never started anywhere, so time controls never ticked.
-    this.clock?.start(this.game.turn());
+    if (mode === MODES.ONLINE) {
+      this.ui.showClocks(false);
+    } else {
+      const tcConfig = TIME_CONTROLS.find((t) => t.id === this.timeControlId) ?? TIME_CONTROLS[0];
+      this._initClock(tcConfig);
+      // The clock was never started anywhere, so time controls never ticked.
+      this.clock?.start(this.game.turn());
+    }
 
     if (mode === MODES.HUMAN_VS_AI) {
       this.ui.showGameView();
@@ -105,8 +111,8 @@ export class Controller {
     } else if (mode === MODES.AI_VS_AI) {
       this.ui.showGameView();
       this._startAiVsAi(opts);
-    } else if (mode === MODES.REMOTE) {
-      await this._startRemote(opts);
+    } else if (mode === MODES.ONLINE) {
+      await this._startOnline(opts);
       this.ui.showGameView();
     } else {
       if (opts.sandboxSetup) {
@@ -125,7 +131,7 @@ export class Controller {
   // ---- Interactive Sandbox Board Setup -----------------------------------
 
   startSandboxSetup({ initialFen } = {}) {
-    // Leave any previous game fully behind (engines, remote polling, clock,
+    // Leave any previous game fully behind (engines, online socket, clock,
     // viewer lock, game-over flags) so stale state can't corrupt the editor.
     this.dispose();
     this._overPopupShown = false;
@@ -307,12 +313,6 @@ export class Controller {
       // king-less FEN already caught above; ignore
     }
 
-    // Remote rooms need a room token — fail early and stay in the editor.
-    if (targetMode === MODES.REMOTE && !(localStorage.getItem(GITHUB_TOKEN_KEY) ?? '')) {
-      this.ui.log('สร้างห้องออนไลน์ต้องใส่ GitHub Token (scope gist) ในช่อง Token ด้านซ้ายก่อน', 'err');
-      return;
-    }
-
     this.sandboxSetup = false;
     this.ui.showGameView({ sandboxMode: false });
 
@@ -331,11 +331,12 @@ export class Controller {
           timeControlId,
           initialFen: cleanFen,
         });
-      } else if (targetMode === MODES.REMOTE) {
-        await this.start(MODES.REMOTE, {
+      } else if (targetMode === MODES.ONLINE) {
+        await this.start(MODES.ONLINE, {
           action: 'create',
+          playerName: HUMAN_NAME,
           title: 'Sandbox Custom Battle',
-          engineColor: this.sandboxSelectedColor ?? 'random',
+          color: this.sandboxSelectedColor ?? 'random',
           timeControlId,
           initialFen: cleanFen,
         });
@@ -420,6 +421,16 @@ export class Controller {
   }
 
   resign() {
+    if (this.mode === MODES.ONLINE) {
+      if (!this.online || this.onlineState?.status !== 'active') return;
+      try {
+        this.online.resign(this.onlineState.revision);
+        this.ui.log('ส่งคำขอยอมแพ้แล้ว — รอเซิร์ฟเวอร์ยืนยัน', 'sys');
+      } catch (err) {
+        this.ui.log(`ยอมแพ้ไม่สำเร็จ: ${err.message}`, 'err');
+      }
+      return;
+    }
     if (this._isOver() || this._overPopupShown) return;
     const loser = this.humanSide ?? this.game.turn();
     const winnerColor = loser === 'w' ? 'ดำ' : 'ขาว';
@@ -452,7 +463,7 @@ export class Controller {
 
   async handleUserMove(orig, dest) {
     if (this.engineBusy || this.viewerMode) return;
-    if (this.remote && !this._remoteHumanTurn()) return;
+    if (this.mode === MODES.ONLINE && !this._onlineHumanTurn()) return;
 
     const legal = this.game.moves({ square: orig, verbose: true }).some((m) => m.to === dest);
     if (!legal) return;
@@ -465,11 +476,24 @@ export class Controller {
       if (!promotion) return; // cancelled
     }
 
+    if (this.mode === MODES.ONLINE) {
+      try {
+        this.online.sendMove(orig, dest, promotion, this.onlineState.revision);
+        this.ui.log(`ส่งตาเดิน ${orig}${dest}${promotion ?? ''} — รอเซิร์ฟเวอร์ยืนยัน`, 'sys');
+      } catch (err) {
+        this.ui.log(`ส่งตาเดินไม่สำเร็จ: ${err.message}`, 'err');
+      }
+      // Chessground already animated the drop. Snap it back to the last
+      // canonical snapshot until the server accepts and broadcasts the move.
+      this._syncBoard();
+      return;
+    }
+
     const move = this.game.move({ from: orig, to: dest, promotion });
     if (!move) return;
 
     this.ui.log(`${move.color === 'w' ? 'ขาว' : 'ดำ'} เดิน ${move.san}`, 'move');
-    this._afterMove(move, { publish: this.mode === MODES.REMOTE });
+    this._afterMove(move);
   }
 
   async undo() {
@@ -544,7 +568,13 @@ export class Controller {
     if (this.engine) { this.engine.quit(); this.engine = null; }
     if (this.engineBlack) { this.engineBlack.quit(); this.engineBlack = null; }
     if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
-    if (this.remote) { this.remote.stop(); this.remote = null; }
+    if (this.online) { this.online.stop(); this.online = null; }
+    if (this._onlineClockTimer) { clearInterval(this._onlineClockTimer); this._onlineClockTimer = null; }
+    this.onlineState = null;
+    this.onlineRoomId = null;
+    this.onlineInviteToken = null;
+    this.onlineSide = null;
+    this.onlineConnectionState = 'disconnected';
     this.engineReady = false;
     this.engineBusy = false;
     this.hintBusy = false;
@@ -553,7 +583,6 @@ export class Controller {
     this.viewerMode = false;
     this.paused = false;
     this.sandboxSetup = false;
-    this.remoteGistUrl = null;
     this.ground.setShapes([]);
     if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
   }
@@ -672,76 +701,148 @@ export class Controller {
     this._renderMoves();
   }
 
-  async _startRemote({ action = 'create', gistId = '', token, engineColor = 'random', title = 'การประลอง AI', initialFen } = {}) {
-    if (initialFen) {
-      try {
-        this.game = new Chess(initialFen);
-      } catch {
-        this.game = new Chess();
-      }
-    }
-
-    // Token lives in localStorage (entered once in the UI); falls back for
-    // URL auto-joins and sandbox mode.
-    const githubToken = token ?? localStorage.getItem(GITHUB_TOKEN_KEY) ?? '';
-
-    if (action === 'create' && !githubToken) {
-      this.mode = null;
-      this.engineSide = null;
-      throw new Error('กรุณาใส่ GitHub Token (scope gist) ก่อนสร้างห้อง — ดูช่อง Token ในหน้าต่างสร้างห้อง');
-    }
-
-    if (action === 'create') {
-      this.engineSide = engineColor === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : engineColor;
-      const engineWhite = this.engineSide !== 'b';
-      let created;
-      try {
-        created = await createRoom({
-          token: githubToken,
-          title,
-          arenaSide: this.engineSide,
-          initialFen,
-          white: engineWhite
-            ? { name: ENGINE_NAME, kind: 'engine', source: 'stockfish 18 lite single (chess arena)' }
-            : { name: GUEST_NAME, kind: 'agent' },
-          black: engineWhite
-            ? { name: GUEST_NAME, kind: 'agent' }
-            : { name: ENGINE_NAME, kind: 'engine', source: 'stockfish 18 lite single (chess arena)' },
-        });
-      } catch (err) {
-        // Leave no half-started remote state behind on failure.
-        this.remoteGistUrl = null;
-        this.mode = null;
-        this.engineSide = null;
-        throw err;
-      }
-      this.remoteGistUrl = created.url;
-      gistId = created.gistId;
-
-      saveRoom({
-        id: gistId,
-        gistId,
-        title,
-        hostName: HUMAN_NAME,
-        createdAt: Date.now(),
-        status: 'WAITING',
-      });
-    } else {
-      // Joining: the engine side comes from the room state (arenaSide).
-      this.engineSide = null;
-    }
-
-    this.remote = new RemoteChannel({
-      gistId,
-      token: githubToken,
-      pollMs: REMOTE_POLL_MS,
-      onState: (state) => this._onRemoteState(state),
-      onError: (msg) => this.ui.log(`Remote: ${msg}`, 'err'),
+  async _startOnline({
+    action = 'create',
+    roomId = '',
+    inviteToken = '',
+    playerName = HUMAN_NAME,
+    title = 'ห้องประลองออนไลน์',
+    color = 'random',
+    timeControlId = DEFAULT_TIME_CONTROL,
+    initialFen,
+  } = {}) {
+    this.online = this.onlineClientFactory({
+      onState: (state) => this._onOnlineState(state),
+      onError: (message, detail) => {
+        this.ui.log(`Online: ${message}`, 'err');
+        if (detail?.code === 'stale_revision') this.online?.sync();
+      },
+      onConnectionState: (state) => {
+        this.onlineConnectionState = state;
+        if (state === 'connected') {
+          this.ui.setStatus('เชื่อมต่อห้องออนไลน์แล้ว', '');
+          if (this.onlineState) this._syncBoard();
+        }
+        else if (state === 'reconnecting') this.ui.setStatus('การเชื่อมต่อขาดหาย — กำลังเชื่อมต่อใหม่…', 'busy');
+        else if (state === 'failed') this.ui.setStatus('เชื่อมต่อห้องไม่ได้ กรุณาลองเปิดลิงก์ใหม่', '');
+      },
     });
 
-    this.ui.setStatus('กำลังเชื่อมต่อห้อง Remote…', '');
+    let result;
+    if (action === 'create') {
+      result = await this.online.create({ playerName, title, color, timeControlId, initialFen });
+      this.onlineRoomId = result.roomId;
+      this.onlineInviteToken = result.inviteToken;
+    } else if (action === 'join') {
+      result = await this.online.join(roomId, { playerName, inviteToken });
+      this.onlineRoomId = roomId;
+    } else if (action === 'resume') {
+      if (!this.online.restoreSession(roomId)) throw new Error('ไม่พบ session ของห้องนี้ในเบราว์เซอร์');
+      this.onlineRoomId = roomId;
+      result = { state: this.online.state };
+    } else {
+      throw new Error('คำสั่งเปิดห้องออนไลน์ไม่ถูกต้อง');
+    }
+
+    this.onlineSide = this.online.session.color;
+    this.orientation = this.onlineSide === 'w' ? 'white' : 'black';
+    if (result.state) this._onOnlineState(result.state);
     this.ui.setActionStrip({ undo: false, resign: true, flip: false, pause: false });
-    this.remote.start();
+    this.online.connect();
+  }
+
+  _onlineHumanTurn() {
+    return Boolean(
+      this.online
+      && this.onlineState?.status === 'active'
+      && this.onlineConnectionState === 'connected'
+      && this.onlineSide === this.game.turn(),
+    );
+  }
+
+  _onOnlineState(state) {
+    if (!state || (this.onlineRoomId && state.roomId !== this.onlineRoomId)) return;
+    if (this.onlineState && state.revision < this.onlineState.revision) return;
+
+    try {
+      const game = new Chess(state.initialFen);
+      for (const uci of state.moves) {
+        const move = game.move({
+          from: uci.slice(0, 2),
+          to: uci.slice(2, 4),
+          promotion: uci.length > 4 ? uci[4] : undefined,
+        });
+        if (!move) throw new Error('ประวัติการเดินไม่ถูกต้อง');
+      }
+      if (game.fen() !== state.fen) throw new Error('FEN ไม่ตรงกับประวัติการเดิน');
+      this.game = game;
+    } catch (err) {
+      this.ui.log(`Online snapshot ถูกปฏิเสธ: ${err.message}`, 'err');
+      return;
+    }
+
+    this.onlineState = state;
+    const topColor = this.orientation === 'white' ? 'b' : 'w';
+    const bottomColor = topColor === 'w' ? 'b' : 'w';
+    this.ui.setPlayers(
+      { name: state.players[topColor].name ?? 'กำลังรอผู้เล่น', avatar: topColor === this.onlineSide ? '👤' : '♟️' },
+      { name: state.players[bottomColor].name ?? 'กำลังรอผู้เล่น', avatar: bottomColor === this.onlineSide ? '👤' : '♟️' },
+    );
+    this._syncBoard();
+    this._renderMoves();
+    this._renderOnlineClock(state);
+
+    if (state.status === 'waiting') {
+      this.ui.setStatus('ห้องพร้อมแล้ว — ส่งลิงก์เชิญและรอคู่แข่ง', 'busy');
+    } else if (state.status === 'active') {
+      this.ui.setStatus(
+        state.turn === this.onlineSide ? 'ถึงตาของคุณ' : 'รอคู่แข่งเดิน…',
+        state.turn === this.onlineSide ? '' : 'busy',
+      );
+    } else {
+      this._announceOnlineResult(state);
+    }
+  }
+
+  _renderOnlineClock(state) {
+    if (this._onlineClockTimer) clearInterval(this._onlineClockTimer);
+    this._onlineClockTimer = null;
+    if (!state.clock) {
+      this.ui.showClocks(false);
+      return;
+    }
+    this.ui.showClocks(true);
+    const render = () => {
+      const clock = state.clock;
+      let whiteMs = clock.whiteMs;
+      let blackMs = clock.blackMs;
+      if (state.status === 'active' && clock.activeSince !== null) {
+        const elapsed = Math.max(0, Date.now() - clock.activeSince);
+        if (state.turn === 'w') whiteMs = Math.max(0, whiteMs - elapsed);
+        else blackMs = Math.max(0, blackMs - elapsed);
+      }
+      const topColor = this.orientation === 'white' ? 'b' : 'w';
+      const topMs = topColor === 'w' ? whiteMs : blackMs;
+      const bottomMs = topColor === 'w' ? blackMs : whiteMs;
+      this.ui.setClock('top', ChessClock.formatTime(topMs), state.turn === topColor, topMs <= 20_000);
+      this.ui.setClock('bottom', ChessClock.formatTime(bottomMs), state.turn !== topColor, bottomMs <= 20_000);
+    };
+    render();
+    if (state.status === 'active') this._onlineClockTimer = setInterval(render, 250);
+  }
+
+  _announceOnlineResult(state) {
+    if (this._overPopupShown) return;
+    this._overPopupShown = true;
+    const draw = state.result === '1/2-1/2';
+    const won = !draw && ((state.result === '1-0' && this.onlineSide === 'w') || (state.result === '0-1' && this.onlineSide === 'b'));
+    const title = draw ? 'เสมอกัน' : won ? 'คุณชนะ' : 'คุณแพ้';
+    const reasons = { checkmate: 'รุกฆาต', draw: 'เสมอตามกติกา', resignation: 'มีผู้เล่นยอมแพ้', timeout: 'หมดเวลา' };
+    const detail = `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
+    this.ui.setStatus(`จบเกม · ${title}`, 'done');
+    this.ui.log(`จบเกมออนไลน์: ${title} — ${detail}`, 'sys');
+    this.ui.showGameOver(title, detail, () => this.goHome(), () => this.goHome());
+    sounds.play(draw ? 'draw' : won ? 'victory' : 'lose');
   }
 
   // ------------------------------------------------------------------ internal flow
@@ -774,7 +875,7 @@ export class Controller {
     const isHumanTurn =
       this.mode === MODES.ANALYZE ||
       (this.mode === MODES.HUMAN_VS_AI && this.game.turn() === this.humanSide) ||
-      (this.mode === MODES.REMOTE && this._remoteHumanTurn());
+      (this.mode === MODES.ONLINE && this._onlineHumanTurn());
 
     // Highlight the REAL last move from chess.js history (from+to) so the
     // opponent's move is highlighted too — without this, chessground kept the
@@ -861,7 +962,7 @@ export class Controller {
     return dests;
   }
 
-  _afterMove(move, { publish = false } = {}) {
+  _afterMove(move) {
     this._renderMoves();
     this._syncBoard();
 
@@ -873,19 +974,11 @@ export class Controller {
     if (over) {
       this._announceGameOver();
     } else if (this.mode !== MODES.ANALYZE) {
-      // move / capture / check feedback (human, bot, remote) — silent in
+      // move / capture / check feedback (human or bot) — silent in
       // sandbox / custom (analyze) mode.
       if (move.captured) sounds.play('capture');
       else sounds.play('move');
       if (this.game.inCheck()) sounds.play('check');
-    }
-
-    if (publish && this.remote) {
-      // Publish UCI + SAN + resulting FEN to the battle room (docs/agent-battle.md).
-      const uci = move.from + move.to + (move.promotion ?? '');
-      this.remote
-        .appendMove(uci, move.san, this.game.fen(), this._gameResult())
-        .catch((err) => this.ui.log(`Remote: ${err.message}`, 'err'));
     }
 
     if (over) return;
@@ -895,12 +988,6 @@ export class Controller {
     } else if (this.mode === MODES.AI_VS_AI) {
       this._maybeStartAiLoop();
     }
-  }
-
-  _gameResult() {
-    if (!this.game.isGameOver()) return null;
-    if (this.game.isCheckmate()) return this.game.turn() === 'w' ? '0-1' : '1-0';
-    return '1/2-1/2';
   }
 
   /**
@@ -1078,76 +1165,6 @@ export class Controller {
     }, delay);
   }
 
-  _remoteHumanTurn() {
-    if (!this.remote || !this.remote.state) return false;
-    if (!this.remote.token) return false; // spectators only watch
-    const turn = this.game.turn();
-    return this.engineSide !== turn;
-  }
-
-  _onRemoteState(state) {
-    // Joiners learn the engine side from the room itself.
-    if (!this.engineSide && state.arenaSide) this.engineSide = state.arenaSide;
-
-    if (state.fen && state.fen !== this.game.fen()) {
-      try {
-        this.game.load(state.fen);
-        this.ui.log(`ซิงค์กระดาน Remote (${state.moves?.length ?? 0} ตา)`, 'sys');
-        this._syncBoard();
-        this._renderMoves();
-      } catch (err) {
-        this.ui.log(`โหลด FEN Remote ล้มเหลว: ${err.message}`, 'err');
-      }
-    }
-
-    if (this._isOver()) {
-      this._announceGameOver();
-      return;
-    }
-
-    // Only the room creator auto-plays the arena side locally (remoteGistUrl is
-    // set on create); joiners/spectators must never spawn a second engine.
-    if (this.remoteGistUrl && this.remote.token && this.game.turn() === this.engineSide && !this.engineBusy) {
-      if (!this.engine) {
-        this.engine = new Stockfish({
-          onReady: () => {
-            if (!this.engine) return;
-            this.engineReady = true;
-            this.engine.setOption('Skill Level', 20);
-            this.engine.setOption('Hash', 16);
-            this._remoteEngineTurn();
-          },
-          onBestMove: (uci) => {
-            this.engineBusy = false;
-            if (!uci) return;
-            const orig = uci.slice(0, 2);
-            const dest = uci.slice(2, 4);
-            const promotion = uci.length > 4 ? uci[4] : undefined;
-            const move = this.game.move({ from: orig, to: dest, promotion });
-            if (move) {
-              this.ui.log(`เอนจินสนามเดินแทน ${move.san}`, 'engine');
-              this._afterMove(move, { publish: true });
-            }
-          },
-        });
-      } else {
-        this._remoteEngineTurn();
-      }
-    }
-  }
-
-  _remoteEngineTurn() {
-    if (this.engineBusy || this._isOver()) return;
-    this.engineBusy = true;
-    const { delay } = this._thinkTime();
-    const fen = this.game.fen();
-    this._aiTimer = setTimeout(() => {
-      if (this._isOver() || !this.engine) return;
-      this.engine.setPosition(fen);
-      this.engine.go({ movetime: 600, depth: 10 });
-    }, delay);
-  }
-
   _isOver() {
     return this.game.isGameOver() || this._isTimeout;
   }
@@ -1189,11 +1206,11 @@ export class Controller {
   }
 
   /** Win (victory1+victory2 together) / lose / draw sounds — only when a
-   *  human is playing (hva, or remote host). AI vs AI / analyze stay silent. */
+   *  human is playing. AI vs AI / analyze stay silent. */
   _playGameOverSound() {
     let humanSide = null;
     if (this.mode === MODES.HUMAN_VS_AI) humanSide = this.humanSide;
-    else if (this.mode === MODES.REMOTE && this.remoteGistUrl) humanSide = this.engineSide === 'w' ? 'b' : 'w';
+    else if (this.mode === MODES.ONLINE) humanSide = this.onlineSide;
     if (!humanSide) return;
 
     if (this.game.isDraw()) {

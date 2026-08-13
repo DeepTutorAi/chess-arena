@@ -1,4 +1,7 @@
 node_modules/
 dist/
+dist-preview/
+.dev.vars
+.wrangler/
 .DS_Store
 *.local

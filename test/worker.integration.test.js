@@ -1,0 +1,177 @@
+import { exports } from 'cloudflare:workers';
+import { describe, expect, it } from 'vitest';
+
+const ORIGIN = 'http://localhost:5173';
+
+function jsonRequest(url, method, body, origin = ORIGIN) {
+  return new Request(url, {
+    method,
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function createRoom(overrides = {}) {
+  const response = await exports.default.fetch(jsonRequest(
+    'http://worker.test/api/rooms',
+    'POST',
+    {
+      playerName: 'Host',
+      title: 'Integration room',
+      color: 'w',
+      timeControlId: 'unlimited',
+      ...overrides,
+    },
+  ));
+  return { response, body: await response.json() };
+}
+
+function nextMessage(socket) {
+  return new Promise((resolve, reject) => {
+    const onMessage = (event) => {
+      cleanup();
+      resolve(JSON.parse(event.data));
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error('WebSocket failed'));
+    };
+    const cleanup = () => {
+      socket.removeEventListener('message', onMessage);
+      socket.removeEventListener('error', onError);
+    };
+    socket.addEventListener('message', onMessage);
+    socket.addEventListener('error', onError);
+  });
+}
+
+async function connect(roomId, sessionToken) {
+  const response = await exports.default.fetch(new Request(
+    `http://worker.test/api/rooms/${roomId}/socket`,
+    {
+      headers: {
+        Origin: ORIGIN,
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Protocol': `chess.v1, session.${sessionToken}`,
+      },
+    },
+  ));
+  expect(response.status).toBe(101);
+  const socket = response.webSocket;
+  socket.accept();
+  return socket;
+}
+
+async function playMove(sender, observer, move, expectedRevision) {
+  const senderMessage = nextMessage(sender);
+  const observerMessage = nextMessage(observer);
+  sender.send(JSON.stringify({ type: 'move', ...move, expectedRevision }));
+  const [senderState, observerState] = await Promise.all([senderMessage, observerMessage]);
+  expect(senderState.revision).toBe(expectedRevision + 1);
+  expect(observerState.revision).toBe(expectedRevision + 1);
+  expect(senderState.lastMove).toBe(`${move.from}${move.to}${move.promotion || ''}`);
+  expect(observerState.fen).toBe(senderState.fen);
+  return senderState;
+}
+
+describe('online room Worker', () => {
+  it('rejects untrusted origins and malformed HTTP boundaries', async () => {
+    const forbidden = await exports.default.fetch(jsonRequest(
+      'http://worker.test/api/rooms',
+      'POST',
+      { playerName: 'Host' },
+      'https://attacker.example',
+    ));
+    expect(forbidden.status).toBe(403);
+
+    const wrongType = await exports.default.fetch(new Request('http://worker.test/api/rooms', {
+      method: 'POST',
+      headers: { Origin: ORIGIN, 'Content-Type': 'text/plain' },
+      body: '{}',
+    }));
+    expect(wrongType.status).toBe(415);
+
+    const sameOrigin = await exports.default.fetch(jsonRequest(
+      'http://worker.test/api/rooms',
+      'POST',
+      { playerName: 'Same Origin', title: 'Hosted room', color: 'w', timeControlId: 'unlimited' },
+      'http://worker.test',
+    ));
+    expect(sameOrigin.status).toBe(201);
+  });
+
+  it('creates a room and allows the invite capability to be claimed once', async () => {
+    const created = await createRoom();
+    expect(created.response.status).toBe(201);
+    expect(created.body.roomId).toMatch(/^[a-z2-7]{16}$/);
+    expect(created.body.sessionToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(created.body.inviteToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(created.body.role).toBe('host');
+    expect(created.body.color).toBe('w');
+    expect(created.body.state.status).toBe('waiting');
+
+    const joined = await exports.default.fetch(jsonRequest(
+      `http://worker.test/api/rooms/${created.body.roomId}/join`,
+      'POST',
+      { playerName: 'Guest', inviteToken: created.body.inviteToken },
+    ));
+    const guest = await joined.json();
+    expect(joined.status).toBe(200);
+    expect(guest.role).toBe('guest');
+    expect(guest.color).toBe('b');
+    expect(guest.state.status).toBe('active');
+
+    const reused = await exports.default.fetch(jsonRequest(
+      `http://worker.test/api/rooms/${created.body.roomId}/join`,
+      'POST',
+      { playerName: 'Other', inviteToken: created.body.inviteToken },
+    ));
+    expect(reused.status).toBe(401);
+    expect(await reused.json()).toEqual({ error: 'invite_invalid' });
+  });
+
+  it('rejects tampering and persists an authoritative game across reconnect', async () => {
+    const created = await createRoom();
+    const joinedResponse = await exports.default.fetch(jsonRequest(
+      `http://worker.test/api/rooms/${created.body.roomId}/join`,
+      'POST',
+      { playerName: 'Guest', inviteToken: created.body.inviteToken },
+    ));
+    const guest = await joinedResponse.json();
+
+    const badSocket = await exports.default.fetch(new Request(
+      `http://worker.test/api/rooms/${created.body.roomId}/socket`,
+      { headers: { Origin: ORIGIN, Upgrade: 'websocket', 'Sec-WebSocket-Protocol': 'chess.v1' } },
+    ));
+    expect(badSocket.status).toBe(401);
+
+    const hostSocket = await connect(created.body.roomId, created.body.sessionToken);
+    const initialPromise = nextMessage(hostSocket);
+    const initial = await initialPromise;
+    expect(initial.status).toBe('active');
+    expect(initial.revision).toBe(1);
+
+    const guestSocket = await connect(created.body.roomId, guest.sessionToken);
+    const guestInitial = await nextMessage(guestSocket);
+    expect(guestInitial.revision).toBe(1);
+
+    const illegalMessage = nextMessage(hostSocket);
+    hostSocket.send(JSON.stringify({ type: 'move', from: 'e2', to: 'e5', expectedRevision: 1 }));
+    expect(await illegalMessage).toMatchObject({ type: 'error', code: 'illegal_move', revision: 1 });
+
+    await playMove(hostSocket, guestSocket, { from: 'e2', to: 'e4' }, 1);
+    await playMove(guestSocket, hostSocket, { from: 'e7', to: 'e5' }, 2);
+    await playMove(hostSocket, guestSocket, { from: 'g1', to: 'f3' }, 3);
+    const moved = await playMove(guestSocket, hostSocket, { from: 'b8', to: 'c6' }, 4);
+
+    hostSocket.close(1000, 'reconnect');
+    const reconnected = await connect(created.body.roomId, created.body.sessionToken);
+    const syncPromise = nextMessage(reconnected);
+    const synced = await syncPromise;
+    expect(synced.revision).toBe(5);
+    expect(synced.fen).toBe(moved.fen);
+
+    guestSocket.close(1000, 'done');
+    reconnected.close(1000, 'done');
+  });
+});

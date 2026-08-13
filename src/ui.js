@@ -57,7 +57,7 @@ export class UI {
               <div style="font-size:11px; color:var(--muted);">เลือกโหมดเกม (หากไม่เลือก = โหมด Solo ฝึกซ้อมเดินหมากทั้ง 2 ฝ่าย):</div>
 
               <div style="display:flex; flex-direction:column; gap:8px;">
-                <button class="sandbox-mode-opt-btn" id="sb-mode-online" data-mode="remote">
+                <button class="sandbox-mode-opt-btn" id="sb-mode-online" data-mode="online">
                   <span class="m-icon">⚡</span>
                   <span>เล่นออนไลน์ (Online)</span>
                 </button>
@@ -92,11 +92,6 @@ export class UI {
                   <input type="range" id="sb-aiva-w-slider" min="1" max="11" value="6" step="1" />
                   <span class="field-label" style="margin-top:4px;">ระดับเอนจินฝ่ายดำ: <b id="sb-aiva-b-label">Elo 1200</b></span>
                   <input type="range" id="sb-aiva-b-slider" min="1" max="11" value="3" step="1" />
-                </div>
-
-                <div id="sb-setting-token" class="field hidden">
-                  <span class="field-label">GitHub Token (scope gist — เก็บเฉพาะในเบราว์เซอร์นี้)</span>
-                  <input type="password" id="sb-token-input" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" />
                 </div>
 
                 <div id="sb-setting-tc" class="field">
@@ -304,8 +299,6 @@ export class UI {
       sbAivaWLabel: $('#sb-aiva-w-label'),
       sbAivaBSlider: $('#sb-aiva-b-slider'),
       sbAivaBLabel: $('#sb-aiva-b-label'),
-      sbSettingToken: $('#sb-setting-token'),
-      sbTokenInput: $('#sb-token-input'),
       sbTcContainer: $('#sb-tc-container'),
       sbResetBoardBtn: $('#sb-reset-board-btn'),
       sbBackMenuBtn: $('#sb-back-menu-btn'),
@@ -330,7 +323,6 @@ export class UI {
     this.refs.sbSettingBot.classList.add('hidden');
     this.refs.sbSettingColor.classList.add('hidden');
     this.refs.sbSettingAiva.classList.add('hidden');
-    this.refs.sbSettingToken.classList.add('hidden');
   }
 
   showGameView({ sandboxMode = false } = {}) {

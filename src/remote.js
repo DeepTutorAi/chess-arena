@@ -22,9 +22,9 @@
 // Write strategy: read-modify-write with a compare-and-swap on `updatedAt` to
 // avoid clobbering a move made by the opponent between our read and write.
 
-import { REMOTE_POLL_MS, REMOTE_MAX_MOVES } from './config.js';
-
 const API = 'https://api.github.com';
+const REMOTE_POLL_MS = 2500;
+const REMOTE_MAX_MOVES = 512;
 
 export function sanitizeName(name) {
   return String(name ?? 'คู่แข่ง AI').slice(0, 40);

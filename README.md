@@ -1,10 +1,11 @@
 # ♞ Chess Arena — สนามหมากรุกสากล vs AI
 
-สนามหมากรุกสากลคุณภาพระดับ lichess ที่รันบนเบราว์เซอร์ได้เลย (GitHub Pages 100%):
+สนามหมากรุกสากลที่รันบนเบราว์เซอร์ พร้อมห้องผู้เล่นออนไลน์แบบ server-authoritative:
 
 - **เล่น vs AI** — สู้กับเอนจิน **Stockfish 18** (ตัวที่ chess.com ใช้) ระดับปรับได้ 1–8
 - **AI vs AI** — เปิดชม Stockfish ปะทะ Stockfish เอง
-- **ต่อสู้ Remote** — สนามนี้เล่นกับ **AI ตัวอื่นที่อยู่นอกสนาม** ผ่านโปรโตคอล Gist (ดู `docs/agent-battle.md`) — สร้างห้อง ส่ง URL ให้ AI คู่แข่ง แล้วสู้กันจริง
+- **เล่นออนไลน์** — สร้างห้อง ส่งลิงก์ให้ผู้เล่นอีกคน และให้ Cloudflare Durable Object ตรวจตาเดินทุกครั้ง
+- **ต่อสู้ Remote Agent (Legacy)** — AI ภายนอกยังใช้โปรโตคอล Gist ผ่านสคริปต์ใน `scripts/` ได้ตาม `docs/agent-battle.md`; player UI ไม่ขอ GitHub Token แล้ว
 - **วิเคราะห์** — กระดานฝึกเดินเล่นเองทั้งสองสี
 
 ## เทคโนโลยี
@@ -15,6 +16,7 @@
 | กติกาหมากรุก | [chess.js](https://github.com/jhlywa/chess.js) 1.4 | SAN, FEN, ตรวจผลเสมอ/แพ้ชนะ |
 | เอนจิน | [stockfish](https://github.com/nmrugg/stockfish.js) 18 (lite single) | รันในเบราว์เซอร์ **ไม่ต้องใช้ header พิเศษ** — ใช้กับ GitHub Pages ได้ |
 | Build | Vite 7 | Static SPA, `base: './'` รองรับ subpath |
+| ห้องผู้เล่นออนไลน์ | Cloudflare Workers + SQLite Durable Objects | WebSocket, one-time invite, server-authoritative chess.js |
 
 ## รัน
 
@@ -25,19 +27,48 @@ npm run build      # build ไป dist/
 npm run deploy     # build + push ขึ้น GitHub Pages (gh-pages branch)
 ```
 
+## ห้องผู้เล่นออนไลน์แบบฟรี
+
+รัน Worker และ Vite แยกกัน:
+
+```bash
+npx wrangler dev --port 8787
+```
+
+อีก PowerShell terminal:
+
+```powershell
+$env:VITE_ONLINE_API_URL="http://localhost:8787"
+npm run dev
+```
+
+เปิดเว็บ กด **CREATE GAME → Play Online** ใส่ชื่อและสร้างห้อง จากนั้นส่งลิงก์เชิญให้ผู้เล่นอีกคน ลิงก์มี invite capability อยู่หลัง `#invite=` และใช้ claim ที่นั่ง guest ได้ครั้งเดียว หลัง join แล้วแต่ละ browser จะเก็บ session capability เฉพาะห้องนั้นเพื่อ reconnect
+
+ก่อน deploy ให้เปลี่ยน `ALLOWED_ORIGINS` ใน `wrangler.jsonc` เป็น origin ของเว็บจริง แล้วรัน:
+
+```bash
+npx wrangler login
+npx wrangler deploy
+```
+
+`wrangler deploy` จะส่งทั้ง Worker และไฟล์หน้าเว็บใน `dist/` ขึ้น origin เดียวกัน หน้า production จึงใช้ URL ปัจจุบันเป็น API ได้ทันทีโดยไม่ต้องตั้ง `VITE_ONLINE_API_URL` ตัวแปรนี้ยังใช้สำหรับ local dev หรือกรณีที่แยก frontend/backend คนละ origin เท่านั้น ไม่มี Cloudflare credential หรือ session/invite capability ใดถูกกำหนดเป็น `VITE_*`
+
+คำสั่งตรวจสอบ:
+
+```bash
+npm test
+npm run build
+npx wrangler deploy --dry-run
+```
+
 ## เล่น vs AI ระดับ 1–8
 
 ระดับ 1–3 = เหมาะสำหรับมือใหม่, 4–6 = ผู้เล่นทั่วไป, 7–8 = ระดับทัวร์นาเมนต์
 (ระดับปรับผ่าน UCI `Skill Level` + จำกัดความลึกและเวลา — เอนจินยังเป็นตัวจริง 100%)
 
-## ต่อสู้ Remote (AI ตัวนอก)
+## ต่อสู้ Remote Agent แบบเดิม (AI ตัวนอก)
 
-1. เปิดโหมด **ต่อสู้ Remote** → **สร้างห้อง** (หรือใช้สคริปต์ `scripts/arena-host.mjs` รันเอนจินสนามจากเทอร์มินัลแทนการเปิด tab)
-2. ใส่ GitHub Token ของคุณ (scope `gist` — เก็บเฉพาะใน localStorage ของเบราว์เซอร์)
-3. เลือกว่าสนามนี้เล่นเป็นฝ่ายขาว/ดำ/สุ่ม แล้วสร้างห้อง
-4. ระบบจะคัดลอก URL ห้องให้ — **ส่ง URL นี้ให้ AI คู่แข่ง**
-5. คู่แข่งใช้โปรโตคอลใน `docs/agent-battle.md` (มี client ตัวอย่าง `scripts/agent-client.mjs`) อ่านห้องและเดิน
-6. สนามจะ poll ห้องทุก 2.5 วินาที ซิงก์กระดานอัตโนมัติ และเอนจินจะตอบกลับ
+โปรโตคอล Gist ยังคงอยู่เพื่อความเข้ากันได้ของ terminal AI clients แต่ไม่ได้แสดงใน player-facing UI ดูวิธีใช้และ trust model ใน `docs/agent-battle.md`
 
 ### รันเอนจินสนามจากเทอร์มินัล (ไม่ต้องเปิด tab ทิ้งไว้)
 
@@ -56,7 +87,10 @@ public/engine/        เอนจิน Stockfish (js + wasm) — คัดล�
 src/config.js         ค่าคงที่: ระดับ, ความเร็ว, ชื่อ
 src/engine.js         UCI client (Worker wrapper)
 src/controller.js     state machine ของทุกโหมด
-src/remote.js         โปรโตคอลห้องประลอง (GitHub Gist)
+src/online.js         client ห้องผู้เล่นออนไลน์ (HTTP + WebSocket)
+worker/               Worker router, Durable Object, authoritative chess domain
+wrangler.jsonc        Cloudflare Worker/SQLite Durable Object configuration
+src/remote.js         โปรโตคอล Remote Agent เดิม (GitHub Gist)
 src/ui.js             DOM helper
 src/main.js           bootstrap + ไดอะลอก
 scripts/copy-engine.mjs   คัดลอกเอนจินเข้า public/
