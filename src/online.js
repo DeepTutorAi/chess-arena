@@ -5,6 +5,7 @@ const VERSION = 1;
 const ROOM_PATTERN = /^[a-z2-7]{16}$/u;
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const SESSION_PREFIX = 'chess-arena-online-session:';
+const AVATARS = ['knight', 'king', 'rook', 'bishop', 'pawns', 'shield'];
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -13,8 +14,53 @@ function isRecord(value) {
 function validSession(value) {
   return isRecord(value)
     && CAPABILITY_PATTERN.test(value.sessionToken)
-    && ['host', 'guest'].includes(value.role)
-    && ['w', 'b'].includes(value.color);
+    && (
+      (['host', 'guest'].includes(value.role) && ['w', 'b'].includes(value.color))
+      || (value.role === 'spectator' && value.color === null)
+    );
+}
+
+function validProfile(value, { nullable = false } = {}) {
+  if (nullable && value === null) return true;
+  return isRecord(value)
+    && typeof value.name === 'string'
+    && Array.from(value.name.trim()).length > 0
+    && Array.from(value.name.trim()).length <= 40
+    && AVATARS.includes(value.avatar);
+}
+
+function validLobbyRoom(value) {
+  if (!isRecord(value)) return false;
+  const allowed = [
+    'roomId', 'title', 'status', 'host', 'guest', 'openColor', 'timeControlId',
+    'createdAt', 'updatedAt', 'spectatorCount', 'allowSpectators', 'expiresAt',
+  ];
+  return Object.keys(value).every((key) => allowed.includes(key))
+    && ROOM_PATTERN.test(value.roomId)
+    && typeof value.title === 'string'
+    && Array.from(value.title.trim()).length > 0
+    && ['waiting', 'active', 'finished'].includes(value.status)
+    && validProfile(value.host)
+    && validProfile(value.guest, { nullable: true })
+    && [null, 'w', 'b'].includes(value.openColor)
+    && typeof value.timeControlId === 'string'
+    && [value.createdAt, value.updatedAt, value.expiresAt].every(Number.isSafeInteger)
+    && Number.isSafeInteger(value.spectatorCount)
+    && value.spectatorCount >= 0
+    && value.spectatorCount <= 50
+    && typeof value.allowSpectators === 'boolean';
+}
+
+export function validateLobbyResponse(value) {
+  if (!isRecord(value)
+    || !Array.isArray(value.rooms)
+    || value.rooms.length > 24
+    || !value.rooms.every(validLobbyRoom)
+    || (value.nextCursor !== null && (typeof value.nextCursor !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/u.test(value.nextCursor)))
+    || !Number.isSafeInteger(value.serverTime)) {
+    return { ok: false, error: 'invalid_lobby_response' };
+  }
+  return { ok: true, value };
 }
 
 export function getOnlineApiUrl(env = import.meta.env ?? {}, location = globalThis.location) {
@@ -38,6 +84,20 @@ export function parseInviteLocation(location) {
   return { roomId, inviteToken };
 }
 
+export function parseWatchInviteLocation(location) {
+  let url;
+  try {
+    url = new URL(location.href);
+  } catch {
+    return null;
+  }
+  const roomId = url.searchParams.get('room') ?? '';
+  const fragment = new URLSearchParams(url.hash.replace(/^#/u, ''));
+  const watchInviteToken = fragment.get('watch') ?? '';
+  if (!ROOM_PATTERN.test(roomId) || !CAPABILITY_PATTERN.test(watchInviteToken)) return null;
+  return { roomId, watchInviteToken };
+}
+
 export function buildInviteUrl(location, roomId, inviteToken) {
   if (!ROOM_PATTERN.test(roomId) || !CAPABILITY_PATTERN.test(inviteToken)) {
     throw new Error('Invalid room invitation');
@@ -45,6 +105,16 @@ export function buildInviteUrl(location, roomId, inviteToken) {
   const url = new URL(location.href);
   url.searchParams.set('room', roomId);
   url.hash = new URLSearchParams({ invite: inviteToken }).toString();
+  return url.toString();
+}
+
+export function buildWatchInviteUrl(location, roomId, watchInviteToken) {
+  if (!ROOM_PATTERN.test(roomId) || !CAPABILITY_PATTERN.test(watchInviteToken)) {
+    throw new Error('Invalid watch invitation');
+  }
+  const url = new URL(location.href);
+  url.searchParams.set('room', roomId);
+  url.hash = new URLSearchParams({ watch: watchInviteToken }).toString();
   return url.toString();
 }
 
@@ -79,6 +149,11 @@ export function validateServerMessage(value) {
     || value.protocol !== PROTOCOL
     || value.version !== VERSION
     || !ROOM_PATTERN.test(value.roomId)
+    || typeof value.title !== 'string'
+    || Array.from(value.title.trim()).length === 0
+    || Array.from(value.title.trim()).length > 80
+    || !['public', 'private'].includes(value.visibility)
+    || typeof value.allowSpectators !== 'boolean'
     || !Number.isSafeInteger(value.revision)
     || value.revision < 0
     || !['waiting', 'active', 'finished'].includes(value.status)
@@ -89,8 +164,19 @@ export function validateServerMessage(value) {
     || !isRecord(value.players)
     || !isRecord(value.players.w)
     || !isRecord(value.players.b)
+    || typeof value.players.w.name !== 'string'
+    || Array.from(value.players.w.name.trim()).length > 40
+    || !AVATARS.includes(value.players.w.avatar)
+    || typeof value.players.b.name !== 'string'
+    || Array.from(value.players.b.name.trim()).length > 40
+    || !AVATARS.includes(value.players.b.avatar)
     || typeof value.players.w.connected !== 'boolean'
-    || typeof value.players.b.connected !== 'boolean') {
+    || typeof value.players.b.connected !== 'boolean'
+    || !Array.isArray(value.spectators)
+    || value.spectators.length > 50
+    || !value.spectators.every((profile) => validProfile(profile))
+    || !Number.isSafeInteger(value.spectatorCount)
+    || value.spectatorCount !== value.spectators.length) {
     return { ok: false, error: 'invalid_message' };
   }
   return { ok: true, value };
@@ -143,6 +229,39 @@ export class OnlineRoomClient {
     this.state = result.state;
     this.onState(result.state);
     return result;
+  }
+
+  async joinPublic(roomId, input) {
+    if (!ROOM_PATTERN.test(roomId)) throw new Error('รหัสห้องไม่ถูกต้อง');
+    const result = await this.request(`/api/rooms/${roomId}/join-public`, input);
+    this.useSession(roomId, result);
+    this.state = result.state;
+    this.onState(result.state);
+    return result;
+  }
+
+  async watch(roomId, input) {
+    if (!ROOM_PATTERN.test(roomId)) throw new Error('รหัสห้องไม่ถูกต้อง');
+    const result = await this.request(`/api/rooms/${roomId}/watch`, input);
+    this.useSession(roomId, result);
+    this.state = result.state;
+    this.onState(result.state);
+    return result;
+  }
+
+  async listLobby(filters = {}, signal) {
+    if (!this.apiUrl) throw new Error('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ห้องออนไลน์');
+    const url = new URL(`${this.apiUrl}/api/lobby`);
+    for (const key of ['status', 'time', 'search', 'cursor']) {
+      if (filters[key] !== undefined && filters[key] !== '') url.searchParams.set(key, filters[key]);
+    }
+    const response = await this.fetchImpl(url.toString(), { signal });
+    let value;
+    try { value = await response.json(); } catch { value = null; }
+    if (!response.ok) throw new Error(value?.message || value?.error || `HTTP ${response.status}`);
+    const parsed = validateLobbyResponse(value);
+    if (!parsed.ok) throw new Error('เซิร์ฟเวอร์ส่งรายการห้องไม่ตรงโปรโตคอล');
+    return parsed.value;
   }
 
   async request(path, body) {

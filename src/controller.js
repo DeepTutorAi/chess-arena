@@ -22,6 +22,10 @@ export const MODES = {
   ANALYZE: 'analyze',
 };
 
+const ONLINE_AVATAR_GLYPHS = Object.freeze({
+  knight: '♞', king: '♚', rook: '♜', bishop: '♝', pawns: '♟', shield: '♛',
+});
+
 export class Controller {
   constructor({ ui, ground, onPromotion, onlineClientFactory = (options) => new OnlineRoomClient(options) }) {
     this.ui = ui;
@@ -38,7 +42,10 @@ export class Controller {
     this.onlineRoomId = null;
     this.onlineInviteToken = null;
     this.onlineSide = null;
+    this.onlineRole = null;
+    this.onlineWatchInviteToken = null;
     this.onlineConnectionState = 'disconnected';
+    this.ui.setShareVisible?.(false);
     this._onlineClockTimer = null;
     this.clock = null;
 
@@ -422,6 +429,7 @@ export class Controller {
 
   resign() {
     if (this.mode === MODES.ONLINE) {
+      if (this.onlineRole === 'spectator') return;
       if (!this.online || this.onlineState?.status !== 'active') return;
       try {
         this.online.resign(this.onlineState.revision);
@@ -574,6 +582,8 @@ export class Controller {
     this.onlineRoomId = null;
     this.onlineInviteToken = null;
     this.onlineSide = null;
+    this.onlineRole = null;
+    this.onlineWatchInviteToken = null;
     this.onlineConnectionState = 'disconnected';
     this.engineReady = false;
     this.engineBusy = false;
@@ -710,6 +720,10 @@ export class Controller {
     color = 'random',
     timeControlId = DEFAULT_TIME_CONTROL,
     initialFen,
+    visibility = 'public',
+    allowSpectators = true,
+    avatar = 'knight',
+    watchInviteToken,
   } = {}) {
     this.online = this.onlineClientFactory({
       onState: (state) => this._onOnlineState(state),
@@ -730,11 +744,22 @@ export class Controller {
 
     let result;
     if (action === 'create') {
-      result = await this.online.create({ playerName, title, color, timeControlId, initialFen });
+      result = await this.online.create({
+        playerName, title, color, timeControlId, initialFen, visibility, allowSpectators, avatar,
+      });
       this.onlineRoomId = result.roomId;
       this.onlineInviteToken = result.inviteToken;
+      this.onlineWatchInviteToken = result.watchInviteToken;
     } else if (action === 'join') {
       result = await this.online.join(roomId, { playerName, inviteToken });
+      this.onlineRoomId = roomId;
+    } else if (action === 'joinPublic') {
+      result = await this.online.joinPublic(roomId, { playerName, avatar });
+      this.onlineRoomId = roomId;
+    } else if (action === 'watch') {
+      result = await this.online.watch(roomId, {
+        playerName, avatar, ...(watchInviteToken ? { watchInviteToken } : {}),
+      });
       this.onlineRoomId = roomId;
     } else if (action === 'resume') {
       if (!this.online.restoreSession(roomId)) throw new Error('ไม่พบ session ของห้องนี้ในเบราว์เซอร์');
@@ -744,10 +769,14 @@ export class Controller {
       throw new Error('คำสั่งเปิดห้องออนไลน์ไม่ถูกต้อง');
     }
 
+    this.onlineRole = this.online.session.role;
     this.onlineSide = this.online.session.color;
-    this.orientation = this.onlineSide === 'w' ? 'white' : 'black';
+    this.viewerMode = this.onlineRole === 'spectator';
+    this.orientation = this.onlineSide === 'b' ? 'black' : 'white';
     if (result.state) this._onOnlineState(result.state);
-    this.ui.setActionStrip({ undo: false, resign: true, flip: false, pause: false });
+    this.ui.setActionStrip({ undo: false, resign: this.onlineRole !== 'spectator', flip: false, pause: false });
+    this.ui.setOnlineRole?.(this.onlineRole);
+    this.ui.setShareVisible?.(this.onlineRole === 'host');
     this.online.connect();
   }
 
@@ -782,23 +811,31 @@ export class Controller {
     }
 
     this.onlineState = state;
+    this.ui.setSpectators?.({ visible: state.allowSpectators, spectators: state.spectators ?? [] });
     const topColor = this.orientation === 'white' ? 'b' : 'w';
     const bottomColor = topColor === 'w' ? 'b' : 'w';
     this.ui.setPlayers(
-      { name: state.players[topColor].name ?? 'กำลังรอผู้เล่น', avatar: topColor === this.onlineSide ? '👤' : '♟️' },
-      { name: state.players[bottomColor].name ?? 'กำลังรอผู้เล่น', avatar: bottomColor === this.onlineSide ? '👤' : '♟️' },
+      {
+        name: state.players[topColor].name || 'กำลังรอผู้เล่น',
+        avatar: ONLINE_AVATAR_GLYPHS[state.players[topColor].avatar] ?? '♟',
+      },
+      {
+        name: state.players[bottomColor].name || 'กำลังรอผู้เล่น',
+        avatar: ONLINE_AVATAR_GLYPHS[state.players[bottomColor].avatar] ?? '♟',
+      },
     );
     this._syncBoard();
     this._renderMoves();
     this._renderOnlineClock(state);
 
     if (state.status === 'waiting') {
-      this.ui.setStatus('ห้องพร้อมแล้ว — ส่งลิงก์เชิญและรอคู่แข่ง', 'busy');
+      this.ui.setStatus(this.onlineRole === 'spectator' ? 'กำลังชมโต๊ะที่รอผู้เล่น' : 'ห้องพร้อมแล้ว — รอผู้เล่นจาก Lobby', 'busy');
     } else if (state.status === 'active') {
-      this.ui.setStatus(
-        state.turn === this.onlineSide ? 'ถึงตาของคุณ' : 'รอคู่แข่งเดิน…',
-        state.turn === this.onlineSide ? '' : 'busy',
-      );
+      if (this.onlineRole === 'spectator') this.ui.setStatus('กำลังรับชมการแข่งขันแบบสด', 'busy');
+      else this.ui.setStatus(
+          state.turn === this.onlineSide ? 'ถึงตาของคุณ' : 'รอคู่แข่งเดิน…',
+          state.turn === this.onlineSide ? '' : 'busy',
+        );
     } else {
       this._announceOnlineResult(state);
     }
@@ -893,7 +930,7 @@ export class Controller {
       movable: {
         free: false,
         color: isHumanTurn ? (this.game.turn() === 'w' ? 'white' : 'black') : false,
-        dests: this._getDests(),
+        dests: isHumanTurn ? this._getDests() : new Map(),
         // Always rebind the game-move handler: chessground merges config, so
         // without this the sandbox setup handler would stick around and
         // silently swallow every move after leaving sandbox mode.

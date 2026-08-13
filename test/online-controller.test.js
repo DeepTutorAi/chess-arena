@@ -31,9 +31,13 @@ function stateAfter(moves = [], overrides = {}) {
     result: null,
     reason: null,
     players: {
-      w: { name: 'Host', connected: true },
-      b: { name: 'Guest', connected: true },
+      w: { name: 'Host', avatar: 'knight', connected: true },
+      b: { name: 'Guest', avatar: 'rook', connected: true },
     },
+    visibility: 'public',
+    allowSpectators: true,
+    spectators: [],
+    spectatorCount: 0,
     clock: null,
     expiresAt: Date.now() + 60_000,
     ...overrides,
@@ -45,6 +49,7 @@ function makeHarness() {
   const ui = new Proxy({
     log(message, level) { calls.logs.push([message, level]); },
     renderMoves(moves) { calls.renderedMoves = moves; },
+    setPlayers(top, bottom) { calls.players = [top, bottom]; },
   }, {
     get(target, key) {
       if (key in target) return target[key];
@@ -64,6 +69,16 @@ function makeHarness() {
       this.session = { sessionToken: TOKEN, role: 'host', color: 'w' };
       this.state = stateAfter();
       return { roomId: ROOM_ID, inviteToken: 'I'.repeat(43), ...this.session, state: this.state };
+    },
+    async joinPublic() {
+      this.session = { sessionToken: TOKEN, role: 'guest', color: 'b' };
+      this.state = stateAfter();
+      return { roomId: ROOM_ID, ...this.session, state: this.state };
+    },
+    async watch() {
+      this.session = { sessionToken: TOKEN, role: 'spectator', color: null };
+      this.state = stateAfter();
+      return { roomId: ROOM_ID, ...this.session, state: this.state };
     },
     connect() { callbacks.onConnectionState('connected'); },
     sendMove(...args) { calls.moves.push(args); },
@@ -86,6 +101,10 @@ test('online mode sends move intent without committing local canonical state', a
     action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
   });
   assert.equal(calls.ground.at(-1).movable.color, 'white');
+  assert.deepEqual(calls.players, [
+    { name: 'Guest', avatar: '♜' },
+    { name: 'Host', avatar: '♞' },
+  ]);
   const before = controller.game.fen();
 
   await controller.handleUserMove('e2', 'e4');
@@ -126,4 +145,21 @@ test('online resignation waits for server authority and dispose stops transport'
 
   controller.dispose();
   assert.equal(calls.stopped, 1);
+});
+
+test('spectator mode renders canonical snapshots with a locked board and no resign authority', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'watch', roomId: ROOM_ID, playerName: 'Viewer', avatar: 'bishop',
+  });
+
+  assert.equal(controller.onlineRole, 'spectator');
+  assert.equal(controller.onlineSide, null);
+  assert.equal(calls.ground.at(-1).movable.color, false);
+  assert.deepEqual(calls.ground.at(-1).movable.dests, new Map());
+  await controller.handleUserMove('e2', 'e4');
+  assert.equal(calls.moves.length, 0);
+  controller.resign();
+  assert.equal(calls.resigned, undefined);
 });

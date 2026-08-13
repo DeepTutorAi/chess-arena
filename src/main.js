@@ -10,7 +10,15 @@ import './styles.css';
 import { UI } from './ui.js';
 import { Controller, MODES } from './controller.js';
 import { LEVELS, TIME_CONTROLS, HUMAN_NAME, getRooms, saveRoom } from './config.js';
-import { buildInviteUrl, getOnlineApiUrl, parseInviteLocation } from './online.js';
+import {
+  buildInviteUrl,
+  buildWatchInviteUrl,
+  getOnlineApiUrl,
+  OnlineRoomClient,
+  parseInviteLocation,
+  parseWatchInviteLocation,
+} from './online.js';
+import { createLobbyView } from './lobby.js';
 import { sounds } from './sounds.js';
 
 const ui = new UI(document.getElementById('app'));
@@ -154,7 +162,84 @@ function dlgButtons(...items) {
 }
 
 // ROOM LOBBY WITH BACK TO MENU BUTTON
+function openLiveLobby() {
+  const overlay = ui.el('div', 'live-lobby-host');
+  const browseClient = new OnlineRoomClient();
+  const storedRooms = getRooms();
+  const recentRooms = Array.isArray(storedRooms)
+    ? storedRooms.filter((room) => room.kind === 'online' && room.roomId)
+    : [];
+  let lobbyView;
+  const close = () => {
+    lobbyView?.destroy();
+    overlay.remove();
+  };
+  const remember = (room, profile, status) => {
+    localStorage.setItem(PLAYER_NAME_KEY, profile.name);
+    saveRoom({
+      id: room.roomId,
+      roomId: room.roomId,
+      kind: 'online',
+      title: room.title,
+      hostName: room.host?.name || 'ผู้เล่นออนไลน์',
+      status,
+      createdAt: Date.now(),
+    });
+  };
+  lobbyView = createLobbyView({
+    root: overlay,
+    client: browseClient,
+    profile: {
+      name: localStorage.getItem(PLAYER_NAME_KEY) || '',
+      avatar: localStorage.getItem('chess-arena-player-avatar') || 'knight',
+    },
+    recentRooms,
+    onClose: close,
+    onCreate: () => { close(); openModeDialog(MODES.ONLINE); },
+    onJoin: async (room, profile) => {
+      localStorage.setItem('chess-arena-player-avatar', profile.avatar);
+      try {
+        await controller.start(MODES.ONLINE, {
+          action: 'joinPublic', roomId: room.roomId, playerName: profile.name, avatar: profile.avatar,
+        });
+        remember(room, profile, 'ACTIVE');
+        close();
+      } catch (error) {
+        ui.log(`เข้าห้องไม่สำเร็จ: ${error.message}`, 'err');
+        await lobbyView.refresh();
+      }
+    },
+    onWatch: async (room, profile) => {
+      localStorage.setItem('chess-arena-player-avatar', profile.avatar);
+      try {
+        await controller.start(MODES.ONLINE, {
+          action: 'watch', roomId: room.roomId, playerName: profile.name, avatar: profile.avatar,
+        });
+        remember(room, profile, 'WATCHING');
+        close();
+      } catch (error) {
+        ui.log(`เข้าชมไม่สำเร็จ: ${error.message}`, 'err');
+        await lobbyView.refresh();
+      }
+    },
+    onReconnect: async (room) => {
+      try {
+        await controller.start(MODES.ONLINE, { action: 'resume', roomId: room.roomId });
+        close();
+      } catch (error) {
+        ui.log(`กลับเข้าห้องไม่สำเร็จ: ${error.message}`, 'err');
+      }
+    },
+  });
+  document.body.appendChild(overlay);
+}
+
 function openJoinDialog(prefillInvite = null) {
+  if (!prefillInvite) {
+    openLiveLobby();
+    return;
+  }
+  const spectatorInvite = Boolean(prefillInvite.watchInviteToken);
   const overlay = ui.el('div', 'join-lobby-overlay');
   overlay.innerHTML = `
     <div class="lobby-topbar">
@@ -165,18 +250,22 @@ function openJoinDialog(prefillInvite = null) {
     </div>
 
     <div class="online-join-panel">
-      <h2>เข้าห้องด้วยลิงก์เชิญ</h2>
-      <p>วางลิงก์ที่เจ้าของห้องส่งมา ผู้เล่นไม่ต้องใช้ GitHub Token</p>
+      <h2>${spectatorInvite ? 'ชมการแข่งขันสด' : 'เข้าร่วมโต๊ะส่วนตัว'}</h2>
+      <p>${spectatorInvite ? 'ลิงก์นี้ให้สิทธิ์รับชมเท่านั้น คุณจะเดินหมากหรือรับที่นั่งผู้เล่นไม่ได้' : 'ลิงก์เชิญพร้อมแล้ว ใส่ชื่อแล้วเข้าร่วมได้ทันทีโดยไม่ต้องใช้ GitHub Token'}</p>
       <label class="field">
         <span class="field-label">ชื่อที่แสดง</span>
         <input id="online-join-name" maxlength="40" autocomplete="nickname" />
       </label>
       <label class="field">
-        <span class="field-label">ลิงก์เชิญ</span>
-        <input id="online-invite-url" type="url" inputmode="url" autocomplete="off" placeholder="https://.../?room=...#invite=..." />
+        <span class="field-label">ตราประจำตัว</span>
+        <select id="online-join-avatar">
+          <option value="knight">♞ Knight</option><option value="king">♚ King</option>
+          <option value="rook">♜ Rook</option><option value="bishop">♝ Bishop</option>
+          <option value="pawns">♟ Pawns</option><option value="shield">♛ Shield</option>
+        </select>
       </label>
       <div class="online-join-actions">
-        <button class="btn primary" id="online-join-btn">เข้าร่วมห้อง</button>
+        <button class="btn primary" id="online-join-btn">${spectatorInvite ? 'WATCH LIVE' : 'เข้าร่วมโต๊ะ'}</button>
         <span id="online-join-status" role="status"></span>
       </div>
     </div>
@@ -191,13 +280,13 @@ function openJoinDialog(prefillInvite = null) {
 
   const container = overlay.querySelector('#lobby-cards-container');
   const nameInput = overlay.querySelector('#online-join-name');
-  const inviteInput = overlay.querySelector('#online-invite-url');
+  const avatarInput = overlay.querySelector('#online-join-avatar');
   const joinButton = overlay.querySelector('#online-join-btn');
   const joinStatus = overlay.querySelector('#online-join-status');
   const apiReady = Boolean(getOnlineApiUrl());
 
   nameInput.value = localStorage.getItem(PLAYER_NAME_KEY) || '';
-  if (prefillInvite) inviteInput.value = window.location.href;
+  avatarInput.value = localStorage.getItem('chess-arena-player-avatar') || 'knight';
   if (!apiReady) {
     joinButton.disabled = true;
     joinStatus.textContent = 'ยังไม่ได้ตั้งค่า VITE_ONLINE_API_URL';
@@ -210,24 +299,22 @@ function openJoinDialog(prefillInvite = null) {
       nameInput.focus();
       return;
     }
-    const invite = parseInviteLocation({ href: inviteInput.value.trim() });
-    if (!invite) {
-      joinStatus.textContent = 'ลิงก์เชิญไม่ถูกต้องหรือไม่ครบ';
-      inviteInput.focus();
-      return;
-    }
+    const invite = prefillInvite;
     joinButton.disabled = true;
     joinStatus.textContent = 'กำลังเข้าร่วมห้อง…';
     try {
       localStorage.setItem(PLAYER_NAME_KEY, playerName);
-      await controller.start(MODES.ONLINE, { action: 'join', playerName, ...invite });
+      localStorage.setItem('chess-arena-player-avatar', avatarInput.value);
+      await controller.start(MODES.ONLINE, {
+        action: spectatorInvite ? 'watch' : 'join', playerName, avatar: avatarInput.value, ...invite,
+      });
       saveRoom({
         id: invite.roomId,
         roomId: invite.roomId,
         kind: 'online',
         title: controller.onlineState?.title || 'ห้องออนไลน์',
-        hostName: controller.onlineState?.players?.[controller.onlineSide === 'w' ? 'b' : 'w']?.name || 'ผู้เล่นออนไลน์',
-        status: controller.onlineState?.status || 'ACTIVE',
+        hostName: controller.onlineState?.players?.w?.name || 'ผู้เล่นออนไลน์',
+        status: spectatorInvite ? 'WATCHING' : (controller.onlineState?.status || 'ACTIVE'),
         createdAt: Date.now(),
       });
       const cleanUrl = new URL(window.location.href);
@@ -484,6 +571,21 @@ function openModeDialog(targetMode = null) {
       nameField.appendChild(nameInput);
       body.appendChild(nameField);
 
+      const avatarField = ui.el('label', 'field');
+      avatarField.append(ui.el('span', 'field-label', 'ตราประจำตัว'));
+      const avatarSelect = ui.el('select');
+      avatarSelect.innerHTML = `
+        <option value="knight">♞ Knight</option>
+        <option value="king">♚ King</option>
+        <option value="rook">♜ Rook</option>
+        <option value="bishop">♝ Bishop</option>
+        <option value="pawns">♟ Pawns</option>
+        <option value="shield">♛ Royal Shield</option>
+      `;
+      avatarSelect.value = localStorage.getItem('chess-arena-player-avatar') || 'knight';
+      avatarField.appendChild(avatarSelect);
+      body.appendChild(avatarField);
+
       body.append(ui.el('div', 'field-label', 'คุณต้องการเล่นเป็น'));
       body.appendChild(colorRadios('online-color'));
 
@@ -495,10 +597,31 @@ function openModeDialog(targetMode = null) {
       titleField.appendChild(titleInput);
       body.appendChild(titleField);
 
+      body.append(ui.el('div', 'field-label', 'การมองเห็นห้อง'));
+      const visibilityRow = ui.el('div', 'radio-row');
+      for (const [value, label, checked] of [['public', 'Public · แสดงใน Lobby', true], ['private', 'Private · ลิงก์เท่านั้น', false]]) {
+        const option = ui.el('label', 'radio-pill');
+        const input = ui.el('input');
+        input.type = 'radio';
+        input.name = 'online-visibility';
+        input.value = value;
+        input.checked = checked;
+        option.append(input, ui.el('span', null, label));
+        visibilityRow.appendChild(option);
+      }
+      body.appendChild(visibilityRow);
+
+      const spectatorOption = ui.el('label', 'online-spectator-option');
+      const spectatorInput = ui.el('input');
+      spectatorInput.type = 'checkbox';
+      spectatorInput.checked = true;
+      spectatorOption.append(spectatorInput, ui.el('span', null, 'อนุญาตผู้ชมการแข่งขัน (สูงสุด 50 คน)'));
+      body.appendChild(spectatorOption);
+
       body.append(ui.el('div', 'field-label', 'ตั้งค่าเวลา (Time Control)'));
       body.appendChild(timeControlRadios('online-tc'));
 
-      const createButton = ui.el('button', 'btn primary', 'สร้างห้องและคัดลอกลิงก์');
+      const createButton = ui.el('button', 'btn primary', 'สร้างห้องออนไลน์');
       const createStatus = ui.el('span', 'online-create-status');
       createStatus.setAttribute('role', 'status');
       createButton.disabled = !getOnlineApiUrl();
@@ -515,16 +638,14 @@ function openModeDialog(targetMode = null) {
         try {
           const color = body.querySelector('input[name="online-color"]:checked').value;
           const tcId = body.querySelector('input[name="online-tc"]:checked').value;
+          const visibility = body.querySelector('input[name="online-visibility"]:checked').value;
           const roomTitle = titleInput.value.trim() || 'ห้องประลอง Chess Arena';
           localStorage.setItem(PLAYER_NAME_KEY, playerName);
+          localStorage.setItem('chess-arena-player-avatar', avatarSelect.value);
           await controller.start(MODES.ONLINE, {
             action: 'create', playerName, color, timeControlId: tcId, title: roomTitle,
+            visibility, allowSpectators: spectatorInput.checked, avatar: avatarSelect.value,
           });
-          const inviteUrl = buildInviteUrl(
-            window.location,
-            controller.onlineRoomId,
-            controller.onlineInviteToken,
-          );
           saveRoom({
             id: controller.onlineRoomId,
             roomId: controller.onlineRoomId,
@@ -535,13 +656,9 @@ function openModeDialog(targetMode = null) {
             status: 'WAITING',
           });
           modal.close();
-          try {
-            await navigator.clipboard.writeText(inviteUrl);
-            ui.log('สร้างห้องแล้วและคัดลอกลิงก์เชิญเรียบร้อย', 'sys');
-          } catch {
-            window.prompt('คัดลอกลิงก์เชิญนี้แล้วส่งให้คู่แข่ง', inviteUrl);
-            ui.log('สร้างห้องแล้ว — กรุณาคัดลอกลิงก์เชิญจากหน้าต่างที่เปิด', 'sys');
-          }
+          ui.log(visibility === 'public'
+            ? 'สร้างห้องแล้ว — ห้องกำลังแสดงใน Live Lobby'
+            : 'สร้างห้อง Private แล้ว — ใช้ปุ่ม Share ในหน้าเกมเพื่อส่งลิงก์', 'sys');
         } catch (err) {
           createButton.disabled = false;
           createStatus.textContent = err.message;
@@ -579,6 +696,30 @@ ui.refs.btnResign.onclick = () => {
   if (confirm('คุณแน่ใจหรือไม่ว่าต้องการยอมแพ้?')) {
     controller.resign();
   }
+};
+ui.refs.btnShare.onclick = () => {
+  if (!controller.onlineRoomId || !controller.onlineInviteToken) return;
+  const body = ui.el('div', 'share-room-dialog');
+  body.appendChild(ui.el('p', 'dlg-hint', 'เลือกสิทธิ์ของลิงก์ที่ต้องการส่ง ลิงก์ผู้ชมไม่สามารถรับที่นั่งผู้เล่นได้'));
+  const links = [
+    ['ลิงก์สำหรับผู้เล่น', buildInviteUrl(window.location, controller.onlineRoomId, controller.onlineInviteToken)],
+  ];
+  if (controller.onlineWatchInviteToken) {
+    links.push(['ลิงก์สำหรับผู้ชม', buildWatchInviteUrl(window.location, controller.onlineRoomId, controller.onlineWatchInviteToken)]);
+  }
+  for (const [label, value] of links) {
+    const row = ui.el('div', 'share-link-row');
+    const copy = ui.el('div', 'share-link-copy');
+    copy.append(ui.el('strong', null, label), ui.el('span', null, 'Capability link · ส่งให้คนที่คุณไว้ใจ'));
+    const button = ui.el('button', 'btn primary', 'คัดลอก');
+    button.onclick = async () => {
+      await navigator.clipboard.writeText(value);
+      button.textContent = 'คัดลอกแล้ว';
+    };
+    row.append(copy, button);
+    body.appendChild(row);
+  }
+  ui.openModal('แชร์ห้องออนไลน์', body);
 };
 ui.refs.btnHome.onclick = () => controller.goHome();
 ui.refs.btnFlip.onclick = () => controller.flip();
@@ -724,7 +865,7 @@ function setupSandboxLeftPanel() {
 setupSandboxLeftPanel();
 
 // ---- ONLINE INVITE / RECONNECT FROM URL -----------------------------------
-const pendingInvite = parseInviteLocation(window.location);
+const pendingInvite = parseInviteLocation(window.location) ?? parseWatchInviteLocation(window.location);
 const resumeRoomArg = new URLSearchParams(window.location.search).get('room');
 
 // ---- boot --------------------------------------------------------------------

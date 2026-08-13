@@ -4,10 +4,13 @@ import assert from 'node:assert/strict';
 import {
   OnlineRoomClient,
   buildInviteUrl,
+  buildWatchInviteUrl,
   getOnlineApiUrl,
   loadRoomSession,
   parseInviteLocation,
+  parseWatchInviteLocation,
   saveRoomSession,
+  validateLobbyResponse,
   validateServerMessage,
 } from '../src/online.js';
 
@@ -29,6 +32,9 @@ function validState(overrides = {}) {
     version: 1,
     type: 'state',
     roomId: ROOM_ID,
+    title: 'Friday Blitz',
+    visibility: 'public',
+    allowSpectators: true,
     revision: 1,
     status: 'active',
     initialFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
@@ -40,9 +46,11 @@ function validState(overrides = {}) {
     result: null,
     reason: null,
     players: {
-      w: { name: 'Host', connected: true },
-      b: { name: 'Guest', connected: true },
+      w: { name: 'Host', avatar: 'knight', connected: true },
+      b: { name: 'Guest', avatar: 'rook', connected: true },
     },
+    spectators: [{ name: 'Viewer', avatar: 'bishop' }],
+    spectatorCount: 1,
     clock: null,
     expiresAt: 99_999,
     ...overrides,
@@ -67,6 +75,18 @@ test('parseInviteLocation rejects malformed room and invite values', () => {
   assert.equal(parseInviteLocation({ href: 'https://example.test/' }), null);
 });
 
+test('watch invite helpers keep the spectator capability separate and in the fragment', () => {
+  const location = { href: 'https://example.github.io/chess-arena/?theme=dark' };
+  const invite = buildWatchInviteUrl(location, ROOM_ID, TOKEN);
+  const url = new URL(invite);
+
+  assert.equal(url.searchParams.get('room'), ROOM_ID);
+  assert.equal(url.hash, `#watch=${TOKEN}`);
+  assert.equal(parseInviteLocation({ href: invite }), null);
+  assert.deepEqual(parseWatchInviteLocation({ href: invite }), { roomId: ROOM_ID, watchInviteToken: TOKEN });
+  assert.equal(parseWatchInviteLocation({ href: `https://example.test/?room=${ROOM_ID}#watch=short` }), null);
+});
+
 test('room sessions are isolated by room and validated when loaded', () => {
   const storage = memoryStorage();
   saveRoomSession(storage, ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
@@ -76,6 +96,71 @@ test('room sessions are isolated by room and validated when loaded', () => {
   assert.equal(loadRoomSession(storage, 'cdefghij23456724'), null);
   storage.setItem(`chess-arena-online-session:${ROOM_ID}`, '{broken');
   assert.equal(loadRoomSession(storage, ROOM_ID), null);
+
+  saveRoomSession(storage, ROOM_ID, { sessionToken: TOKEN, role: 'spectator', color: null });
+  assert.deepEqual(loadRoomSession(storage, ROOM_ID), { sessionToken: TOKEN, role: 'spectator', color: null });
+});
+
+test('validateLobbyResponse accepts public summaries and rejects authority leakage', () => {
+  const value = {
+    rooms: [{
+      roomId: ROOM_ID,
+      title: 'Friday Blitz',
+      status: 'waiting',
+      host: { name: 'Host', avatar: 'knight' },
+      guest: null,
+      openColor: 'b',
+      timeControlId: 'blitz_5_0',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      spectatorCount: 0,
+      allowSpectators: true,
+      expiresAt: 99_999,
+    }],
+    nextCursor: null,
+    serverTime: 3_000,
+  };
+  assert.deepEqual(validateLobbyResponse(value), { ok: true, value });
+  assert.equal(validateLobbyResponse({ ...value, rooms: [{ ...value.rooms[0], sessionToken: TOKEN }] }).ok, false);
+  assert.equal(validateLobbyResponse({ ...value, rooms: [{ ...value.rooms[0], spectatorCount: 51 }] }).ok, false);
+});
+
+test('OnlineRoomClient lists, joins, and watches rooms with role-scoped sessions', async () => {
+  const requests = [];
+  const responses = [
+    {
+      rooms: [], nextCursor: null, serverTime: 10,
+    },
+    {
+      roomId: ROOM_ID, sessionToken: TOKEN, role: 'guest', color: 'b', state: validState(),
+    },
+    {
+      roomId: ROOM_ID, sessionToken: 'S'.repeat(43), role: 'spectator', color: null, state: validState(),
+    },
+  ];
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.test',
+    storage: memoryStorage(),
+    async fetchImpl(url, options = {}) {
+      requests.push({ url, options });
+      return { ok: true, status: 200, async json() { return responses.shift(); } };
+    },
+  });
+  const signal = new AbortController().signal;
+
+  assert.deepEqual(await client.listLobby({ status: 'open', time: 'blitz', search: 'Friday' }, signal), {
+    rooms: [], nextCursor: null, serverTime: 10,
+  });
+  assert.match(requests[0].url, /\/api\/lobby\?status=open&time=blitz&search=Friday$/u);
+  assert.equal(requests[0].options.signal, signal);
+
+  await client.joinPublic(ROOM_ID, { playerName: 'Guest', avatar: 'rook' });
+  assert.deepEqual(JSON.parse(requests[1].options.body), { playerName: 'Guest', avatar: 'rook' });
+  assert.equal(client.session.role, 'guest');
+
+  await client.watch(ROOM_ID, { playerName: 'Viewer', avatar: 'bishop' });
+  assert.deepEqual(JSON.parse(requests[2].options.body), { playerName: 'Viewer', avatar: 'bishop' });
+  assert.deepEqual(client.session, { sessionToken: 'S'.repeat(43), role: 'spectator', color: null });
 });
 
 test('validateServerMessage accepts canonical snapshots and rejects malformed authority', () => {
@@ -83,6 +168,9 @@ test('validateServerMessage accepts canonical snapshots and rejects malformed au
   assert.equal(validateServerMessage(validState({ revision: -1 })).ok, false);
   assert.equal(validateServerMessage(validState({ turn: 'green' })).ok, false);
   assert.equal(validateServerMessage(validState({ players: {} })).ok, false);
+  assert.equal(validateServerMessage(validState({ spectators: [{ name: 'Viewer', avatar: 'unknown' }] })).ok, false);
+  assert.equal(validateServerMessage(validState({ spectatorCount: 2 })).ok, false);
+  assert.equal(validateServerMessage(validState({ visibility: 'secret' })).ok, false);
   assert.deepEqual(validateServerMessage({ type: 'error', code: 'wrong_turn', message: 'wait', revision: 2 }), {
     ok: true,
     value: { type: 'error', code: 'wrong_turn', message: 'wait', revision: 2 },

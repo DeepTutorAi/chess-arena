@@ -158,6 +158,20 @@ export class UI {
                 <div class="tab-btn" id="tab-log">⚙️ สัญญาณ / Log</div>
               </div>
 
+              <div class="spectator-control hidden" id="spectator-control">
+                <button id="spectator-btn" class="spectator-eye-btn" type="button" aria-haspopup="dialog" aria-expanded="false">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                  <span id="spectator-count">0</span>
+                </button>
+                <div id="spectator-panel" class="spectator-panel" role="dialog" aria-modal="false" aria-label="รายชื่อผู้ชม" hidden>
+                  <div class="spectator-panel-head">
+                    <strong>ผู้ชมการแข่งขัน</strong>
+                    <button id="spectator-close" type="button" aria-label="ปิดรายชื่อผู้ชม">✕</button>
+                  </div>
+                  <div id="spectator-list" class="spectator-list"></div>
+                </div>
+              </div>
+
               <div class="sidebar-content">
                 <div id="moves-container" class="moves-container">
                   <div id="moves" class="moves-list"></div>
@@ -180,6 +194,10 @@ export class UI {
                 <button id="btn-resign" class="action-btn danger" title="ยอมแพ้ (Resign)">
                   <span class="icon">🚩</span>
                   <span class="label">ยอมแพ้</span>
+                </button>
+                <button id="btn-share" class="action-btn hidden" title="แชร์ห้อง (Share Room)">
+                  <span class="icon">↗</span>
+                  <span class="label">แชร์</span>
                 </button>
                 <button id="btn-flip" class="action-btn hidden" title="กลับกระดาน (Flip Board)">
                   <span class="icon">🔄</span>
@@ -271,9 +289,16 @@ export class UI {
       btnUndo: $('#btn-undo'),
       btnHint: $('#btn-hint'),
       btnResign: $('#btn-resign'),
+      btnShare: $('#btn-share'),
       btnFlip: $('#btn-flip'),
       btnPause: $('#btn-pause'),
       btnHome: $('#btn-home'),
+      spectatorControl: $('#spectator-control'),
+      spectatorButton: $('#spectator-btn'),
+      spectatorCount: $('#spectator-count'),
+      spectatorPanel: $('#spectator-panel'),
+      spectatorClose: $('#spectator-close'),
+      spectatorList: $('#spectator-list'),
       modalRoot: $('#modal-root'),
 
       // Sandbox Editor refs (Right panel)
@@ -303,6 +328,12 @@ export class UI {
       sbResetBoardBtn: $('#sb-reset-board-btn'),
       sbBackMenuBtn: $('#sb-back-menu-btn'),
     };
+
+    this.refs.spectatorButton.onclick = () => this._setSpectatorPanel(this.refs.spectatorPanel.hidden);
+    this.refs.spectatorClose.onclick = () => this._setSpectatorPanel(false);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !this.refs.spectatorPanel.hidden) this._setSpectatorPanel(false);
+    });
   }
 
   // ---- Navigation Views ----------------------------------------------------
@@ -351,6 +382,44 @@ export class UI {
     this.refs.btnFlip.classList.toggle('hidden', !flip);
     this.refs.btnPause.classList.toggle('hidden', !pause);
     this.refs.btnHint.classList.toggle('hidden', !hint);
+  }
+
+  setOnlineRole(role) {
+    this.refs.btnResign.classList.toggle('hidden', role === 'spectator');
+    this.refs.btnUndo.classList.toggle('hidden', role === 'spectator');
+  }
+
+  setShareVisible(visible) {
+    this.refs.btnShare.classList.toggle('hidden', !visible);
+  }
+
+  setSpectators({ visible = false, spectators = [] } = {}) {
+    this.refs.spectatorControl.classList.toggle('hidden', !visible);
+    if (!visible) this._setSpectatorPanel(false, { restoreFocus: false });
+    this.refs.spectatorCount.textContent = String(spectators.length);
+    this.refs.spectatorButton.setAttribute('aria-label', `ผู้ชม ${spectators.length} คน`);
+    this.refs.spectatorList.innerHTML = '';
+    if (!spectators.length) {
+      this.refs.spectatorList.appendChild(this.el('p', 'spectator-empty', 'ยังไม่มีผู้ชม'));
+      return;
+    }
+    const glyphs = { knight: '♞', king: '♚', rook: '♜', bishop: '♝', pawns: '♟', shield: '♛' };
+    for (const profile of spectators) {
+      const item = this.el('div', 'spectator-profile');
+      item.append(
+        this.el('span', `spectator-avatar avatar-${profile.avatar}`, glyphs[profile.avatar] ?? '♞'),
+        this.el('span', 'spectator-name', profile.name),
+        this.el('span', 'spectator-state', 'Watching'),
+      );
+      this.refs.spectatorList.appendChild(item);
+    }
+  }
+
+  _setSpectatorPanel(open, { restoreFocus = true } = {}) {
+    this.refs.spectatorPanel.hidden = !open;
+    this.refs.spectatorButton.setAttribute('aria-expanded', String(open));
+    if (open) this.refs.spectatorClose.focus();
+    else if (restoreFocus) this.refs.spectatorButton.focus();
   }
 
   setPauseState(paused) {
