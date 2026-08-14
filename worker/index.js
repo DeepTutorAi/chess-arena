@@ -89,13 +89,14 @@ function lobbyStub(env) {
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin') ?? '';
-    const requestOrigin = new URL(request.url).origin;
-    if (origin !== requestOrigin && !allowedOrigins(env).includes(origin)) {
+    const url = new URL(request.url);
+    const requestOrigin = url.origin;
+    const publicLobbyRead = !origin && request.method === 'GET' && url.pathname === '/api/lobby';
+    if (!publicLobbyRead && origin !== requestOrigin && !allowedOrigins(env).includes(origin)) {
       return json({ error: 'origin_forbidden' }, 403, origin || 'null');
     }
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(origin) });
 
-    const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/api/lobby') {
       const parsed = parseLobbyQuery(url);
       if (!parsed.ok) return json({ error: parsed.code, message: parsed.message }, 400, origin);
@@ -103,7 +104,7 @@ export default {
       for (const [key, value] of Object.entries(parsed.value)) {
         if (value !== undefined) listUrl.searchParams.set(key, value);
       }
-      return withCors(await lobbyStub(env).fetch(listUrl), origin);
+      return withCors(await lobbyStub(env).fetch(listUrl), origin || requestOrigin);
     }
 
     if (request.method === 'POST' && url.pathname === '/api/rooms') {

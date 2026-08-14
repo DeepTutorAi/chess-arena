@@ -105,6 +105,24 @@ describe('online room Worker', () => {
     expect(sameOrigin.status).toBe(201);
   });
 
+  it('allows public same-origin Lobby reads when browsers omit the Origin header', async () => {
+    const lobby = await exports.default.fetch(new Request(
+      'http://worker.test/api/lobby?status=all&time=all&search=',
+    ));
+    expect(lobby.status).toBe(200);
+    expect(await lobby.json()).toMatchObject({ rooms: expect.any(Array) });
+
+    const mutationWithoutOrigin = await exports.default.fetch(new Request(
+      'http://worker.test/api/rooms',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerName: 'Missing Origin' }),
+      },
+    ));
+    expect(mutationWithoutOrigin.status).toBe(403);
+  });
+
   it('creates a room and allows the invite capability to be claimed once', async () => {
     const created = await createRoom();
     expect(created.response.status).toBe(201);
