@@ -2,6 +2,32 @@
 // this module; nothing here knows about chess rules or the engine.
 
 import { AVATAR_GLYPHS } from './online.js';
+import {
+  iconUndo,
+  iconHint,
+  iconFlag,
+  iconFlip,
+  iconPause,
+  iconPlay,
+  iconSound,
+  iconHome,
+  iconShare,
+  iconRefresh,
+  iconSwords,
+  iconLink,
+  iconBolt,
+  iconBot,
+  iconArena,
+  iconWrench,
+  iconUser,
+  iconRobot,
+  iconRating,
+  iconMove,
+  iconPalette,
+  iconTrash,
+  iconList,
+  iconTerminal,
+} from './icons.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -16,10 +42,10 @@ export class UI {
 
         <!-- PROFILE PLACEHOLDER (RIGHT TOPBAR) -->
         <button class="profile-badge-placeholder" id="profile-btn" type="button" title="โปรไฟล์ผู้เล่น (ระบบสมาชิกเร็วๆ นี้)">
-          <span class="user-avatar">👤</span>
+          <span class="user-avatar">${iconUser({ size: 16 })}</span>
           <span class="user-info">
             <span class="user-name">Guest Player</span>
-            <span class="user-rating">⚡ 1500</span>
+            <span class="user-rating">${iconRating({ size: 12 })} 1500</span>
           </span>
         </button>
       </header>
@@ -35,13 +61,17 @@ export class UI {
             
             <div class="park-hero-cards">
               <button id="hero-create-btn" class="park-action-card create-card">
-                <div class="card-icon">⚔️</div>
+                <div class="card-icon-3d-wrap">
+                  <img src="./assets/icons/btn_create_3d.jpg" alt="Create Game" class="card-icon-3d-img" />
+                </div>
                 <div class="card-text">CREATE GAME</div>
                 <div class="card-sub">สร้างห้อง / เลือกโหมด</div>
               </button>
 
               <button id="hero-join-btn" class="park-action-card join-card">
-                <div class="card-icon">🔗</div>
+                <div class="card-icon-3d-wrap">
+                  <img src="./assets/icons/btn_join_3d.jpg" alt="Join Game" class="card-icon-3d-img" />
+                </div>
                 <div class="card-text">JOIN GAME</div>
                 <div class="card-sub">เข้าร่วมห้องประลอง</div>
               </button>
@@ -55,27 +85,27 @@ export class UI {
             
             <!-- LEFT PANEL FOR SANDBOX MODE (MODE SELECTOR & SETTINGS) -->
             <aside class="sidebar sandbox-left-panel hidden" id="sandbox-left-panel">
-              <h3 class="sandbox-tool-title">🎯 เลือกโหมด & ตั้งค่า</h3>
+              <h3 class="sandbox-tool-title">${iconWrench({ size: 18 })} เลือกโหมด & ตั้งค่า</h3>
 
               <div style="font-size:11px; color:var(--muted);">เลือกโหมดเกม (หากไม่เลือก = โหมด Solo ฝึกซ้อมเดินหมากทั้ง 2 ฝ่าย):</div>
 
               <div style="display:flex; flex-direction:column; gap:8px;">
                 <button class="sandbox-mode-opt-btn" id="sb-mode-online" data-mode="online">
-                  <span class="m-icon">⚡</span>
+                  <span class="m-icon">${iconBolt({ size: 16 })}</span>
                   <span>เล่นออนไลน์ (Online)</span>
                 </button>
                 <button class="sandbox-mode-opt-btn" id="sb-mode-bot" data-mode="hva">
-                  <span class="m-icon">🤖</span>
+                  <span class="m-icon">${iconBot({ size: 16 })}</span>
                   <span>เล่นกับบอท (Stockfish)</span>
                 </button>
                 <button class="sandbox-mode-opt-btn" id="sb-mode-aiva" data-mode="aiva">
-                  <span class="m-icon">⚔️</span>
+                  <span class="m-icon">${iconArena({ size: 16 })}</span>
                   <span>AI vs AI Arena</span>
                 </button>
               </div>
 
               <div id="sb-solo-notice" class="sandbox-solo-notice">
-                💡 <b>โหมด Solo ฝึกซ้อม:</b> ขยับเดินหมากได้ทั้งขาวและดำแบบอิสระ
+                <span class="solo-notice-icon">${iconHint({ size: 14 })}</span> <b>โหมด Solo ฝึกซ้อม:</b> ขยับเดินหมากได้ทั้งขาวและดำแบบอิสระ
               </div>
 
               <!-- SUB SETTINGS CONTAINER -->
@@ -106,10 +136,10 @@ export class UI {
               <!-- ACTION BUTTONS ROW -->
               <div class="sandbox-action-row">
                 <button id="sb-reset-board-btn" class="sandbox-action-btn" title="รีเซ็ตตำแหน่งกระดาน">
-                  <span>🔄</span> รีเซ็ตกระดาน
+                  <span class="btn-svg">${iconRefresh({ size: 15 })}</span> รีเซ็ตกระดาน
                 </button>
                 <button id="sb-back-menu-btn" class="sandbox-action-btn" title="กลับหน้าแรก">
-                  <span>🏠</span> กลับหน้า Menu
+                  <span class="btn-svg">${iconHome({ size: 15 })}</span> กลับหน้า Menu
                 </button>
               </div>
             </aside>
@@ -119,7 +149,7 @@ export class UI {
               <!-- TOP PLAYER -->
               <div class="player-bar top-player" id="player-bar-top">
                 <div class="player-profile">
-                  <div class="avatar" id="avatar-top">🤖</div>
+                  <div class="avatar" id="avatar-top">${iconRobot({ size: 22 })}</div>
                   <div class="player-meta">
                     <span class="pname" id="name-top">Stockfish 18</span>
                     <div class="player-subrow">
@@ -138,7 +168,7 @@ export class UI {
               <!-- BOTTOM PLAYER -->
               <div class="player-bar bottom-player" id="player-bar-bottom">
                 <div class="player-profile">
-                  <div class="avatar" id="avatar-bottom">👤</div>
+                  <div class="avatar" id="avatar-bottom">${iconUser({ size: 22 })}</div>
                   <div class="player-meta">
                     <span class="pname" id="name-bottom">คุณ</span>
                     <div class="player-subrow">
@@ -157,8 +187,8 @@ export class UI {
             <!-- RIGHT SIDEBAR (CHESS.COM MOVES & CONTROLS) -->
             <aside class="sidebar" id="game-sidebar">
               <div class="sidebar-header">
-                <button class="tab-btn active" id="tab-moves" type="button">📜 รายการเดิน</button>
-                <button class="tab-btn" id="tab-log" type="button">⚙️ สัญญาณ / Log</button>
+                <button class="tab-btn active" id="tab-moves" type="button">${iconList({ size: 15 })} รายการเดิน</button>
+                <button class="tab-btn" id="tab-log" type="button">${iconTerminal({ size: 15 })} สัญญาณ / Log</button>
               </div>
 
               <div class="spectator-control hidden" id="spectator-control">
@@ -195,35 +225,35 @@ export class UI {
               <!-- CHESS.COM ACTION STRIP BUTTONS -->
               <div class="action-strip">
                 <button id="btn-undo" class="action-btn" title="ย้อนเดิน (Undo)">
-                  <span class="icon">↩️</span>
+                  <span class="icon">${iconUndo({ size: 18 })}</span>
                   <span class="label">ย้อน</span>
                 </button>
                 <button id="btn-hint" class="action-btn hidden" title="คำใบ้จากบอทระดับ GM (Hint)">
-                  <span class="icon">💡</span>
+                  <span class="icon">${iconHint({ size: 18 })}</span>
                   <span class="label">คำใบ้</span>
                 </button>
                 <button id="btn-resign" class="action-btn danger" title="ยอมแพ้ (Resign)">
-                  <span class="icon">🚩</span>
+                  <span class="icon">${iconFlag({ size: 18 })}</span>
                   <span class="label">ยอมแพ้</span>
                 </button>
                 <button id="btn-share" class="action-btn hidden" title="แชร์ห้อง (Share Room)">
-                  <span class="icon">↗</span>
+                  <span class="icon">${iconShare({ size: 18 })}</span>
                   <span class="label">แชร์</span>
                 </button>
                 <button id="btn-flip" class="action-btn hidden" title="กลับกระดาน (Flip Board)">
-                  <span class="icon">🔄</span>
+                  <span class="icon">${iconFlip({ size: 18 })}</span>
                   <span class="label">กลับกระดาน</span>
                 </button>
                 <button id="btn-pause" class="action-btn hidden" title="หยุด/เล่นต่อ (Pause/Resume)">
-                  <span class="icon">⏸️</span>
+                  <span class="icon">${iconPause({ size: 18 })}</span>
                   <span class="label">หยุด</span>
                 </button>
                 <button id="btn-sound" class="action-btn" type="button" title="เปิด/ปิดเสียง" aria-pressed="false">
-                  <span class="icon">🔊</span>
+                  <span class="icon">${iconSound({ size: 18 })}</span>
                   <span class="label">เสียง</span>
                 </button>
                 <button id="btn-home" class="action-btn" title="กลับหน้าแรก (Home)">
-                  <span class="icon">🏠</span>
+                  <span class="icon">${iconHome({ size: 18 })}</span>
                   <span class="label">หน้าแรก</span>
                 </button>
               </div>
@@ -231,11 +261,11 @@ export class UI {
 
             <!-- SANDBOX BOARD EDITOR RIGHT PANEL (PIECE PALETTE) -->
             <aside class="sidebar sandbox-editor-panel hidden" id="sandbox-tools">
-              <h3 class="sandbox-tool-title">🛠️ จัดแต่งกระดาน (Sandbox)</h3>
+              <h3 class="sandbox-tool-title">${iconWrench({ size: 18 })} จัดแต่งกระดาน (Sandbox)</h3>
               
               <div class="sandbox-mode-selector">
-                <button class="sandbox-mode-btn active" id="sb-tool-move">👆 ย้ายตำแหน่ง</button>
-                <button class="sandbox-mode-btn" id="sb-tool-replace">🎨 แทนที่ตัวหมาก</button>
+                <button class="sandbox-mode-btn active" id="sb-tool-move"><span class="btn-svg">${iconMove({ size: 16 })}</span> ย้ายตำแหน่ง</button>
+                <button class="sandbox-mode-btn" id="sb-tool-replace"><span class="btn-svg">${iconPalette({ size: 16 })}</span> แทนที่ตัวหมาก</button>
               </div>
 
               <div class="sandbox-palette-label">เลือกตัวหมากมาวางแทนที่:</div>
@@ -245,7 +275,7 @@ export class UI {
                 <button class="piece-btn" data-piece="b"><span class="p-icon">♝</span><span class="p-name">Bishop</span></button>
                 <button class="piece-btn" data-piece="n"><span class="p-icon">♞</span><span class="p-name">Knight</span></button>
                 <button class="piece-btn" data-piece="p"><span class="p-icon">♟</span><span class="p-name">Pawn</span></button>
-                <button class="piece-btn delete-btn" data-piece="delete"><span class="p-icon">🗑️</span><span class="p-name">ลบหมาก</span></button>
+                <button class="piece-btn delete-btn" data-piece="delete"><span class="p-icon">${iconTrash({ size: 18 })}</span><span class="p-name">ลบหมาก</span></button>
               </div>
 
               <div class="sandbox-rule-notice">
@@ -254,7 +284,7 @@ export class UI {
                 • การเพิ่ม/แทนที่หมากทำได้เฉพาะใน 2 แถวแรกของแต่ละฝั่ง
               </div>
 
-              <button id="sb-start-game-btn" class="sandbox-start-btn">⚔️ เริ่มเล่นเกมตามที่จัด</button>
+              <button id="sb-start-game-btn" class="sandbox-start-btn"><span class="btn-svg">${iconSwords({ size: 18 })}</span> เริ่มเล่นเกมตามที่จัด</button>
             </aside>
           </div>
         </section>
@@ -460,7 +490,7 @@ export class UI {
   }
 
   setPauseState(paused) {
-    this.refs.btnPause.querySelector('.icon').textContent = paused ? '▶️' : '⏸️';
+    this.refs.btnPause.querySelector('.icon').innerHTML = paused ? iconPlay({ size: 18 }) : iconPause({ size: 18 });
     this.refs.btnPause.querySelector('.label').textContent = paused ? 'ต่อ' : 'หยุด';
   }
 
@@ -646,13 +676,15 @@ export class UI {
     body.append(big, sub);
     const row = this.el('div', 'dlg-actions');
 
-    const again = this.el('button', 'btn primary', '🔄 เริ่มเกมใหม่');
+    const again = this.el('button', 'btn primary');
+    again.innerHTML = `<span class="btn-svg">${iconRefresh({ size: 16 })}</span> <span>เริ่มเกมใหม่</span>`;
     again.onclick = () => {
       overlay.close();
       onNewGame?.();
     };
 
-    const home = this.el('button', 'btn', '🏠 กลับหน้าเมนู');
+    const home = this.el('button', 'btn');
+    home.innerHTML = `<span class="btn-svg">${iconHome({ size: 16 })}</span> <span>กลับหน้าเมนู</span>`;
     home.onclick = () => {
       overlay.close();
       onHome?.();

@@ -20,6 +20,7 @@ import {
 } from './online.js';
 import { createLobbyView } from './lobby.js';
 import { sounds } from './sounds.js';
+import { iconBolt, iconBot, iconArena, iconWrench, iconHome, iconSound, iconMute } from './icons.js';
 
 const ui = new UI(document.getElementById('app'));
 const PLAYER_NAME_KEY = 'chess-arena-player-name';
@@ -270,7 +271,7 @@ function openJoinDialog(prefillInvite = null) {
   overlay.innerHTML = `
     <div class="lobby-topbar">
       <button class="lobby-back-btn" id="lobby-back-btn">
-        <span>🏠</span> กลับหน้าเมนู
+        <span class="btn-svg">${iconHome({ size: 16 })}</span> กลับหน้าเมนู
       </button>
       <div style="font-size:18px; font-weight:900; color:var(--accent);">Chess Arena Online</div>
     </div>
@@ -427,35 +428,50 @@ function openModeDialog(targetMode = null) {
     const options = [
       {
         mode: MODES.ONLINE,
-        icon: '⚡',
+        banner: './assets/banners/banner_online.jpg',
+        tag: 'PVP ONLINE',
+        tagClass: 'tag-cyan',
         title: 'Play Online (ผู้เล่นสองคน)',
-        desc: 'สร้างห้อง ส่งลิงก์เชิญ และเล่นผ่านเซิร์ฟเวอร์โดยไม่ใช้ GitHub Token',
+        desc: 'สร้างห้อง ส่งลิงก์เชิญ และเล่นผ่านเซิร์ฟเวอร์แบบเรียลไทม์',
       },
       {
         mode: MODES.HUMAN_VS_AI,
-        icon: '🤖',
-        title: 'Play Bots (เล่น vs Stockfish AI)',
-        desc: 'สู้กับบอท Stockfish ปรับ Elo 800 - 2200+',
+        banner: './assets/banners/banner_bots.jpg',
+        tag: 'SOLO VS BOT',
+        tagClass: 'tag-green',
+        title: 'Play Bots (เล่น vs Stockfish 18)',
+        desc: 'ท้าดวล AI ปรับระดับ Elo 800 - 2200+ ได้อย่างอิสระ',
       },
       {
         mode: MODES.AI_VS_AI,
-        icon: '⚔️',
-        title: 'AI vs AI Arena',
-        desc: 'เปิดชม Stockfish ปะทะ Stockfish เองแบบเต็มระบบ',
+        banner: './assets/banners/banner_arena.jpg',
+        tag: 'AI ARENA',
+        tagClass: 'tag-amber',
+        title: 'AI vs AI Arena (ชมการประลองสด)',
+        desc: 'เปิดสนามประลอง Stockfish ปะทะ Stockfish เต็มอัตราศึก',
       },
       {
         mode: 'sandbox_direct',
-        icon: '🛠️',
-        title: 'Sandbox (กระดานทดลอง / ปรับแต่งสนาม)',
-        desc: 'ปรับแต่งตัวหมาก รูปแบบกระดาน และเลือกโหมดเล่นอิสระ',
+        banner: './assets/banners/banner_sandbox.jpg',
+        tag: 'BOARD EDITOR',
+        tagClass: 'tag-purple',
+        title: 'Sandbox (กระดานทดลอง / จัดวางหมาก)',
+        desc: 'ปรับแต่งตัวหมาก ออกแบบตำแหน่งหมากรุกตามจินตนาการ',
       },
     ];
 
     for (const opt of options) {
-      const card = ui.el('div', 'chesscom-play-card');
+      const card = ui.el('div', `chesscom-play-card card-${opt.mode}`);
       card.innerHTML = `
-        <div class="c-icon">${opt.icon}</div>
+        <div class="c-banner-wrap">
+          <img src="${opt.banner}" alt="${opt.title}" class="c-banner-img" />
+          <div class="c-banner-overlay"></div>
+        </div>
         <div class="c-body">
+          <div class="c-header-row">
+            <span class="c-tag ${opt.tagClass}">${opt.tag}</span>
+            <span class="c-arrow">➔</span>
+          </div>
           <div class="c-title">${opt.title}</div>
           <div class="c-desc">${opt.desc}</div>
         </div>
@@ -769,7 +785,7 @@ ui.refs.btnSound.onclick = () => setSoundMuted(!sounds.muted);
 function setSoundMuted(muted) {
   sounds.muted = muted;
   storeLocal(SOUND_MUTED_KEY, muted ? '1' : '0');
-  ui.refs.btnSound.querySelector('.icon').textContent = muted ? '🔇' : '🔊';
+  ui.refs.btnSound.querySelector('.icon').innerHTML = muted ? iconMute({ size: 18 }) : iconSound({ size: 18 });
   ui.refs.btnSound.setAttribute('aria-pressed', String(muted));
 }
 setSoundMuted(localStorage.getItem(SOUND_MUTED_KEY) === '1');

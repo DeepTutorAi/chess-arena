@@ -189,9 +189,11 @@ test('getOnlineApiUrl uses an explicit endpoint or the production page origin', 
   assert.equal(getOnlineApiUrl({ VITE_ONLINE_API_URL: 'https://rooms.example.workers.dev/' }), 'https://rooms.example.workers.dev');
   assert.equal(getOnlineApiUrl({}, { protocol: 'https:', origin: 'https://chess.example.workers.dev' }), 'https://chess.example.workers.dev');
   assert.equal(getOnlineApiUrl({}, { protocol: 'http:', origin: 'http://localhost:5173' }), '');
-  // GitHub Pages cannot host the Worker — the origin fallback would only hit
-  // the static host, so online mode is reported unavailable instead.
+  // Static hosts (github.io / pages.dev) cannot host the Worker — the origin
+  // fallback would only hit the static host, so online mode is reported
+  // unavailable there instead.
   assert.equal(getOnlineApiUrl({}, { protocol: 'https:', origin: 'https://player.github.io', hostname: 'player.github.io' }), '');
+  assert.equal(getOnlineApiUrl({}, { protocol: 'https:', origin: 'https://chess-arena.pages.dev', hostname: 'chess-arena.pages.dev' }), '');
   assert.equal(getOnlineApiUrl({ VITE_ONLINE_API_URL: 'https://rooms.example.workers.dev' }, { protocol: 'https:', origin: 'https://player.github.io', hostname: 'player.github.io' }), 'https://rooms.example.workers.dev');
 });
 

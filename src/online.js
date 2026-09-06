@@ -96,10 +96,11 @@ export function validateLobbyResponse(value) {
 export function getOnlineApiUrl(env = import.meta.env ?? {}, location = globalThis.location) {
   const value = String(env.VITE_ONLINE_API_URL ?? '').trim();
   if (/^https?:\/\/[^/]+/u.test(value)) return value.replace(/\/+$/u, '');
-  // A GitHub Pages site can never host the Worker — the origin fallback that
-  // serves self-hosted (wrangler) deployments would only produce requests to
-  // the static host, so online mode stays disabled there.
-  if (location?.hostname?.endsWith('.github.io')) return '';
+  // Static hosts (GitHub Pages / Cloudflare Pages) can never host the Worker
+  // — the origin fallback that serves self-hosted (wrangler) deployments
+  // would only produce requests to the static host, so online mode stays
+  // disabled there until VITE_ONLINE_API_URL is provided at build time.
+  if (/(^|\.)github\.io$|(\/|\.)pages\.dev$/u.test(location?.hostname ?? '')) return '';
   if (location?.protocol === 'https:' && /^https:\/\/[^/]+$/u.test(location.origin)) return location.origin;
   return '';
 }
