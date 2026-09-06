@@ -3,7 +3,7 @@
 
 import { Chess } from 'chess.js';
 import { Stockfish } from './engine.js';
-import { OnlineRoomClient } from './online.js';
+import { AVATAR_GLYPHS, OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
 import { sounds } from './sounds.js';
 import {
@@ -21,10 +21,6 @@ export const MODES = {
   ONLINE: 'online',
   ANALYZE: 'analyze',
 };
-
-const ONLINE_AVATAR_GLYPHS = Object.freeze({
-  knight: '♞', king: '♚', rook: '♜', bishop: '♝', pawns: '♟', shield: '♛',
-});
 
 export class Controller {
   constructor({ ui, ground, onPromotion, onlineClientFactory = (options) => new OnlineRoomClient(options) }) {
@@ -56,6 +52,7 @@ export class Controller {
     this.paused = false;
     this.hintEngine = null;   // GM-level engine for the hint button (hva only)
     this.hintBusy = false;
+    this._hintTimer = null;
     this.orientation = 'white';
     this.levelIndex = 3; // level 4
     this.humanSide = 'w';
@@ -377,7 +374,7 @@ export class Controller {
     this.ui.showClocks(true);
     this.clock = new ChessClock({
       initialMs: tcConfig.initialMs,
-      incMs: tcConfig.incMs,
+      incrementMs: tcConfig.incMs,
       onTick: (times, currentTurn) => this._onClockTick(times, currentTurn),
       onTimeout: (loser) => this._onClockTimeout(loser),
     });
@@ -410,6 +407,10 @@ export class Controller {
 
     if (this.engine) this.engine.stop();
     if (this.engineBlack) this.engineBlack.stop();
+    this.ui.setBusy?.(false);
+    // Lock the board: without a re-sync the flagged side keeps the pre-timeout
+    // movable config and could keep dragging pieces after the flag.
+    this._syncBoard();
 
     this.ui.setStatus(`จบเกม · ${text}`, 'done');
     this.ui.setPlayerDone(loser === 'w' ? 'bottom' : 'top');
@@ -441,7 +442,8 @@ export class Controller {
       return;
     }
     if (this._isOver() || this._overPopupShown) return;
-    const loser = this.humanSide ?? this.game.turn();
+    // In analyze both sides are human — the resigning side is the one to move.
+    const loser = this.mode === MODES.ANALYZE ? this.game.turn() : this.humanSide;
     const winnerColor = loser === 'w' ? 'ดำ' : 'ขาว';
     const winnerCode = loser === 'w' ? '0-1' : '1-0';
     const text = `ยอมแพ้! ฝ่าย${winnerColor}ชนะ`;
@@ -450,6 +452,7 @@ export class Controller {
     if (this.engine) this.engine.stop();
     if (this.engineBlack) this.engineBlack.stop();
     this.clock?.stop();
+    this.ui.setBusy?.(false);
 
     this.ui.setStatus(`จบเกม · ${text}`, 'done');
     this.ui.log(`จบเกม: ${text} (${detail})`, 'sys');
@@ -471,7 +474,7 @@ export class Controller {
   /** User dragged a piece in game mode. */
 
   async handleUserMove(orig, dest) {
-    if (this.engineBusy || this.viewerMode) return;
+    if (this.engineBusy || this.viewerMode || this._isOver()) return;
     if (this.mode === MODES.ONLINE && !this._onlineHumanTurn()) return;
 
     const legal = this.game.moves({ square: orig, verbose: true }).some((m) => m.to === dest);
@@ -482,7 +485,14 @@ export class Controller {
     const toRow = dest.charCodeAt(1) - 48; // 1..8
     if (piece && piece.type === 'p' && (toRow === 8 || toRow === 1)) {
       promotion = await this.onPromotion(orig, dest);
-      if (!promotion) return; // cancelled
+      if (!promotion) {
+        // Nothing was played — snap the animated drag back to canonical state.
+        this._syncBoard();
+        return;
+      }
+      // The clock can flag while the promotion picker is open — re-validate
+      // so a decided game never accepts the queued move.
+      if (this._isOver()) return;
     }
 
     if (this.mode === MODES.ONLINE) {
@@ -526,6 +536,10 @@ export class Controller {
       this._renderMoves();
       sounds.play('move'); // undo uses the move sound, as requested
       if (this._isOver()) return;
+      // A previous timeout/pause left the clock stopped and pointed at the
+      // wrong turn — restart it on the restored turn so time drains the
+      // correct side and the game can still end by flag.
+      this.clock?.start(this.game.turn());
       if (this.mode === MODES.HUMAN_VS_AI && this.game.turn() !== this.humanSide) {
         this._engineTurn();
       }
@@ -562,6 +576,7 @@ export class Controller {
       if (this.engineBlack) this.engineBlack.stop();
       this.engineBusy = false;
       this.clock?.stop();
+      this.ui.setBusy?.(false);
       this.ui.setStatus('⏸ หยุดชั่วคราว — กด ▶️ ต่อเพื่อเล่นต่อ', '');
       this.ui.setPauseState(true);
     } else {
@@ -577,6 +592,7 @@ export class Controller {
     if (this.engine) { this.engine.quit(); this.engine = null; }
     if (this.engineBlack) { this.engineBlack.quit(); this.engineBlack = null; }
     if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
+    if (this._hintTimer) { clearTimeout(this._hintTimer); this._hintTimer = null; }
     if (this.online) { this.online.stop(); this.online = null; }
     if (this._onlineClockTimer) { clearInterval(this._onlineClockTimer); this._onlineClockTimer = null; }
     if (this._onlineAfkTimer) { clearInterval(this._onlineAfkTimer); this._onlineAfkTimer = null; }
@@ -621,7 +637,9 @@ export class Controller {
       { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})` },
       { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})` }
     );
-    this.ui.setStatus(`Stockfish Elo ${cfg.elo} · เริ่มเกม`, '');
+    // The WASM download is several MB on first load — say so instead of a
+    // silent gap between the dialog closing and the engine's first move.
+    this.ui.setStatus(`กำลังโหลดเอนจิน ${ENGINE_NAME}…`, 'busy');
     this.ui.setActionStrip({ undo: true, resign: true, flip: false, pause: false, hint: true });
 
     this.engine = new Stockfish({
@@ -633,12 +651,18 @@ export class Controller {
           this.engine.setPosition(this.game.fen());
         }
         this.ui.log(`เอนจินพร้อม (${ENGINE_NAME})`, 'sys');
+        this.ui.setStatus(`Stockfish Elo ${cfg.elo} · เริ่มเกม`, '');
         if (this.mode === MODES.HUMAN_VS_AI && this.game.turn() !== this.humanSide) {
           this._engineTurn();
         }
       },
       onBestMove: (uci) => this._onEngineBestMove(uci),
-      onError: (msg) => this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err'),
+      onError: (msg) => {
+        this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err');
+        if (!this.engineReady) {
+          this.ui.setStatus('โหลดเอนจินไม่สำเร็จ — กด 🔄 เริ่มเกมใหม่', 'err');
+        }
+      },
     });
     this._syncBoard();
     this._renderMoves();
@@ -690,13 +714,19 @@ export class Controller {
     this.engine = new Stockfish({
       onReady: () => onWorkerReady('w'),
       onBestMove: (uci) => this._onAiLoopMove('w', uci),
-      onError: (msg) => this.ui.log(`เอนจินขาวผิดพลาด: ${msg}`, 'err'),
+      onError: (msg) => {
+        this.ui.log(`เอนจินขาวผิดพลาด: ${msg}`, 'err');
+        this.ui.setStatus('เอนจินฝ่ายขาวล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'err');
+      },
     });
 
     this.engineBlack = new Stockfish({
       onReady: () => onWorkerReady('b'),
       onBestMove: (uci) => this._onAiLoopMove('b', uci),
-      onError: (msg) => this.ui.log(`เอนจินดำผิดพลาด: ${msg}`, 'err'),
+      onError: (msg) => {
+        this.ui.log(`เอนจินดำผิดพลาด: ${msg}`, 'err');
+        this.ui.setStatus('เอนจินฝ่ายดำล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'err');
+      },
     });
 
     this._syncBoard();
@@ -741,7 +771,10 @@ export class Controller {
           if (this.onlineState) this._syncBoard();
         }
         else if (state === 'reconnecting') this.ui.setStatus('การเชื่อมต่อขาดหาย — กำลังเชื่อมต่อใหม่…', 'busy');
-        else if (state === 'failed') this.ui.setStatus('เชื่อมต่อห้องไม่ได้ กรุณาลองเปิดลิงก์ใหม่', '');
+        else if (state === 'failed') this.ui.setStatus('เชื่อมต่อห้องไม่ได้ — กลับมาที่แท็บนี้เมื่อเน็ตกลับมาเพื่อลองใหม่อัตโนมัติ', 'err');
+        else if (state === 'replaced') this.ui.setStatus('ห้องนี้ถูกเปิดจากแท็บอื่น — การเชื่อมต่อแท็บนี้ถูกแทนที่', '');
+        else if (state === 'unauthorized') this.ui.setStatus('session หมดอายุหรือไม่ถูกต้อง — กลับเข้าห้องจาก Lobby หรือลิงก์เชิญอีกครั้ง', 'err');
+        else if (state === 'expired') this.ui.setStatus('ห้องนี้หมดอายุแล้ว', '');
       },
     });
 
@@ -820,11 +853,11 @@ export class Controller {
     this.ui.setPlayers(
       {
         name: state.players[topColor].name || 'กำลังรอผู้เล่น',
-        avatar: ONLINE_AVATAR_GLYPHS[state.players[topColor].avatar] ?? '♟',
+        avatar: AVATAR_GLYPHS[state.players[topColor].avatar] ?? '♟',
       },
       {
         name: state.players[bottomColor].name || 'กำลังรอผู้เล่น',
-        avatar: ONLINE_AVATAR_GLYPHS[state.players[bottomColor].avatar] ?? '♟',
+        avatar: AVATAR_GLYPHS[state.players[bottomColor].avatar] ?? '♟',
       },
     );
     this._syncBoard();
@@ -845,6 +878,12 @@ export class Controller {
     }
   }
 
+  /** Server-aligned now() — clock/AFK deadlines are server epochs and must
+   *  not be extrapolated with the browser's possibly-skewed Date.now(). */
+  _onlineNow() {
+    return this.online?.now?.() ?? Date.now();
+  }
+
   _renderOnlineClock(state) {
     if (this._onlineClockTimer) clearInterval(this._onlineClockTimer);
     this._onlineClockTimer = null;
@@ -858,7 +897,7 @@ export class Controller {
       let whiteMs = clock.whiteMs;
       let blackMs = clock.blackMs;
       if (state.status === 'active' && clock.activeSince !== null) {
-        const elapsed = Math.max(0, Date.now() - clock.activeSince);
+        const elapsed = Math.max(0, this._onlineNow() - clock.activeSince);
         if (state.turn === 'w') whiteMs = Math.max(0, whiteMs - elapsed);
         else blackMs = Math.max(0, blackMs - elapsed);
       }
@@ -893,7 +932,7 @@ export class Controller {
       ? causes.opening
       : `${causes[countdown.cause]} · คำเตือน ${strikes}/2`;
     const render = () => {
-      const remainingSeconds = Math.max(0, Math.ceil((countdown.deadlineAt - Date.now()) / 1_000));
+      const remainingSeconds = Math.max(0, Math.ceil((countdown.deadlineAt - this._onlineNow()) / 1_000));
       this.ui.setAfkWarning?.({
         visible: true,
         title: isSelf ? 'คุณกำลังถูกนับ AFK' : `${affectedName} กำลังถูกนับ AFK`,
@@ -957,9 +996,10 @@ export class Controller {
     }
 
     const isHumanTurn =
-      this.mode === MODES.ANALYZE ||
+      !this._isOver() &&
+      (this.mode === MODES.ANALYZE ||
       (this.mode === MODES.HUMAN_VS_AI && this.game.turn() === this.humanSide) ||
-      (this.mode === MODES.ONLINE && this._onlineHumanTurn());
+      (this.mode === MODES.ONLINE && this._onlineHumanTurn()));
 
     // Highlight the REAL last move from chess.js history (from+to) so the
     // opponent's move is highlighted too — without this, chessground kept the
@@ -1069,6 +1109,9 @@ export class Controller {
 
     if (this.mode === MODES.HUMAN_VS_AI && this.game.turn() !== this.humanSide) {
       this._engineTurn();
+    } else if (this.mode === MODES.HUMAN_VS_AI) {
+      // The engine's "thinking…" status must not outlive its move.
+      this.ui.setStatus('ถึงตาของคุณ', '');
     } else if (this.mode === MODES.AI_VS_AI) {
       this._maybeStartAiLoop();
     }
@@ -1124,6 +1167,7 @@ export class Controller {
   _engineTurn() {
     if (!this.engine || !this.engineReady || this.engineBusy || this._isOver()) return;
     this.engineBusy = true;
+    this.ui.setBusy?.(true);
     this.ui.setStatus('เอนจินกำลังคิด…', 'busy');
     const cfg = LEVELS[this.levelIndex];
     const { delay } = this._thinkTime();
@@ -1137,6 +1181,7 @@ export class Controller {
 
   _onEngineBestMove(uci) {
     this.engineBusy = false;
+    this.ui.setBusy?.(false);
     if (!uci || this._isOver()) return;
     const orig = uci.slice(0, 2);
     const dest = uci.slice(2, 4);
@@ -1153,6 +1198,7 @@ export class Controller {
   /** AI vs AI — apply the bestmove of the engine for `side` and hand off. */
   _onAiLoopMove(side, uci) {
     this.engineBusy = false;
+    this.ui.setBusy?.(false);
     if (this.paused) return; // paused — discard the computed move
     if (!uci) {
       // Stockfish answers (none) for illegal/custom positions — don't stall silently.
@@ -1183,6 +1229,7 @@ export class Controller {
       return;
     }
     this.hintBusy = true;
+    this.ui.setBusy?.(true);
     this.ui.setStatus('💡 บอท GM กำลังคิดคำใบ้…', 'busy');
     if (!this.hintEngine) {
       this.hintEngine = new Stockfish({
@@ -1195,8 +1242,7 @@ export class Controller {
         },
         onBestMove: (uci) => this._applyHint(uci),
         onError: (msg) => {
-          this.hintBusy = false;
-          this.ui.log(`เอนจินคำใบ้ผิดพลาด: ${msg}`, 'err');
+          this._failHint(`เอนจินคำใบ้ผิดพลาด: ${msg}`);
         },
       });
     } else {
@@ -1204,14 +1250,33 @@ export class Controller {
     }
   }
 
+  /** Reset hint state and drop a dead/ wedged hint worker so the next click
+   *  recreates it — without this the button bricks after one worker error. */
+  _failHint(logMessage) {
+    this.hintBusy = false;
+    if (this._hintTimer) { clearTimeout(this._hintTimer); this._hintTimer = null; }
+    if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
+    this.ui.setBusy?.(false);
+    this.ui.log(logMessage, 'err');
+    this.ui.setStatus('คำใบ้ใช้ไม่ได้ตอนนี้ — ลองอีกครั้ง', '');
+  }
+
   _hintGo() {
     if (!this.hintEngine || !this.hintEngine.ready || !this.hintBusy) return;
     this.hintEngine.setPosition(this.game.fen());
     this.hintEngine.go({ movetime: 3500, depth: 20 });
+    // Watchdog: a hung worker must not leave the button stuck at "thinking".
+    if (this._hintTimer) clearTimeout(this._hintTimer);
+    this._hintTimer = setTimeout(() => {
+      this._hintTimer = null;
+      if (this.hintBusy) this._failHint('หมดเวลารอคำใบ้จากเอนจิน');
+    }, 8000);
   }
 
   _applyHint(uci) {
+    if (this._hintTimer) { clearTimeout(this._hintTimer); this._hintTimer = null; }
     this.hintBusy = false;
+    this.ui.setBusy?.(false);
     if (!uci || uci === '(none)') {
       this.ui.log('💡 ไม่มีคำใบ้สำหรับตำแหน่งนี้', 'warn');
       return;
@@ -1238,6 +1303,7 @@ export class Controller {
     if (!activeEngine || !this.engineReady) return;
 
     this.engineBusy = true;
+    this.ui.setBusy?.(true);
     const { delay, search } = this._thinkTime();
     const cfg = turn === 'w' ? LEVELS[this.aivaLevelW] : LEVELS[this.aivaLevelB];
     this.ui.setStatus(`AI (${turn === 'w' ? 'ขาว' : 'ดำ'}) กำลังคิด…`, 'busy');

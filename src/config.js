@@ -75,5 +75,9 @@ export function saveRoom(room) {
   } else {
     rooms.unshift(room);
   }
-  localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms.slice(0, 20)));
+  try {
+    localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms.slice(0, 20)));
+  } catch {
+    // quota/blocked storage must not fail the flow that saved the room
+  }
 }

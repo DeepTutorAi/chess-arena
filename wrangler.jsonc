@@ -33,5 +33,14 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:5173,http://127.0.0.1:5173"
-  }
+  },
+  "env": {
+    // Production fails closed to same-origin only; add an explicit cross-origin
+    // frontend here if one is ever deployed.
+    "production": {
+      "vars": {
+        "ALLOWED_ORIGINS": ""
+      }
+    }
+  },
 }

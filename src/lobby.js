@@ -1,3 +1,8 @@
+// Avatar vocabulary is owned by src/online.js (same list the server
+// validates) — re-exported here for the lobby's tests and helpers.
+export { AVATAR_GLYPHS } from './online.js';
+import { AVATAR_GLYPHS } from './online.js';
+
 const TIME_CATEGORY = Object.freeze({
   unlimited: 'unlimited',
   bullet_1_0: 'bullet',
@@ -7,15 +12,6 @@ const TIME_CATEGORY = Object.freeze({
   rapid_10_0: 'rapid',
   rapid_15_0: 'rapid',
   classical_30_0: 'rapid',
-});
-
-export const AVATAR_GLYPHS = Object.freeze({
-  knight: '♞',
-  king: '♚',
-  rook: '♜',
-  bishop: '♝',
-  pawns: '♟',
-  shield: '♛',
 });
 
 export const AVATAR_ATLAS = Object.freeze({
@@ -338,6 +334,12 @@ export function createLobbyView({
     client,
     ready,
     refresh,
+    /** Surface join/watch failures on the lobby itself — the game log lives
+     *  behind this fullscreen overlay, so ui.log is invisible here. */
+    showError(message) {
+      alert.hidden = false;
+      alert.textContent = message;
+    },
     destroy() {
       state.destroyed = true;
       if (state.timer !== null) clearTimeoutImpl(state.timer);

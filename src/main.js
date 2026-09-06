@@ -23,14 +23,29 @@ import { sounds } from './sounds.js';
 
 const ui = new UI(document.getElementById('app'));
 const PLAYER_NAME_KEY = 'chess-arena-player-name';
+const SOUND_MUTED_KEY = 'chess-arena-sound-muted';
+
+// localStorage may be blocked (private mode, quota) — persistence is a
+// convenience and must never break the flow that triggered it.
+function storeLocal(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // storage unavailable
+  }
+}
 
 // ---- promotion picker -----------------------------------------------------
 
 function openPromotion(orig, dest) {
+  // A second drag while the picker is open must not stack a second overlay;
+  // it resolves as cancelled and the board snaps back.
+  if (document.querySelector('.promo-overlay')) return Promise.resolve(null);
   return new Promise((resolve) => {
     const overlay = ui.el('div', 'promo-overlay');
     const box = ui.el('div', 'promo-box');
     box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'เลือกตัวหมากสำหรับโปรโมท');
     box.appendChild(ui.el('div', 'promo-title', '♟️ โปรโมทเบี้ย — เลือกตัวหมาก'));
     const piecesRow = ui.el('div', 'promo-pieces');
@@ -39,27 +54,36 @@ function openPromotion(orig, dest) {
     const pieces = ['q', 'r', 'b', 'n'];
     const labels = { q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight' };
     const roles = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight' };
+    const finish = (value) => {
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.remove();
+      resolve(value);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') finish(null);
+    };
     for (const p of pieces) {
       const btn = ui.el('button', 'promo-btn');
+      btn.type = 'button';
       const wrap = document.createElement('div');
       wrap.className = 'cg-wrap';
       wrap.innerHTML = `<piece class="${white ? 'white' : 'black'} ${roles[p]}"></piece>`;
       btn.append(wrap, ui.el('span', 'promo-label', labels[p]));
-      btn.onclick = () => {
-        overlay.remove();
-        resolve(p);
-      };
+      btn.onclick = () => finish(p);
       piecesRow.appendChild(btn);
     }
     box.appendChild(piecesRow);
     const cancel = ui.el('button', 'promo-cancel', 'ยกเลิก');
-    cancel.onclick = () => {
-      overlay.remove();
-      resolve(null);
-    };
+    cancel.type = 'button';
+    cancel.onclick = () => finish(null);
     box.appendChild(cancel);
     overlay.appendChild(box);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) finish(null);
+    });
+    document.addEventListener('keydown', onKeyDown);
     document.body.appendChild(overlay);
+    piecesRow.querySelector('button')?.focus();
   });
 }
 
@@ -175,7 +199,7 @@ function openLiveLobby() {
     overlay.remove();
   };
   const remember = (room, profile, status) => {
-    localStorage.setItem(PLAYER_NAME_KEY, profile.name);
+    storeLocal(PLAYER_NAME_KEY, profile.name);
     saveRoom({
       id: room.roomId,
       roomId: room.roomId,
@@ -197,7 +221,7 @@ function openLiveLobby() {
     onClose: close,
     onCreate: () => { close(); openModeDialog(MODES.ONLINE); },
     onJoin: async (room, profile) => {
-      localStorage.setItem('chess-arena-player-avatar', profile.avatar);
+      storeLocal('chess-arena-player-avatar', profile.avatar);
       try {
         await controller.start(MODES.ONLINE, {
           action: 'joinPublic', roomId: room.roomId, playerName: profile.name, avatar: profile.avatar,
@@ -206,11 +230,12 @@ function openLiveLobby() {
         close();
       } catch (error) {
         ui.log(`เข้าห้องไม่สำเร็จ: ${error.message}`, 'err');
-        await lobbyView.refresh();
+        try { await lobbyView.refresh(); } catch { /* keep the list we have */ }
+        lobbyView?.showError?.(`เข้าห้องไม่สำเร็จ: ${error.message}`);
       }
     },
     onWatch: async (room, profile) => {
-      localStorage.setItem('chess-arena-player-avatar', profile.avatar);
+      storeLocal('chess-arena-player-avatar', profile.avatar);
       try {
         await controller.start(MODES.ONLINE, {
           action: 'watch', roomId: room.roomId, playerName: profile.name, avatar: profile.avatar,
@@ -219,7 +244,8 @@ function openLiveLobby() {
         close();
       } catch (error) {
         ui.log(`เข้าชมไม่สำเร็จ: ${error.message}`, 'err');
-        await lobbyView.refresh();
+        try { await lobbyView.refresh(); } catch { /* keep the list we have */ }
+        lobbyView?.showError?.(`เข้าชมไม่สำเร็จ: ${error.message}`);
       }
     },
     onReconnect: async (room) => {
@@ -227,7 +253,7 @@ function openLiveLobby() {
         await controller.start(MODES.ONLINE, { action: 'resume', roomId: room.roomId });
         close();
       } catch (error) {
-        ui.log(`กลับเข้าห้องไม่สำเร็จ: ${error.message}`, 'err');
+        lobbyView?.showError?.(`กลับเข้าห้องไม่สำเร็จ: ${error.message}`);
       }
     },
   });
@@ -303,8 +329,8 @@ function openJoinDialog(prefillInvite = null) {
     joinButton.disabled = true;
     joinStatus.textContent = 'กำลังเข้าร่วมห้อง…';
     try {
-      localStorage.setItem(PLAYER_NAME_KEY, playerName);
-      localStorage.setItem('chess-arena-player-avatar', avatarInput.value);
+      storeLocal(PLAYER_NAME_KEY, playerName);
+      storeLocal('chess-arena-player-avatar', avatarInput.value);
       await controller.start(MODES.ONLINE, {
         action: spectatorInvite ? 'watch' : 'join', playerName, avatar: avatarInput.value, ...invite,
       });
@@ -600,7 +626,7 @@ function openModeDialog(targetMode = null) {
       body.append(ui.el('div', 'field-label', 'การมองเห็นห้อง'));
       const visibilityRow = ui.el('div', 'radio-row');
       for (const [value, label, checked] of [['public', 'Public · แสดงใน Lobby', true], ['private', 'Private · ลิงก์เท่านั้น', false]]) {
-        const option = ui.el('label', 'radio-pill');
+        const option = ui.el('label', 'pill');
         const input = ui.el('input');
         input.type = 'radio';
         input.name = 'online-visibility';
@@ -640,8 +666,8 @@ function openModeDialog(targetMode = null) {
           const tcId = body.querySelector('input[name="online-tc"]:checked').value;
           const visibility = body.querySelector('input[name="online-visibility"]:checked').value;
           const roomTitle = titleInput.value.trim() || 'ห้องประลอง Chess Arena';
-          localStorage.setItem(PLAYER_NAME_KEY, playerName);
-          localStorage.setItem('chess-arena-player-avatar', avatarSelect.value);
+          storeLocal(PLAYER_NAME_KEY, playerName);
+          storeLocal('chess-arena-player-avatar', avatarSelect.value);
           await controller.start(MODES.ONLINE, {
             action: 'create', playerName, color, timeControlId: tcId, title: roomTitle,
             visibility, allowSpectators: spectatorInput.checked, avatar: avatarSelect.value,
@@ -681,7 +707,10 @@ function openModeDialog(targetMode = null) {
 // ---- Event Wiring -----------------------------------------------------------
 
 ui.refs.brandHome.onclick = () => controller.goHome();
-ui.refs.profileBtn.onclick = () => alert('ระบบสมาชิกและโปรไฟล์ผู้เล่นกำลังอยู่ในการพัฒนาค่ะ!');
+ui.refs.profileBtn.onclick = () => {
+  const body = ui.el('p', 'dlg-hint', 'ระบบสมาชิกและโปรไฟล์ผู้เล่นกำลังอยู่ในการพัฒนาค่ะ!');
+  ui.openModal('โปรไฟล์ผู้เล่น', body);
+};
 
 ui.refs.heroCreateBtn.onclick = () => openModeDialog();
 ui.refs.heroJoinBtn.onclick = () => openJoinDialog();
@@ -693,9 +722,19 @@ ui.refs.tabLog.onclick = () => ui.showTab('log');
 // Action Strip Buttons (Chess.com controls)
 ui.refs.btnUndo.onclick = () => controller.undo();
 ui.refs.btnResign.onclick = () => {
-  if (confirm('คุณแน่ใจหรือไม่ว่าต้องการยอมแพ้?')) {
+  const body = ui.el('p', 'dlg-hint', 'คุณแน่ใจหรือไม่ว่าต้องการยอมแพ้?');
+  const row = ui.el('div', 'dlg-actions');
+  const keepPlaying = ui.el('button', 'btn', 'เล่นต่อ');
+  const confirmResign = ui.el('button', 'btn primary', 'ยอมแพ้');
+  const modal = ui.openModal('ยืนยันการยอมแพ้', body);
+  keepPlaying.onclick = () => modal.close();
+  confirmResign.onclick = () => {
+    modal.close();
     controller.resign();
-  }
+  };
+  row.append(keepPlaying, confirmResign);
+  body.appendChild(row);
+  confirmResign.focus();
 };
 ui.refs.btnShare.onclick = () => {
   if (!controller.onlineRoomId || !controller.onlineInviteToken) return;
@@ -725,6 +764,15 @@ ui.refs.btnHome.onclick = () => controller.goHome();
 ui.refs.btnFlip.onclick = () => controller.flip();
 ui.refs.btnPause.onclick = () => controller.togglePause();
 ui.refs.btnHint.onclick = () => controller.showHint();
+ui.refs.btnSound.onclick = () => setSoundMuted(!sounds.muted);
+
+function setSoundMuted(muted) {
+  sounds.muted = muted;
+  storeLocal(SOUND_MUTED_KEY, muted ? '1' : '0');
+  ui.refs.btnSound.querySelector('.icon').textContent = muted ? '🔇' : '🔊';
+  ui.refs.btnSound.setAttribute('aria-pressed', String(muted));
+}
+setSoundMuted(localStorage.getItem(SOUND_MUTED_KEY) === '1');
 
 // ---- SANDBOX BOARD EDITOR EVENTS -------------------------------------------
 
@@ -896,5 +944,7 @@ document.addEventListener(
   { capture: true }
 );
 
-// Debug/testing hook (dev aid; harmless in production).
-window.__arena = { controller, ui, ground };
+// Debug/testing hook — dev builds only, never shipped to production.
+if (import.meta.env?.DEV) {
+  window.__arena = { controller, ui, ground };
+}

@@ -82,14 +82,17 @@ export class ChessClock {
 
   static formatTime(ms) {
     if (ms <= 0) return '0:00';
+    if (ms < 10_000) {
+      // Floor both digits so the readout never claims more time than is left
+      // (ceil here would show e.g. 0:01.0 while only 100ms remains).
+      const totalTenths = Math.floor(ms / 100);
+      const secs = Math.floor(totalTenths / 10);
+      const tenths = totalTenths % 10;
+      return `0:${secs.toString().padStart(2, '0')}.${tenths}`;
+    }
     const totalSeconds = Math.ceil(ms / 1000);
     const mins = Math.floor(totalSeconds / 60);
     const secs = totalSeconds % 60;
-
-    if (totalSeconds < 10) {
-      const tenths = Math.floor((ms % 1000) / 100);
-      return `${mins}:${secs.toString().padStart(2, '0')}.${tenths}`;
-    }
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 }

@@ -403,6 +403,24 @@ describe('online room Worker', () => {
     expect(statuses.at(-1)).toBe(429);
   });
 
+  it('throttles socket message floods on a single connection', async () => {
+    const created = await createRoom({ title: `Socket throttle ${crypto.randomUUID()}` });
+    const hostSocket = await connect(created.body.roomId, created.body.sessionToken);
+    await nextMessage(hostSocket);
+
+    // sync replies 1:1, so each answer is either a snapshot or the throttle
+    // error once the 40-messages window is exhausted.
+    let sawRateLimited = null;
+    for (let index = 0; index < 45 && sawRateLimited === null; index += 1) {
+      const reply = nextMessage(hostSocket);
+      hostSocket.send(JSON.stringify({ type: 'sync' }));
+      const message = await reply;
+      if (message.type === 'error' && message.code === 'rate_limited') sawRateLimited = message;
+    }
+    expect(sawRateLimited).not.toBeNull();
+    hostSocket.close(1000, 'done');
+  });
+
   it('gives spectators live presence while rejecting every game mutation', async () => {
     const created = await createRoom({ title: `Spectator ${crypto.randomUUID()}`, color: 'w' });
     const joinedResponse = await exports.default.fetch(jsonRequest(

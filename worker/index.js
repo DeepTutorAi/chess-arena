@@ -1,6 +1,7 @@
 import { Chess } from 'chess.js';
 
 import { createGameState } from './game-state.js';
+import { consumeCreateAttempt } from './rate-limit.js';
 import {
   parseCreateRequest,
   parseJoinRequest,
@@ -17,6 +18,8 @@ const ROOM_TTL_MS = 24 * 60 * 60 * 1_000;
 const STANDARD_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const ROOM_PATTERN = /^[a-z2-7]{16}$/u;
 const BASE32 = 'abcdefghijklmnopqrstuvwxyz234567';
+// Per-isolate; see worker/rate-limit.js for the trade-off.
+const createAttempts = new Map();
 
 function roomId() {
   const bytes = new Uint8Array(10);
@@ -108,6 +111,12 @@ export default {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/rooms') {
+      // CF-Connecting-IP is injected by the Cloudflare edge; its absence means
+      // a non-edge caller (local dev/test), which we do not throttle.
+      const clientIp = request.headers.get('CF-Connecting-IP');
+      if (clientIp && !consumeCreateAttempt(createAttempts, clientIp, Date.now())) {
+        return json({ error: 'rate_limited' }, 429, origin);
+      }
       const body = await readJson(request, origin);
       if (body.response) return body.response;
       const parsed = parseCreateRequest(body.value);

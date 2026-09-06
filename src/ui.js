@@ -1,24 +1,27 @@
 // UI layer — pure DOM helpers. The controller drives the game and calls into
 // this module; nothing here knows about chess rules or the engine.
 
+import { AVATAR_GLYPHS } from './online.js';
+
 const $ = (sel) => document.querySelector(sel);
 
 export class UI {
   constructor(root) {
+    this._activeModalClose = null;
     root.innerHTML = `
       <header class="topbar">
-        <div class="brand" id="brand-home">
+        <button class="brand" id="brand-home" type="button">
           <span class="brand-mark">♞</span> Chess Arena
-        </div>
-        
+        </button>
+
         <!-- PROFILE PLACEHOLDER (RIGHT TOPBAR) -->
-        <div class="profile-badge-placeholder" id="profile-btn" title="โปรไฟล์ผู้เล่น (ระบบสมาชิกเร็วๆ นี้)">
-          <div class="user-avatar">👤</div>
-          <div class="user-info">
+        <button class="profile-badge-placeholder" id="profile-btn" type="button" title="โปรไฟล์ผู้เล่น (ระบบสมาชิกเร็วๆ นี้)">
+          <span class="user-avatar">👤</span>
+          <span class="user-info">
             <span class="user-name">Guest Player</span>
             <span class="user-rating">⚡ 1500</span>
-          </div>
-        </div>
+          </span>
+        </button>
       </header>
 
       <main class="app-viewport">
@@ -154,8 +157,8 @@ export class UI {
             <!-- RIGHT SIDEBAR (CHESS.COM MOVES & CONTROLS) -->
             <aside class="sidebar" id="game-sidebar">
               <div class="sidebar-header">
-                <div class="tab-btn active" id="tab-moves">📜 รายการเดิน</div>
-                <div class="tab-btn" id="tab-log">⚙️ สัญญาณ / Log</div>
+                <button class="tab-btn active" id="tab-moves" type="button">📜 รายการเดิน</button>
+                <button class="tab-btn" id="tab-log" type="button">⚙️ สัญญาณ / Log</button>
               </div>
 
               <div class="spectator-control hidden" id="spectator-control">
@@ -214,6 +217,10 @@ export class UI {
                 <button id="btn-pause" class="action-btn hidden" title="หยุด/เล่นต่อ (Pause/Resume)">
                   <span class="icon">⏸️</span>
                   <span class="label">หยุด</span>
+                </button>
+                <button id="btn-sound" class="action-btn" type="button" title="เปิด/ปิดเสียง" aria-pressed="false">
+                  <span class="icon">🔊</span>
+                  <span class="label">เสียง</span>
                 </button>
                 <button id="btn-home" class="action-btn" title="กลับหน้าแรก (Home)">
                   <span class="icon">🏠</span>
@@ -276,6 +283,7 @@ export class UI {
       log: $('#log'),
       movesContainer: $('#moves-container'),
       logContainer: $('#log-container'),
+      sidebarContent: $('.sidebar-content'),
       tabMoves: $('#tab-moves'),
       tabLog: $('#tab-log'),
 
@@ -300,6 +308,7 @@ export class UI {
       btnShare: $('#btn-share'),
       btnFlip: $('#btn-flip'),
       btnPause: $('#btn-pause'),
+      btnSound: $('#btn-sound'),
       btnHome: $('#btn-home'),
       spectatorControl: $('#spectator-control'),
       spectatorButton: $('#spectator-btn'),
@@ -417,7 +426,7 @@ export class UI {
       this.refs.spectatorList.appendChild(this.el('p', 'spectator-empty', 'ยังไม่มีผู้ชม'));
       return;
     }
-    const glyphs = { knight: '♞', king: '♚', rook: '♜', bishop: '♝', pawns: '♟', shield: '♛' };
+    const glyphs = AVATAR_GLYPHS;
     for (const profile of spectators) {
       const item = this.el('div', 'spectator-profile');
       item.append(
@@ -507,6 +516,13 @@ export class UI {
   setStatus(text, cls = '') {
     this.refs.status.className = `status-bar ${cls}`;
     this.refs.status.textContent = text;
+    this.refs.status.setAttribute('role', 'status');
+  }
+
+  /** Dim board-blocking actions while the engine (or hint search) is busy. */
+  setBusy(busy) {
+    this.refs.btnUndo.disabled = Boolean(busy);
+    this.refs.btnHint.disabled = Boolean(busy);
   }
 
   // ---- players -----------------------------------------------------------
@@ -554,7 +570,9 @@ export class UI {
       row.append(num, w, b);
       this.refs.moves.appendChild(row);
     }
-    this.refs.movesContainer.scrollTop = this.refs.movesContainer.scrollHeight;
+    // The scroll container is .sidebar-content; the inner containers have no
+    // overflow of their own, so scrolling them is a no-op.
+    this.refs.sidebarContent.scrollTop = this.refs.sidebarContent.scrollHeight;
   }
 
   // ---- event log ---------------------------------------------------------
@@ -570,30 +588,52 @@ export class UI {
     while (this.refs.log.childElementCount > 200) {
       this.refs.log.removeChild(this.refs.log.firstElementChild);
     }
-    this.refs.logContainer.scrollTop = this.refs.logContainer.scrollHeight;
+    this.refs.sidebarContent.scrollTop = this.refs.sidebarContent.scrollHeight;
   }
 
   // ---- modals ------------------------------------------------------------
   openModal(title, bodyEl) {
-    this.refs.modalRoot.innerHTML = '';
+    // One modal at a time: a new open tears the previous one down through its
+    // own close path so listeners and focus never leak.
+    this._activeModalClose?.();
+    const previouslyFocused = document.activeElement;
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', title);
     overlay.innerHTML = `
-      <div class="modal">
-        <div class="modal-head"><h2></h2><button class="modal-close" aria-label="ปิด">✕</button></div>
+      <div class="modal" tabindex="-1">
+        <div class="modal-head"><h2></h2><button class="modal-close" type="button" aria-label="ปิด">✕</button></div>
         <div class="modal-body"></div>
       </div>
     `;
     overlay.querySelector('h2').textContent = title;
     const body = overlay.querySelector('.modal-body');
     if (bodyEl) body.appendChild(bodyEl);
-    overlay.querySelector('.modal-close').onclick = () => overlay.remove();
+    const dialog = overlay.querySelector('.modal');
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') close();
+    };
+    const close = () => {
+      if (!overlay.isConnected) return;
+      overlay.remove();
+      document.removeEventListener('keydown', onKeyDown);
+      if (previouslyFocused instanceof HTMLElement && previouslyFocused.isConnected) {
+        previouslyFocused.focus();
+      }
+      if (this._activeModalClose === close) this._activeModalClose = null;
+    };
+    overlay.querySelector('.modal-close').onclick = close;
     overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
+      if (e.target === overlay) close();
     });
+    document.addEventListener('keydown', onKeyDown);
     this.refs.modalRoot.appendChild(overlay);
+    dialog.focus();
+    this._activeModalClose = close;
     return {
-      close: () => overlay.remove(),
+      close,
       body,
     };
   }

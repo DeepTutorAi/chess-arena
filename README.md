@@ -1,127 +1,176 @@
-# ♞ Chess Arena — สนามหมากรุกสากล vs AI
+<h1 align="center">♞ Chess Arena</h1>
 
-สนามหมากรุกสากลที่รันบนเบราว์เซอร์ พร้อมห้องผู้เล่นออนไลน์แบบ server-authoritative:
+<p align="center">
+  <strong>สนามหมากรุกสากลในเบราว์เซอร์ — เล่นกับ Stockfish 18 หรือประลองกับผู้เล่นจริงแบบ server-authoritative</strong>
+</p>
 
-- **เล่น vs AI** — สู้กับเอนจิน **Stockfish 18** (ตัวที่ chess.com ใช้) ระดับปรับได้ 1–8
-- **AI vs AI** — เปิดชม Stockfish ปะทะ Stockfish เอง
-- **เล่นออนไลน์** — เปิด Lobby เลือกหลายห้อง กด Join/Watch ได้ทันที หรือสร้างห้องส่วนตัวด้วยลิงก์แยกสิทธิ์
-- **ต่อสู้ Remote Agent (Legacy)** — AI ภายนอกยังใช้โปรโตคอล Gist ผ่านสคริปต์ใน `scripts/` ได้ตาม `docs/agent-battle.md`; player UI ไม่ขอ GitHub Token แล้ว
-- **วิเคราะห์** — กระดานฝึกเดินเล่นเองทั้งสองสี
+<p align="center">
+  <a href="https://github.com/DeepTutorAi/chess-arena/actions/workflows/deploy.yml"><img src="https://img.shields.io/github/actions/workflow/status/DeepTutorAi/chess-arena/deploy.yml?branch=main&label=CI%20%2B%20Pages&logo=github" alt="CI status" /></a>
+  <img src="https://img.shields.io/badge/engine-Stockfish%2018-81b64c?logo=chessdotcom&logoColor=white" alt="Stockfish 18" />
+  <img src="https://img.shields.io/badge/online-Durable%20Objects-f2c66d?logo=cloudflare" alt="Cloudflare Durable Objects" />
+  <img src="https://img.shields.io/badge/license-MIT%20%2B%20GPLv3%20engine-blue" alt="License" />
+</p>
 
-## เทคโนโลยี
+<p align="center">
+  <img src="docs/screenshots/home.jpg" alt="Chess Arena — หน้าแรก" width="820" />
+</p>
 
-| ชิ้นส่วน | ไลบรารี | หมายเหตุ |
-| --- | --- | --- |
-| กระดาน + หมาก + แอนิเมชัน | [chessground](https://github.com/lichess-org/chessground) 9.2 | UI ตัวเดียวกับ lichess |
-| กติกาหมากรุก | [chess.js](https://github.com/jhlywa/chess.js) 1.4 | SAN, FEN, ตรวจผลเสมอ/แพ้ชนะ |
-| เอนจิน | [stockfish](https://github.com/nmrugg/stockfish.js) 18 (lite single) | รันในเบราว์เซอร์ **ไม่ต้องใช้ header พิเศษ** — ใช้กับ GitHub Pages ได้ |
-| Build | Vite 7 | Static SPA, `base: './'` รองรับ subpath |
-| ห้องผู้เล่นออนไลน์ | Cloudflare Workers + SQLite Durable Objects | Public lobby, private capabilities, spectators, WebSocket, server-authoritative chess.js |
+---
 
-## รัน
+## ✨ ไฮไลต์
+
+| | |
+| --- | --- |
+| 🤖 **เล่น vs AI** | Stockfish 18 ตัวจริงในเบราว์เซอร์ ปรับได้ 11 ระดับ (Elo 800–2800) พร้อมเวลาคิดแบบ humanized |
+| ⚔️ **AI vs AI Arena** | เปิดชม Stockfish ปะทะ Stockfish ปรับ Elo แยกแต่ละฝ่าย หยุด/เล่นต่อได้กลางเกม |
+| ⚡ **เล่นออนไลน์** | Live Lobby, ห้อง Public/Private, ลิงก์เชิญแยกสิทธิ์, ผู้ชมสด — เซิร์ฟเวอร์ตรวจทุกตาหมาก |
+| 💡 **คำใบ้ระดับ GM** | เอนจินแข็งสุดใน build คำนวณแล้ววาดลูกศรชี้ตาเดินบนกระดาน |
+| 🛠️ **Sandbox** | จัดกระดานเองได้ทุกหมาก แล้วส่งเข้าโหมดใดก็ได้เพื่อเล่นต่อ |
+| ⏱️ **นาฬิกา & AFK** | Bullet ถึง Classical พร้อมระบบตัดสิน AFK ของเซิร์ฟเวอร์ทั้งช่วงเปิดและช่วงไม่จำกัดเวลา |
+
+<p align="center">
+  <img src="docs/screenshots/mode-picker.jpg" alt="ตัวเลือกโหมดการเล่น" width="420" />
+  &nbsp;
+  <img src="docs/screenshots/game-play.png" alt="เล่นกับบอท Stockfish" width="420" />
+</p>
+
+## 🚀 เริ่มใช้งาน
 
 ```bash
 npm install
-npm run dev        # เล่นในเครื่อง
+npm run dev        # เล่นในเครื่อง (โหมด offline ใช้ได้ทันที)
 npm run build      # build ไป dist/
-npm run deploy     # build + push ขึ้น GitHub Pages (gh-pages branch)
+npm test           # domain suite (node --test) + worker suite (vitest + workers pool)
 ```
 
-## ห้องผู้เล่นออนไลน์แบบฟรี
+Deploy ขึ้น **GitHub Pages** โดย GitHub Actions (`.github/workflows/deploy.yml`) — รันทั้งสองชุดเทส
+ก่อน build และ deploy ทุกครั้งที่ push ไป `main`
 
-รัน Worker และ Vite แยกกัน:
+## 🕹️ โหมดเล่น
+
+<details open>
+<summary><b>เล่นกับบอท & AI vs AI</b></summary>
+
+- ระดับ 1–3 สำหรับมือใหม่, 4–6 ผู้เล่นทั่วไป, 7–8 ระดับทัวร์นาเมนต์, 9–11 ระดับกรังด์มาสเตอร์
+  (ปรับผ่าน UCI `Skill Level` + จำกัดความลึก/เวลา — เอนจินเป็นตัวจริง 100%)
+- นาฬิกาหมากรุกครบทุก time control: 1+0, 1+1, 3+1.5, 5+0, 10+0, 15+0, 30+0 และไม่จำกัดเวลา
+- คำใบ้จากบอท GM (ปุ่ม 💡), ย้อนเดิน, ยอมแพ้, กลับกระดาน เสียงประกอบทุกเหตุการณ์
+- AI vs AI มีปุ่มหยุด/เล่นต่อ และบันทึกความคิดของเอนจินในหน้า Log
+
+</details>
+
+<details open>
+<summary><b>เล่นออนไลน์กับผู้เล่นจริง</b></summary>
+
+1. กด **JOIN GAME** เพื่อเปิด Live Tournament Lobby ที่อ่านรายการห้องสาธารณะจาก Worker จริง
+2. ใส่ชื่อ เลือกตราประจำตัว แล้วกด **JOIN** บนโต๊ะที่ว่าง หรือ **WATCH** บนเกมที่กำลังแข่ง
+3. กด **CREATE ROOM** เพื่อสร้างห้อง **Public** (ขึ้น Lobby) หรือ **Private** (ลิงก์เท่านั้น)
+4. ห้อง Private กด **แชร์** เพื่อคัดลอกลิงก์ผู้เล่น/ผู้ชม — เป็น capability คนละสิทธิ์กัน
+   (`#invite=` สำหรับผู้เล่น, `#watch=` สำหรับผู้ชม ใช้ได้ครั้งเดียวสำหรับที่นั่งผู้เล่น)
+5. ผู้ชมเห็นกระดานสด นับจำนวนคนดูได้ แต่เดินหมาก/ยอมแพ้/แย่งที่นั่งไม่ได้ — เซิร์ฟเวอร์ปฏิเสธทุกคำสั่ง
+6. เข้าห้องเดิมซ้ำได้จาก **Recent / Reconnect** และเกมตัดสิน AFK ให้อัตโนมัติ
+
+</details>
+
+### กติกา AFK ที่เซิร์ฟเวอร์ตัดสิน
+
+- **สองตาแรก (ทุก time control):** 1 นาที = 15 วิ, 3 นาที = 20 วิ, 5 นาที = 25 วิ, 10 นาที = 30 วิ,
+  15 นาที = 35 วิ, 30 นาที/ไม่จำกัด = 40 วิ — ไม่เดินภายในเวลาแพ้ทันที
+- **โหมดไม่จำกัดเวลา หลังผ่านสองตา:** ออกจากแท็บ, ขาด heartbeat เกิน 30 วิ หรือคิดเกิน 4 นาที
+  จะเข้าสู่ countdown 40 วิ — ครั้งแรก/สองกลับมาก็รอด (กรณี inactivity ต้องเดินหมากจริง)
+  ครบ 3 ครั้งแพ้ทันที
+- เวลา คำเตือน และผลแพ้ชนะ ทั้งหมดคำนวณโดย Worker — เบราว์เซอร์ไม่มีสิทธิ์อ้าง timestamp ตัวเอง
+
+## 🏗️ สถาปัตยกรรม
+
+```
+เบราว์เซอร์ (Vite + vanilla JS)          Cloudflare Workers
+┌─────────────────────────────┐         ┌──────────────────────────────┐
+│ chessground    กระดาน       │  WSS    │ Durable Object ต่อห้อง        │
+│ chess.js (client preview)   │◄───────►│  · chess.js ตรวจทุกตา (authoritative)
+│ Stockfish 18 WASM (Worker)  │  HTTP   │  · นาฬิกา + AFK + ผลแพ้ชนะ    │
+│ นาฬิกา/แสดงผลจาก serverTime │         │ Lobby Registry (SQLite DO)   │
+└─────────────────────────────┘         └──────────────────────────────┘
+```
+
+- **Capability model:** session/invite/watch token สุ่ม 32 ไบต์ เก็บเป็น SHA-256 digest
+  เทียบแบบ constant-time, ลิงก์เชิญผู้เล่นใช้ครั้งเดียว, token ไม่เคยอยู่ใน URL ของ WebSocket
+- **Server-authoritative:** ความถูกต้องของตาหมาก นาฬิกา ผลเกม และ AFK ทั้งหมดอยู่ฝั่ง Worker
+  client เสนอตา แล้ว commit เฉพาะ snapshot จากเซิร์ฟเวอร์เท่านั้น
+- **ป้องกันการล่วงละเมิด:** origin allowlist, จำกัดอัตราสร้างห้องต่อ IP, จำกัดอัตราข้อความต่อ socket,
+  เพดานผู้ชม 50 คน, body ไม่เกิน 8 KiB
+
+### โครงสร้างโปรเจกต์
+
+```
+public/engine/        เอนจิน Stockfish (js + wasm) — จัดการโดย scripts/copy-engine.mjs
+src/controller.js     state machine ของทุกโหมด (กระดาน นาฬิกา เอนจิน ออนไลน์)
+src/online.js         client ห้องออนไลน์ (HTTP + WebSocket + validator โปรโตคอล)
+src/lobby.js          Live Lobby: การ์ดห้อง ฟิลเตอร์ Join/Watch reconnect
+src/ui.js             DOM helper (textContent-first, กัน XSS ตามดีไซน์)
+src/clock.js          นาฬิกาหมากรุก drift-free (performance.now)
+worker/index.js       router: origin allowlist, rate limit, body cap
+worker/room.js        Durable Object ต่อห้อง (hibernatable WebSockets, alarms)
+worker/game-state.js  domain ตัดสิน: ตาหมาก นาฬิกา timeout, ผลแพ้ชนะ
+worker/afk-state.js   state machine AFK (opening/hidden/heartbeat/inactivity)
+worker/lobby-registry.js  Lobby SQLite: keyset pagination, sweep ห้องหมดอายุ
+scripts/agent-client.mjs  client ตัวอย่างสำหรับ AI ภายนอก (โปรโตคอล Gist เดิม)
+scripts/arena-host.mjs    รันเอนจินสนามจากเทอร์มินัล (ไม่ต้องเปิดแท็บทิ้งไว้)
+docs/agent-battle.md      โปรโตคอลการประลองสำหรับ AI คู่แข่ง (legacy)
+```
+
+## 🌐 รันระบบออนไลน์ในเครื่อง
 
 ```bash
-npx wrangler dev --port 8787
+npx wrangler dev --port 8787        # terminal 1 — Worker + Durable Objects
 ```
 
-อีก PowerShell terminal:
-
 ```powershell
-$env:VITE_ONLINE_API_URL="http://localhost:8787"
+$env:VITE_ONLINE_API_URL="http://localhost:8787"   # terminal 2
 npm run dev
 ```
 
-เปิดเว็บแล้วใช้ระบบออนไลน์ดังนี้:
+> ตัวเลือก deployment: frontend บน GitHub Pages + Worker แยกโดเมน (ตั้ง
+> `VITE_ONLINE_API_URL` ตอน build) — หน้า `*.github.io` จะปิดโหมดออนไลน์ให้เอง
+> จนกว่าจะตั้งค่านี้ หรือจะ deploy รวม origin เดียวด้วย `npx wrangler deploy`
+> (ดูข้อจำกัด wasm ด้านล่าง)
 
-1. กด **JOIN GAME** เพื่อเปิด Live Tournament Lobby ซึ่งอ่านรายการห้องสาธารณะจาก Worker จริง
-2. ใส่ชื่อและเลือกตราหมากรุก จากนั้นกด **JOIN** บนห้องที่ยังว่าง หรือ **WATCH** บนเกมที่กำลังแข่ง
-3. กด **CREATE ROOM** เพื่อสร้างห้อง โดยเลือกได้ว่าเป็น **Public** หรือ **Private** และอนุญาตผู้ชมหรือไม่
-4. ห้อง Public จะปรากฏใน Lobby อัตโนมัติ ผู้เล่นคนที่สองไม่ต้องรับลิงก์และไม่ต้องใช้ GitHub Token
-5. ห้อง Private จะไม่ถูกแสดงใน Lobby เจ้าของกด **แชร์** ในหน้าเกมเพื่อคัดลอกลิงก์ผู้เล่นหรือผู้ชม ซึ่งเป็นคนละ capability กัน (`#invite=` กับ `#watch=`)
-6. ในเกมที่เปิดผู้ชม ปุ่มรูปตาจะแสดงจำนวนผู้ชมที่เชื่อมต่อจริงและเปิดรายชื่อ/ตราประจำตัวได้ ผู้ชมรับ state สดแต่เดินหมาก ยอมแพ้ หรือยึดที่นั่งผู้เล่นไม่ได้
-7. สองตาแรกมี AFK countdown จากเซิร์ฟเวอร์: 1 นาที = 15 วินาที, 3 นาที = 20, 5 นาที = 25, 10 นาที = 30, 15 นาที = 35 และ 30 นาที/Unlimited = 40 วินาที หากหมดเวลาฝ่ายที่ยังไม่เดินจะแพ้ทันที
-
-โหมด **Unlimited** ยังคงไม่มีนาฬิกาหมากรุก หลังผ่านสองตาแรก หากผู้เล่นที่ถึงตาออกจากแท็บ, ขาด heartbeat เกิน 30 วินาที หรือไม่เดินเกิน 4 นาที ระบบจะเริ่ม countdown 40 วินาที คำเตือนสองครั้งแรกยกเลิกได้เมื่อกลับมา (กรณี inactivity ต้องเดินหมากจริง) และครั้งที่สามปรับแพ้ทันที สถานะเวลา/คำเตือน/ผลแพ้ทั้งหมดตัดสินโดย Worker ไม่เชื่อ timestamp จาก browser ห้อง Public ที่เกมจบจะหายจาก Lobby ทันที แต่ state สุดท้ายยังคงอยู่จนหมดอายุเพื่อให้ popup และ reconnect อ่านผลได้
-
-ห้องที่เคยเข้าใน browser เดิมจะอยู่ในส่วน **Recent / Reconnect** เพื่อกลับเข้า session เดิม รายการนี้เป็นประวัติ local เท่านั้น ส่วนสถานะห้องและเกมมาจาก Durable Object เสมอ ชื่อและตราที่เลือกเป็น guest profile ภายในห้อง ไม่ใช่บัญชีผู้ใช้ เรตติ้ง หรือการยืนยันตัวตน
-
-ถ้า deploy frontend และ Worker ที่ origin เดียวกันตาม `wrangler.jsonc` ปัจจุบัน ไม่ต้องเพิ่ม production origin ใน `ALLOWED_ORIGINS` เพราะ Worker อนุญาต same-origin โดยตรง หากแยก frontend ไปอยู่อีกโดเมนจึงค่อยเพิ่ม origin นั้น แล้วรัน:
+คำสั่งตรวจสอบทั้งหมด:
 
 ```bash
-npx wrangler login
-npx wrangler deploy
+npm test                            # ทั้งสองชุดเทส
+npm run build                       # production build
+npx wrangler deploy --dry-run       # ตรวจ config ของ Worker
 ```
 
-`wrangler deploy` จะส่งทั้ง Worker และไฟล์หน้าเว็บใน `dist/` ขึ้น origin เดียวกัน หน้า production จึงใช้ URL ปัจจุบันเป็น API ได้ทันทีโดยไม่ต้องตั้ง `VITE_ONLINE_API_URL` ตัวแปรนี้ยังใช้สำหรับ local dev หรือกรณีที่แยก frontend/backend คนละ origin เท่านั้น ไม่มี Cloudflare credential หรือ session/invite capability ใดถูกกำหนดเป็น `VITE_*`
+## ⚠️ ข้อจำกัด deployment ปัจจุบัน
 
-> ข้อจำกัด deployment ปัจจุบัน: `public/engine/stockfish-18-lite-single.wasm` มีขนาดประมาณ 7.3 MB ซึ่งเกินเพดาน static asset เดี่ยว 5 MB ของ Workers Assets ดังนั้น `wrangler deploy` แบบรวมทุกโหมดจะถูกปฏิเสธจนกว่าจะย้ายไฟล์ engine ไป object storage/CDN ที่เหมาะสมหรือใช้ build ที่เล็กกว่า ระบบ Lobby/Join/Watch และเกมออนไลน์ไม่พึ่งไฟล์นี้และทดสอบ deploy แยกได้ แต่ห้ามถือว่า preview ที่ตัด engine ออกพิสูจน์โหมดเล่นกับ AI
+`public/engine/stockfish-18-lite-single.wasm` มีขนาด ~7.3 MB ซึ่งเกินเพดาน static asset
+เดี่ยว 5 MB ของ Workers Assets จึงยัง deploy รวมทุกโหมดบน origin เดียวไม่ได้จนกว่าจะย้าย
+ไฟล์เอนจินไป object storage/CDN หรือใช้ build ที่เล็กกว่า ระบบ Lobby/Join/Watch ไม่พึ่ง
+ไฟล์นี้และทดสอบ deploy แยกได้ — แต่ห้ามถือว่า preview ที่ตัดเอนจินออกพิสูจน์โหมดเล่นกับ AI
 
-คำสั่งตรวจสอบ:
+## 🤖 ต่อสู้กับ AI ตัวนอก (Legacy Gist protocol)
 
-```bash
-npm test
-npm run build
-npx wrangler deploy --dry-run
-```
-
-## เล่น vs AI ระดับ 1–8
-
-ระดับ 1–3 = เหมาะสำหรับมือใหม่, 4–6 = ผู้เล่นทั่วไป, 7–8 = ระดับทัวร์นาเมนต์
-(ระดับปรับผ่าน UCI `Skill Level` + จำกัดความลึกและเวลา — เอนจินยังเป็นตัวจริง 100%)
-
-## ต่อสู้ Remote Agent แบบเดิม (AI ตัวนอก)
-
-โปรโตคอล Gist ยังคงอยู่เพื่อความเข้ากันได้ของ terminal AI clients แต่ไม่ได้แสดงใน player-facing UI ดูวิธีใช้และ trust model ใน `docs/agent-battle.md`
-
-### รันเอนจินสนามจากเทอร์มินัล (ไม่ต้องเปิด tab ทิ้งไว้)
+โปรโตคอล Gist ยังใช้ได้สำหรับ terminal AI clients (ไม่แสดงใน UI ผู้เล่นแล้ว):
 
 ```bash
 node scripts/arena-host.mjs <gistId> <token> <w|b> [movetimeMs]
 ```
 
-โหลด Stockfish 18 ใน Node แล้ว poll ห้องทุก 2.5 วิ — เมื่อถึงตาฝ่ายสนามจะคำนวณและเขียนท่าลงห้องให้อัตโนมัติ (ใช้ CAS เดียวกับ agent-client ป้องกันชนกัน)
+> GitHub API ไม่คิดค่าใช้จ่าย แต่ poll ถี่จะติด rate limit (60 ครั้ง/ชม. แบบไม่ล็อกอิน)
+> แนะนำช่วงห่าง ≥ 2.5 วินาที (ค่าเริ่มต้น) — ดู trust model ทั้งหมดใน `docs/agent-battle.md`
 
-> หมายเหตุ: GitHub API ไม่คิดค่าใช้จ่าย แต่ poll บ่อยๆ จะติด rate limit (60 ครั้ง/ชม. แบบไม่ล็อกอิน) — ถ้าเป็นห้องสาธารณะที่ไม่มี token แนะนำ poll ≥ 2.5 วินาที (ค่าเริ่มต้น)
+## 🧪 การทดสอบ
 
-## โครงสร้าง
+| ชุด | คำสั่ง | ครอบคลุม |
+| --- | --- | --- |
+| Domain | `npm run test:domain` | นาฬิกา, game state, AFK, โปรโตคอล, validator, lobby/online UI (happy-dom) |
+| Worker | `npm run test:worker` | integration จริงบน Durable Objects: origin, invite ใช้ครั้งเดียว, race เข้าห้อง, AFK alarm, throttle, ผู้ชม 50 คน |
 
-```
-public/engine/        เอนจิน Stockfish (js + wasm) — คัดลอกจาก node_modules โดย scripts/copy-engine.mjs
-src/config.js         ค่าคงที่: ระดับ, ความเร็ว, ชื่อ
-src/engine.js         UCI client (Worker wrapper)
-src/controller.js     state machine ของทุกโหมด
-src/online.js         client ห้องผู้เล่นออนไลน์ (HTTP + WebSocket)
-src/lobby.js          Live Lobby: cards, filters, Join/Watch และ reconnect
-worker/               Worker router, Durable Object, authoritative chess domain
-wrangler.jsonc        Cloudflare Worker/SQLite Durable Object configuration
-src/remote.js         โปรโตคอล Remote Agent เดิม (GitHub Gist)
-src/ui.js             DOM helper
-src/main.js           bootstrap + ไดอะลอก
-scripts/copy-engine.mjs   คัดลอกเอนจินเข้า public/
-scripts/agent-client.mjs  client ตัวอย่างสำหรับ AI ภายนอก
-scripts/arena-host.mjs    รันเอนจินสนามจากเทอร์มินัล (ไม่ต้องเปิด tab)
-docs/agent-battle.md      โปรโตคอลการประลอง (สำหรับ AI คู่แข่ง)
-```
+CI (GitHub Actions) รันทั้งสองชุดและ build ก่อน deploy ทุกครั้ง
 
-## เปลี่ยนเอนจินเป็นตัวเต็ม (แข็งกว่า แต่ใหญ่กว่า)
+## 📄 License
 
-```bash
-node scripts/copy-engine.mjs full-single   # ~40MB
-```
-
-แล้วแก้ `ENGINE_WORKER_URL` ใน `src/config.js` เป็น `./engine/stockfish-18-single.js`
-
-## License
-
-โค้ดของสนามนี้ MIT — เอนจิน Stockfish ตัวที่รวมมาคือ GPLv3 (ดู `node_modules/stockfish/Copying.txt`), chess.js MIT, chessground GPLv3
+โค้ดของสนามนี้ MIT — เอนจิน Stockfish ที่รวมมาคือ GPLv3 (ดู `node_modules/stockfish/Copying.txt`),
+chess.js MIT, chessground GPLv3

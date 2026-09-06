@@ -34,13 +34,15 @@ function gameOutcome(game) {
   return { result: '1/2-1/2', reason: 'draw' };
 }
 
-function finishByTimeout(state, loser) {
+function finishByTimeout(state, loser, now) {
   const next = copy(state);
   next.status = 'finished';
   next.result = loser === 'w' ? '0-1' : '1-0';
   next.reason = 'timeout';
   next.revision += 1;
-  next.updatedAt = next.clock.activeSince + (loser === 'w' ? next.clock.whiteMs : next.clock.blackMs);
+  // updatedAt must stay monotonic; the projected flag-fall instant is already
+  // recoverable from clock.activeSince + the drained remainder.
+  next.updatedAt = now;
   next.clock[loser === 'w' ? 'whiteMs' : 'blackMs'] = 0;
   next.clock.activeSince = null;
   if (next.afk) {
@@ -127,7 +129,7 @@ export function realizeTimeout(state, now = Date.now()) {
   const elapsed = Math.max(0, now - state.clock.activeSince);
   const remainingKey = state.turn === 'w' ? 'whiteMs' : 'blackMs';
   if (elapsed < state.clock[remainingKey]) return { changed: false, state };
-  return { changed: true, state: finishByTimeout(state, state.turn) };
+  return { changed: true, state: finishByTimeout(state, state.turn, now) };
 }
 
 export function applyGameCommand(state, actor, command, now = Date.now()) {

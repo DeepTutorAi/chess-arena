@@ -5,3 +5,7 @@ dist-preview/
 .wrangler/
 .DS_Store
 *.local
+.zcode/
+.battle-room-id.txt
+.mimosa/
+.serena/

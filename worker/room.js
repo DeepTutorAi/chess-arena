@@ -24,6 +24,9 @@ const MAX_ACTIVE_SPECTATORS = 50;
 const MAX_SPECTATOR_SESSIONS = 100;
 const ISSUANCE_WINDOW_MS = 10_000;
 const MAX_ISSUANCE_ATTEMPTS = 60;
+const SOCKET_WINDOW_MS = 10_000;
+const MAX_SOCKET_MESSAGES = 40;
+const MAX_TRACKED_SOCKETS = 2_000;
 
 function json(value, status = 200) {
   return Response.json(value, { status });
@@ -35,11 +38,17 @@ export class ChessRoom extends DurableObject {
     this.env = env;
     this.registrySyncPromise = null;
     this.issuanceAttempts = [];
+    this.socketMessageCounts = new Map();
   }
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (request.method === 'POST' && url.pathname === '/create') return this.create(request);
+    if (request.method === 'POST' && url.pathname === '/create') {
+      // Same concurrency discipline as join/watch: create() spans non-storage
+      // awaits (request.json(), digests) where the input gate would otherwise
+      // release and let events interleave with the read-check-write.
+      return this.ctx.blockConcurrencyWhile(() => this.create(request));
+    }
     if (request.method === 'POST' && url.pathname === '/join') {
       return this.ctx.blockConcurrencyWhile(() => this.join(request));
     }
@@ -206,6 +215,20 @@ export class ChessRoom extends DurableObject {
     return true;
   }
 
+  /** Per-connection token window. In-memory only: hibernation resets it,
+   *  which merely loosens the throttle, never breaks correctness. */
+  consumeSocketMessage(socket, now = Date.now()) {
+    if (this.socketMessageCounts.size > MAX_TRACKED_SOCKETS) this.socketMessageCounts.clear();
+    const entry = this.socketMessageCounts.get(socket) ?? { windowStart: now, count: 0 };
+    if (now - entry.windowStart >= SOCKET_WINDOW_MS) {
+      entry.windowStart = now;
+      entry.count = 0;
+    }
+    entry.count += 1;
+    this.socketMessageCounts.set(socket, entry);
+    return entry.count <= MAX_SOCKET_MESSAGES;
+  }
+
   rateLimited() {
     return new Response(JSON.stringify({ error: 'rate_limited' }), {
       status: 429,
@@ -270,6 +293,11 @@ export class ChessRoom extends DurableObject {
     const attachment = socket.deserializeAttachment();
     if (!attachment?.role || (attachment.role !== 'spectator' && !attachment.color)) {
       socket.close(4003, 'unauthorized');
+      return;
+    }
+
+    if (!this.consumeSocketMessage(socket)) {
+      this.sendError(socket, 'rate_limited', 'ส่งข้อความถี่เกินไป กรุณารอสักครู่');
       return;
     }
 
@@ -346,6 +374,7 @@ export class ChessRoom extends DurableObject {
   }
 
   async webSocketClose(socket, code, reason) {
+    this.socketMessageCounts.delete(socket);
     socket.close(code, reason);
     const state = await this.ctx.storage.get(ROOM_KEY);
     if (state) {
@@ -355,6 +384,7 @@ export class ChessRoom extends DurableObject {
   }
 
   async webSocketError(socket) {
+    this.socketMessageCounts.delete(socket);
     socket.close(1011, 'socket_error');
     const state = await this.ctx.storage.get(ROOM_KEY);
     if (state) this.broadcast(state);
@@ -397,6 +427,9 @@ export class ChessRoom extends DurableObject {
       }),
       spectators,
       spectatorCount: spectators.length,
+      // Clients extrapolate clocks/AFK deadlines from this — they must not
+      // trust their own Date.now() (see client serverTimeOffsetMs).
+      serverTime: Date.now(),
     };
   }
 
@@ -469,11 +502,12 @@ export class ChessRoom extends DurableObject {
 
   async removeFromRegistry(roomId) {
     const stub = this.env.LOBBY.get(this.env.LOBBY.idFromName('global'));
-    await stub.fetch('http://lobby/remove', {
+    const response = await stub.fetch('http://lobby/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId }),
     });
+    if (!response.ok) throw new Error(`Lobby removal failed: ${response.status}`);
   }
 
   broadcast(state) {

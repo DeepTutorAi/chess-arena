@@ -189,6 +189,10 @@ test('getOnlineApiUrl uses an explicit endpoint or the production page origin', 
   assert.equal(getOnlineApiUrl({ VITE_ONLINE_API_URL: 'https://rooms.example.workers.dev/' }), 'https://rooms.example.workers.dev');
   assert.equal(getOnlineApiUrl({}, { protocol: 'https:', origin: 'https://chess.example.workers.dev' }), 'https://chess.example.workers.dev');
   assert.equal(getOnlineApiUrl({}, { protocol: 'http:', origin: 'http://localhost:5173' }), '');
+  // GitHub Pages cannot host the Worker — the origin fallback would only hit
+  // the static host, so online mode is reported unavailable instead.
+  assert.equal(getOnlineApiUrl({}, { protocol: 'https:', origin: 'https://player.github.io', hostname: 'player.github.io' }), '');
+  assert.equal(getOnlineApiUrl({ VITE_ONLINE_API_URL: 'https://rooms.example.workers.dev' }, { protocol: 'https:', origin: 'https://player.github.io', hostname: 'player.github.io' }), 'https://rooms.example.workers.dev');
 });
 
 test('OnlineRoomClient authenticates with a WebSocket subprotocol, never the URL', () => {
@@ -259,12 +263,60 @@ test('OnlineRoomClient reports player visibility and heartbeat while connected, 
   listeners.get('visibilitychange')();
   assert.deepEqual(sent.slice(1), [
     { type: 'heartbeat', visibility: 'visible' },
+    { type: 'ping' },
     { type: 'presence', visibility: 'hidden' },
   ]);
 
   client.stop();
   assert.equal(intervals.size, 0);
   assert.equal(listeners.has('visibilitychange'), false);
+});
+
+test('a pong keeps liveness alive while sustained silence forces a reconnect', () => {
+  const closed = [];
+  const realNow = Date.now;
+  let fakeNow = 1_000_000;
+  Date.now = () => fakeNow;
+  try {
+    class FakeWebSocket {
+      static OPEN = 1;
+      constructor() { this.readyState = 1; this.listeners = new Map(); }
+      addEventListener(type, callback) { this.listeners.set(type, callback); }
+      send(value) {
+        // Each ping represents one 10s heartbeat interval elapsing.
+        if (JSON.parse(value).type === 'ping') fakeNow += 10_000;
+      }
+      close(code, reason) { closed.push({ code, reason }); }
+      open() { this.readyState = FakeWebSocket.OPEN; this.listeners.get('open')?.(); }
+    }
+    const client = new OnlineRoomClient({
+      apiUrl: 'https://rooms.example.workers.dev',
+      WebSocketImpl: FakeWebSocket,
+      storage: memoryStorage(),
+      documentImpl: { visibilityState: 'visible', addEventListener() {}, removeEventListener() {} },
+      setIntervalImpl(callback) { client._tick = callback; return 1; },
+      clearIntervalImpl() {},
+    });
+    client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
+    const socket = client.connect();
+    socket.open(); // _lastPongAt = 1_000_000
+
+    client._tick();
+    client._tick();
+    client._tick(); // 30s of silence exactly — still at the boundary
+    assert.deepEqual(closed, []);
+
+    socket.listeners.get('message')({ data: JSON.stringify({ type: 'pong' }) });
+    client._tick(); // pong reset the silence window
+    assert.deepEqual(closed, []);
+
+    fakeNow += 21_000; // >30s since the last pong
+    client._tick();
+    assert.equal(closed.at(-1)?.reason, 'liveness_timeout');
+    client.stop();
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 test('OnlineRoomClient never sends player presence for spectators', () => {
@@ -345,7 +397,7 @@ test('OnlineRoomClient invokes browser fetch with the global receiver', async ()
   assert.equal(receiver, globalThis);
 });
 
-test('OnlineRoomClient uses bounded exponential reconnect and stops after its cap', () => {
+test('OnlineRoomClient uses bounded exponential reconnect with jitter and stops after its cap', () => {
   const delays = [];
   const states = [];
   class ClosingWebSocket {
@@ -368,6 +420,150 @@ test('OnlineRoomClient uses bounded exponential reconnect and stops after its ca
   client.connect();
 
   for (let index = 0; index < 4; index += 1) client.socket.fail();
-  assert.deepEqual(delays, [500, 1_000, 2_000]);
+  // Base 500/1000/2000 with ±20% jitter.
+  assert.equal(delays.length, 3);
+  assert.ok(delays[0] >= 400 && delays[0] <= 600, `delay 0 = ${delays[0]}`);
+  assert.ok(delays[1] >= 800 && delays[1] <= 1_200, `delay 1 = ${delays[1]}`);
+  assert.ok(delays[2] >= 1_600 && delays[2] <= 2_400, `delay 2 = ${delays[2]}`);
   assert.equal(states.at(-1), 'failed');
+});
+
+test('terminal close codes never schedule a reconnect', () => {
+  const cases = [
+    { code: 4001, expectedState: 'replaced' },
+    { code: 4003, expectedState: 'unauthorized' },
+    { code: 4004, expectedState: 'expired' },
+  ];
+  for (const { code, expectedState } of cases) {
+    let scheduled = 0;
+    const states = [];
+    class ClosingWebSocket {
+      static OPEN = 1;
+      constructor() { this.listeners = new Map(); }
+      addEventListener(type, callback) { this.listeners.set(type, callback); }
+      close() {}
+      send() {}
+      drop() { this.listeners.get('close')?.({ code }); }
+    }
+    const client = new OnlineRoomClient({
+      apiUrl: 'https://rooms.example.workers.dev',
+      WebSocketImpl: ClosingWebSocket,
+      storage: memoryStorage(),
+      setTimeoutImpl() { scheduled += 1; return 1; },
+      onConnectionState: (state) => states.push(state),
+    });
+    client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
+    client.connect();
+    client.socket.drop();
+
+    assert.equal(scheduled, 0, `code ${code} must not reconnect`);
+    assert.equal(states.at(-1), expectedState);
+    client.stop();
+  }
+});
+
+test('reconnect() retries after a terminal failure and resets the attempt budget', () => {
+  const delays = [];
+  const states = [];
+  const timers = [];
+  class ClosingWebSocket {
+    static OPEN = 1;
+    constructor() { this.listeners = new Map(); }
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    close() {}
+    send() {}
+    fail() { this.listeners.get('close')?.({ code: 1006 }); }
+  }
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.workers.dev',
+    WebSocketImpl: ClosingWebSocket,
+    storage: memoryStorage(),
+    maxReconnectAttempts: 1,
+    setTimeoutImpl(callback, delay) { delays.push(delay); timers.push(callback); return timers.length; },
+    clearTimeoutImpl() {},
+    onConnectionState: (state) => states.push(state),
+  });
+  client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
+  client.connect();
+  assert.equal(states.at(-1), 'connecting');
+
+  client.socket.fail();
+  assert.equal(states.at(-1), 'reconnecting');
+  timers.shift()(); // fire the pending reconnect -> second socket
+  client.socket.fail();
+  assert.equal(states.at(-1), 'failed');
+
+  client.reconnect();
+  assert.equal(client.socket instanceof ClosingWebSocket, true);
+  assert.equal(states.at(-1), 'connecting');
+  client.stop();
+});
+
+test('HTTP create/join/watch snapshots are validated like socket snapshots', async () => {
+  class FakeWebSocket {
+    static OPEN = 1;
+    constructor() { this.listeners = new Map(); }
+    addEventListener() {}
+    close() {}
+    send() {}
+  }
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.workers.dev',
+    WebSocketImpl: FakeWebSocket,
+    storage: memoryStorage(),
+    async fetchImpl() {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { roomId: ROOM_ID, sessionToken: TOKEN, role: 'host', color: 'w', state: validState({ turn: 'green' }) };
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => client.create({ playerName: 'Host' }),
+    /ไม่ตรงโปรโตคอล/u,
+  );
+  assert.equal(client.state, null);
+});
+
+test('a finished snapshot clears the persisted session shortcut', async () => {
+  const storage = memoryStorage();
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.workers.dev',
+    storage,
+    WebSocketImpl: class {
+      static OPEN = 1;
+      constructor() { this.listeners = new Map(); }
+      addEventListener() {}
+      close() {}
+      send() {}
+    },
+  });
+  client.useSession(ROOM_ID, { sessionToken: TOKEN, role: 'host', color: 'w' });
+  assert.notEqual(storage.getItem(`chess-arena-online-session:${ROOM_ID}`), null);
+
+  client._rememberState(validState({
+    status: 'finished',
+    result: '1-0',
+    reason: 'checkmate',
+    serverTime: 5_000,
+  }));
+
+  assert.equal(storage.getItem(`chess-arena-online-session:${ROOM_ID}`), null);
+  assert.ok(Math.abs(client.now() - 5_000) < 5_000, 'serverTime seeds the offset');
+});
+
+test('validateServerMessage checks the clock subtree shape and tolerates serverTime', () => {
+  assert.equal(validateServerMessage(validState({ clock: { initialMs: 1 } })).ok, false);
+  assert.equal(validateServerMessage(validState({ clock: { initialMs: -1, incrementMs: 0, whiteMs: 1, blackMs: 1, activeSince: null } })).ok, false);
+  assert.equal(validateServerMessage(validState({ clock: { initialMs: 1, incrementMs: 0, whiteMs: 1, blackMs: 1, activeSince: 'soon' } })).ok, false);
+  assert.equal(validateServerMessage(validState({ serverTime: 'now' })).ok, false);
+  const withClock = validState({
+    clock: { initialMs: 60_000, incrementMs: 1_000, whiteMs: 59_000, blackMs: 60_000, activeSince: 1_000 },
+    serverTime: 2_000,
+  });
+  assert.deepEqual(validateServerMessage(withClock), { ok: true, value: withClock });
 });
