@@ -59,6 +59,7 @@ export class Controller {
     this.ui.setShareVisible?.(false);
     this._onlineClockTimer = null;
     this._onlineAfkTimer = null;
+    this._onlinePlyCount = null; // plies in the last accepted snapshot (null = none yet)
     this.clock = null;
 
     this.engineReady = false;
@@ -658,6 +659,7 @@ export class Controller {
     this.onlineRole = null;
     this.onlineWatchInviteToken = null;
     this.onlineConnectionState = 'disconnected';
+    this._onlinePlyCount = null;
     this.engineReady = false;
     this.engineBusy = false;
     this.hintBusy = false;
@@ -925,6 +927,7 @@ export class Controller {
     const wasFinished = this.onlineState?.status === 'finished';
 
     this.onlineState = state;
+    this._playOnlineMoveSound(state);
     // Rematch handshake (roadmap B): remember the live offer for the game-over
     // card, even while review owns the screen.
     this._onlineRematch = state.rematch ?? null;
@@ -1007,6 +1010,22 @@ export class Controller {
     } else {
       this._announceOnlineResult(state);
     }
+  }
+
+  /** Move / capture / check feedback for online games — the bot modes get it
+   *  from _afterMove, which online never runs. Only a NEW ply in a live game
+   *  makes noise: not the first snapshot (join / resume), not a rematch reset,
+   *  not a game-ending move (the result sound covers that) and not while the
+   *  review owns the screen. */
+  _playOnlineMoveSound(state) {
+    const previous = this._onlinePlyCount;
+    this._onlinePlyCount = state.moves.length;
+    if (previous === null || state.moves.length <= previous) return;
+    if (state.status !== 'active' || this._reviewActive) return;
+    const last = this.game.history({ verbose: true }).at(-1);
+    if (!last) return;
+    sounds.play(last.captured ? 'capture' : 'move');
+    if (this.game.inCheck()) sounds.play('check');
   }
 
   /** Server-aligned now() — clock/AFK deadlines are server epochs and must
