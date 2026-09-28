@@ -91,3 +91,21 @@ test('names are text, never markup', (t) => {
   assert.equal(view.querySelector('img'), null);
   assert.equal(view.querySelector('input:not([type])').value, '<img src=x onerror=alert(1)>');
 });
+
+test('cancel is only offered while searching, not once a join or create is under way', async (t) => {
+  let controls;
+  let release;
+  const { view } = setup(t, {
+    onStart: (request, c) => { controls = c; return new Promise((resolve) => { release = () => resolve({ ok: true }); }); },
+  });
+  const cancel = [...view.querySelectorAll('button')].find((b) => b.textContent === 'ยกเลิก');
+  const pending = view.submit();
+  assert.equal(cancel.hidden, false, 'searching: can be cancelled');
+  controls.setCancelable(false);
+  assert.equal(cancel.hidden, true, 'joining: too late to cancel');
+  controls.setCancelable(true);
+  assert.equal(cancel.hidden, false);
+  release();
+  await pending;
+  assert.equal(cancel.hidden, true);
+});

@@ -111,6 +111,7 @@ test('incoming requests show accept / decline and pending ones can be withdrawn'
 // ---- the controller ------------------------------------------------------------------------------
 
 function makeHarness(role = 'host', color = 'w') {
+  const harnessRef = {};
   const calls = { sent: [], toasts: [], gameOver: null, logs: [] };
   const toastNodes = [];
   const ui = new Proxy({
@@ -146,11 +147,11 @@ function makeHarness(role = 'host', color = 'w') {
   };
   const controller = new Controller({
     ui, ground, onPromotion: async () => 'q', gameOverDelayMs: 0,
-    onlineClientFactory(options) { callbacks = options; return client; },
+    onlineClientFactory(options) { callbacks = options; harnessRef.callbacks = options; return client; },
     history: { save: async () => 'id', setAnalysis: async () => true },
     turnAlert: { notify() {}, clear() {}, destroy() {} },
   });
-  return { controller, calls, client };
+  return { controller, calls, client, harnessRef };
 }
 
 async function playing(t, role = 'host', color = 'w') {
@@ -165,14 +166,29 @@ async function playing(t, role = 'host', color = 'w') {
   return h;
 }
 
-test('our requests go out with the current revision, and offering shows a receipt', async (t) => {
+test('our requests go out with the current revision; the receipt comes from the server, not the click', async (t) => {
   const { controller, calls } = await playing(t);
   controller._onOnlineState(stateAfter(TWO));
   assert.equal(controller.offerDraw(), true);
   assert.equal(controller.requestTakeback(), true);
   assert.equal(controller.abortOnlineGame(), true);
   assert.deepEqual(calls.sent, [['drawOffer', 3], ['takebackRequest', 3], ['abort', 3]]);
-  assert.equal(calls.toasts[0].title, 'ส่งข้อเสนอเสมอแล้ว');
+  assert.equal(calls.toasts.length, 0, 'nothing is claimed before the server has answered');
+
+  controller._onOnlineState(stateAfter(TWO, { revision: 4, drawOffer: { by: 'w' } }));
+  assert.equal(calls.toasts.at(-1).title, 'ส่งข้อเสนอเสมอแล้ว', 'the snapshot with our offer confirms it');
+  controller._onOnlineState(stateAfter(TWO, { revision: 5, drawOffer: { by: 'w' } }));
+  assert.equal(calls.toasts.filter((t) => t.title === 'ส่งข้อเสนอเสมอแล้ว').length, 1, 'said once');
+});
+
+test('a refused request is shown to the player, not only logged', async (t) => {
+  const { controller, calls, harnessRef } = await playing(t);
+  controller._onOnlineState(stateAfter(TWO));
+  harnessRef.callbacks.onError('อีกฝ่ายปฏิเสธข้อเสนอเสมอแล้ว — เดินหมากก่อนจึงจะขอใหม่ได้', { code: 'draw_blocked' });
+  assert.match(calls.toasts.at(-1).title, /ปฏิเสธข้อเสนอเสมอแล้ว/u);
+  const count = calls.toasts.length;
+  harnessRef.callbacks.onError('rate limited', { code: 'rate_limited' });
+  assert.equal(calls.toasts.length, count, 'other errors stay in the log');
 });
 
 test('a failed send is logged, not thrown', async (t) => {
@@ -201,10 +217,11 @@ test('an incoming draw offer prompts accept / decline, once, and the prompt goes
   assert.equal(prompt.isConnected, false, 'the stale prompt is removed');
 });
 
-test('our own offers never prompt us', async (t) => {
+test('our own offers never prompt us (they only get a receipt)', async (t) => {
   const { controller, calls } = await playing(t);
   controller._onOnlineState(stateAfter(TWO, { revision: 4, drawOffer: { by: 'w' } }));
-  assert.equal(calls.toasts.length, 0);
+  assert.equal(calls.toasts.filter((toast) => toast.actions?.length).length, 0, 'no accept / decline prompt');
+  assert.deepEqual(calls.toasts.map((toast) => toast.title), ['ส่งข้อเสนอเสมอแล้ว']);
 });
 
 test('an incoming takeback request prompts too; a draw offer takes priority when both are open', async (t) => {
@@ -290,4 +307,60 @@ test('an aborted or one-move game is not kept in the history', async (t) => {
   controller._onOnlineState(stateAfter(['e2e4'], { revision: 3, status: 'finished', result: '*', reason: 'aborted' }));
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(saved.length, 0);
+});
+
+test('taking back our own offer is not reported as a refusal', async (t) => {
+  const { controller, calls } = await playing(t);
+  controller._onOnlineState(stateAfter(TWO, { revision: 3, drawOffer: { by: 'w' } }));
+  const before = calls.toasts.length;
+  controller.cancelDraw();
+  controller._onOnlineState(stateAfter(TWO, { revision: 4 }));
+  assert.equal(calls.toasts.length, before, 'no "declined" notice');
+
+  controller._onOnlineState(stateAfter(['e2e4'], { revision: 5, takebackOffer: { by: 'w' } }));
+  const mid = calls.toasts.length;
+  controller.cancelTakeback();
+  controller._onOnlineState(stateAfter(['e2e4'], { revision: 6 }));
+  assert.equal(calls.toasts.length, mid);
+
+  // and a later real refusal still is reported
+  controller._onOnlineState(stateAfter(TWO, { revision: 7, drawOffer: { by: 'w' } }));
+  controller._onOnlineState(stateAfter(TWO, { revision: 8 }));
+  assert.equal(calls.toasts.at(-1).title, 'ฝ่ายตรงข้ามปฏิเสธข้อเสนอเสมอ');
+});
+
+test('the prompt for an incoming offer lives in its own channel and comes back if it was closed', async (t) => {
+  const { controller, calls } = await playing(t);
+  controller._onOnlineState(stateAfter(TWO, { revision: 3, drawOffer: { by: 'b' } }));
+  const prompt = calls.toasts.at(-1);
+  assert.equal(prompt.channel, 'offer', 'unrelated notices cannot replace it');
+  // the prompt element vanished anyway (e.g. the page was re-rendered)
+  prompt.remove();
+  controller._onOnlineState(stateAfter(TWO, { revision: 4, drawOffer: { by: 'b' } }));
+  assert.equal(calls.toasts.at(-1).title, 'ฝ่ายตรงข้ามเสนอเสมอ');
+  assert.notEqual(calls.toasts.at(-1), prompt, 'a fresh prompt was made');
+});
+
+test('after a decline the button is greyed out until we have moved', (t) => {
+  const declined = stateAfter(TWO, { drawBlock: 'w', takebackBlock: 'b' });
+  assert.equal(onlineActionAvailability(declined, 'w').draw, 'blocked');
+  assert.equal(onlineActionAvailability(declined, 'b').draw, 'available', 'the other side is free to offer');
+  assert.equal(onlineActionAvailability(declined, 'b').takeback, 'blocked');
+
+  const r = rowsFor(onlineActionAvailability(declined, 'w'), t);
+  assert.equal(button(r, 'ขอเสมอ').disabled, true);
+  assert.match(r.text(), /เดินหมากก่อนจึงจะขอใหม่ได้/u);
+});
+
+// ---- guards ----------------------------------------------------------------------------------------
+
+test('nothing else is opened over a game that is being played', async (t) => {
+  const { controller } = await playing(t);
+  controller._onOnlineState(stateAfter(TWO));
+  assert.equal(controller.hasGameInProgress(), true);
+  assert.equal((await controller.startMistakePractice()).ok, false);
+  assert.match((await controller.importText('4k3/8/8/8/8/8/4P3/4K3 w - - 0 1')).error, /มีเกมที่กำลังเล่นอยู่/u);
+  const rec = { initialFen: START_FEN, moves: [{ from: 'e2', to: 'e4' }], players: {} };
+  assert.equal((await controller.openRecordForReview(rec)).ok, false);
+  assert.equal(controller.mode, MODES.ONLINE, 'the game was left alone');
 });

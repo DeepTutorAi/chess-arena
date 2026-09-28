@@ -888,9 +888,12 @@ export class UI {
 
   /** Non-blocking corner toast — used during review for online events
    *  (opponent disconnect, future rematch offers). Never covers the board. */
-  showFloatingToast({ title, detail = '', actions = [], autoCloseMs = 0 } = {}) {
-    document.querySelectorAll('.floating-toast').forEach((t) => t.remove());
+  /** channel: toasts replace only others in their own channel, so a pending
+   *  question (channel "offer") is not wiped by an unrelated notice. */
+  showFloatingToast({ title, detail = '', actions = [], autoCloseMs = 0, channel = 'default' } = {}) {
+    document.querySelectorAll('.floating-toast').forEach((t) => { if (t.dataset.channel === channel) t.remove(); });
     const toast = this.el('div', 'floating-toast');
+    toast.dataset.channel = channel;
     toast.setAttribute('role', 'status');
     toast.append(
       this.el('div', 'floating-toast-title', title),

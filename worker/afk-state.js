@@ -26,6 +26,8 @@ function finish(state, loser, reason, now) {
   next.updatedAt = now;
   next.afk.openingDeadlineAt = null;
   next.afk.episode = null;
+  next.drawOffer = null; // a finished game carries no open offers
+  next.takebackOffer = null;
   if (next.clock) next.clock.activeSince = null;
   return next;
 }

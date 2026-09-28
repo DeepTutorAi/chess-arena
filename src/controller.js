@@ -14,7 +14,7 @@ import { bookPlies, getBotBook } from './botbook.js';
 import { createTurnAlert } from './turnalert.js';
 import { MIN_RATED_PLIES, createStatsStore } from './stats.js';
 import { createHistoryStore } from './history.js';
-import { createMistakeBank, practiceAnalysis } from './mistakes.js';
+import { createMistakeBank, gameKey, practiceAnalysis } from './mistakes.js';
 import { onlineActionAvailability } from './online-actions.js';
 import { ImportError, decodeShareToken, encodeShareToken, parseImport, recordToPgn } from './pgn.js';
 import { copyText, downloadTextFile, pgnFilename, shareUrl } from './share-ui.js';
@@ -32,6 +32,14 @@ import {
   getStrongEnginePreference,
   isCrossOriginIsolated,
 } from './config.js';
+
+const BUSY_MESSAGE = 'มีเกมที่กำลังเล่นอยู่ — จบหรือออกจากเกมนั้นก่อน';
+
+// Refusals of the online draw / takeback / abort commands worth a visible notice.
+const OFFER_ERROR_CODES = new Set([
+  'draw_blocked', 'takeback_blocked', 'too_early', 'nothing_to_take_back', 'too_late_to_abort',
+  'no_draw_offer', 'no_takeback_request', 'own_offer', 'not_your_offer',
+]);
 
 export const MODES = {
   HUMAN_VS_AI: 'hva',
@@ -93,6 +101,7 @@ export class Controller {
     this._onlinePlyCount = null; // plies in the last accepted snapshot (null = none yet)
     this._offerPrompt = null;    // toast asking us to answer a draw offer / takeback request
     this._offerPromptKey = null;
+    this._withdrawn = new Set(); // offers we took back ourselves ('draw' / 'takeback')
     this.clock = null;
 
     this.engineReady = false;
@@ -734,6 +743,7 @@ export class Controller {
     if (this._offerPrompt?.isConnected) this._offerPrompt.remove();
     this._offerPrompt = null;
     this._offerPromptKey = null;
+    this._withdrawn.clear();
     this.engineReady = false;
     this.engineBusy = false;
     this.hintBusy = false;
@@ -924,6 +934,10 @@ export class Controller {
       onError: (message, detail) => {
         this.ui.log(`Online: ${message}`, 'err');
         if (detail?.code === 'stale_revision') this.online?.sync();
+        // A refused draw / takeback / abort is the player's to know about, not just a log line.
+        if (OFFER_ERROR_CODES.has(detail?.code)) {
+          this.ui.showFloatingToast?.({ title: message, autoCloseMs: 4500 });
+        }
       },
       onConnectionState: (state) => {
         this.onlineConnectionState = state;
@@ -1161,7 +1175,9 @@ export class Controller {
     return onlineActionAvailability(this.onlineState, this.onlineSide);
   }
 
-  _sendOnlineAction(method, feedback) {
+  /** Send one of those commands. Confirmation comes from the server's next snapshot
+   *  (see _syncOnlineOffers), never from the click: the server may refuse it. */
+  _sendOnlineAction(method) {
     if (!this.online || !this.onlineState) return false;
     try {
       this.online[method](this.onlineState.revision);
@@ -1169,19 +1185,26 @@ export class Controller {
       this.ui.log(`ส่งคำสั่งไม่สำเร็จ: ${err.message}`, 'err');
       return false;
     }
-    if (feedback) this.ui.showFloatingToast?.({ ...feedback, autoCloseMs: 3000 });
     return true;
   }
 
   abortOnlineGame() { return this._sendOnlineAction('abort'); }
-  offerDraw() { return this._sendOnlineAction('drawOffer', { title: 'ส่งข้อเสนอเสมอแล้ว', detail: 'รอคำตอบจากฝ่ายตรงข้าม' }); }
+  offerDraw() { return this._sendOnlineAction('drawOffer'); }
   acceptDraw() { return this._sendOnlineAction('drawAccept'); }
   declineDraw() { return this._sendOnlineAction('drawDecline'); }
-  cancelDraw() { return this._sendOnlineAction('drawCancel'); }
-  requestTakeback() { return this._sendOnlineAction('takebackRequest', { title: 'ส่งคำขอย้อนตาแล้ว', detail: 'รอคำตอบจากฝ่ายตรงข้าม' }); }
+  cancelDraw() {
+    const sent = this._sendOnlineAction('drawCancel');
+    if (sent) this._withdrawn.add('draw'); // so the opponent is not said to have declined
+    return sent;
+  }
+  requestTakeback() { return this._sendOnlineAction('takebackRequest'); }
   acceptTakeback() { return this._sendOnlineAction('takebackAccept'); }
   declineTakeback() { return this._sendOnlineAction('takebackDecline'); }
-  cancelTakeback() { return this._sendOnlineAction('takebackCancel'); }
+  cancelTakeback() {
+    const sent = this._sendOnlineAction('takebackCancel');
+    if (sent) this._withdrawn.add('takeback');
+    return sent;
+  }
 
   /**
    * React to draw offers / takeback requests in a new snapshot: a prompt for an
@@ -1193,28 +1216,43 @@ export class Controller {
     const me = this.onlineSide;
     const live = state.status === 'active';
 
-    // Our own request was answered?
+    // Our own request: confirmed by the server, or answered by the opponent?
+    if (state.status === 'active' && !previous?.drawOffer && state.drawOffer?.by === me) {
+      this.ui.showFloatingToast?.({ title: 'ส่งข้อเสนอเสมอแล้ว', detail: 'รอคำตอบจากฝ่ายตรงข้าม', autoCloseMs: 3000 });
+    }
+    if (state.status === 'active' && !previous?.takebackOffer && state.takebackOffer?.by === me) {
+      this.ui.showFloatingToast?.({ title: 'ส่งคำขอย้อนตาแล้ว', detail: 'รอคำตอบจากฝ่ายตรงข้าม', autoCloseMs: 3000 });
+    }
     if (previous?.status === 'active') {
-      if (previous.drawOffer?.by === me && !state.drawOffer && live && state.moves.length === previous.moves.length) {
-        this.ui.showFloatingToast?.({ title: 'ฝ่ายตรงข้ามปฏิเสธข้อเสนอเสมอ', detail: 'เดินหมากต่อ — ขอใหม่ได้หลังเดินอีกตา', autoCloseMs: 4000 });
+      if (previous.drawOffer?.by === me && !state.drawOffer) {
+        if (this._withdrawn.delete('draw')) { /* we took it back ourselves */ }
+        else if (live && state.moves.length === previous.moves.length) {
+          this.ui.showFloatingToast?.({ title: 'ฝ่ายตรงข้ามปฏิเสธข้อเสนอเสมอ', detail: 'เดินหมากต่อ — ขอใหม่ได้หลังเดินอีกตา', autoCloseMs: 4000 });
+        }
       }
-      if (previous.takebackOffer?.by === me && !state.takebackOffer && live) {
-        // Fewer plies: accepted. The same number: declined. More: the opponent simply moved on.
-        const answer = state.moves.length < previous.moves.length
-          ? { title: 'ฝ่ายตรงข้ามยอมให้ย้อนตา', detail: 'เดินตาของคุณใหม่ได้เลย', autoCloseMs: 4000 }
-          : state.moves.length === previous.moves.length
-            ? { title: 'ฝ่ายตรงข้ามไม่ยอมให้ย้อนตา', detail: 'เดินหมากต่อ', autoCloseMs: 4000 }
-            : null;
-        if (answer) this.ui.showFloatingToast?.(answer);
+      if (previous.takebackOffer?.by === me && !state.takebackOffer) {
+        if (this._withdrawn.delete('takeback')) { /* we took it back ourselves */ }
+        else if (live) {
+          // Fewer plies: accepted. The same number: declined. More: the opponent simply moved on.
+          const answer = state.moves.length < previous.moves.length
+            ? { title: 'ฝ่ายตรงข้ามยอมให้ย้อนตา', detail: 'เดินตาของคุณใหม่ได้เลย', autoCloseMs: 4000 }
+            : state.moves.length === previous.moves.length
+              ? { title: 'ฝ่ายตรงข้ามไม่ยอมให้ย้อนตา', detail: 'เดินหมากต่อ', autoCloseMs: 4000 }
+              : null;
+          if (answer) this.ui.showFloatingToast?.(answer);
+        }
       }
     }
+    // A pending withdrawal that the server never applied must not linger.
+    if (!state.drawOffer) this._withdrawn.delete('draw');
+    if (!state.takebackOffer) this._withdrawn.delete('takeback');
 
     // An incoming request: one prompt at a time, the draw first.
     const draw = live && state.drawOffer && state.drawOffer.by !== me ? state.drawOffer : null;
     const takeback = live && state.takebackOffer && state.takebackOffer.by !== me ? state.takebackOffer : null;
     // An offer belongs to one position (any move clears it), so who + how many plies identifies it.
     const key = draw ? `draw:${draw.by}:${state.moves.length}` : takeback ? `takeback:${takeback.by}:${state.moves.length}` : null;
-    if (key === this._offerPromptKey) return;
+    if (key === this._offerPromptKey && (!key || this._offerPrompt?.isConnected)) return;
     if (this._offerPrompt?.isConnected) this._offerPrompt.remove();
     this._offerPrompt = null;
     this._offerPromptKey = key;
@@ -1224,11 +1262,13 @@ export class Controller {
         title: 'ฝ่ายตรงข้ามเสนอเสมอ',
         detail: 'ยอมรับเพื่อจบเกมเสมอ หรือปฏิเสธแล้วเล่นต่อ',
         actions: [['ยอมรับ', () => this.acceptDraw(), true], ['ปฏิเสธ', () => this.declineDraw()]],
+        channel: 'offer',
       })
       : this.ui.showFloatingToast?.({
         title: 'ฝ่ายตรงข้ามขอย้อนตา',
         detail: 'ขอเดินตาล่าสุดของเขาใหม่ — ยอมรับหรือไม่?',
         actions: [['ยอมรับ', () => this.acceptTakeback(), true], ['ปฏิเสธ', () => this.declineTakeback()]],
+        channel: 'offer',
       });
   }
 
@@ -1457,7 +1497,7 @@ export class Controller {
     if (!this.mistakes || !record?.humanColor) return; // imports and arena games: whose mistakes?
     let added = 0;
     try {
-      added = this.mistakes.addFromAnalysis(analysis, record.humanColor, this._historySlot.id);
+      added = this.mistakes.addFromAnalysis(analysis, record.humanColor, gameKey(record));
     } catch { return; }
     if (added > 0 && !quiet) {
       this.ui.showFloatingToast?.({
@@ -1474,6 +1514,7 @@ export class Controller {
    * @returns {Promise<{ok: boolean, error?: string, count?: number}>}
    */
   async startMistakePractice({ ahead = false } = {}) {
+    if (this.hasGameInProgress()) return { ok: false, error: BUSY_MESSAGE };
     const items = ahead ? this.mistakes.ahead() : this.mistakes.due();
     if (!items.length) return { ok: false, error: ahead ? 'ไม่มีตาพลาดในคลัง' : 'ตอนนี้ยังไม่มีตาพลาดที่ถึงเวลาทบทวน' };
     const analysis = practiceAnalysis(items);
@@ -2395,7 +2436,8 @@ export class Controller {
    * from history, a pasted PGN or a share link.
    * @returns {Promise<{ok: boolean, error?: string}>}
    */
-  async openRecordForReview(record, { analysis = null, historyId = null, source = 'import' } = {}) {
+  async openRecordForReview(record, { analysis = null, historyId = null, source = 'import', force = false } = {}) {
+    if (!force && this.hasGameInProgress()) return { ok: false, error: BUSY_MESSAGE };
     const ticket = ++this._openTicket;
     let replayed;
     try {
@@ -2466,6 +2508,7 @@ export class Controller {
       return { ok: false, error: error instanceof ImportError ? error.message : 'นำเข้าไม่สำเร็จ' };
     }
     if (parsed.kind === 'fen') {
+      if (this.hasGameInProgress()) return { ok: false, error: BUSY_MESSAGE };
       const ticket = ++this._openTicket;
       await this.start(MODES.ANALYZE, { initialFen: parsed.fen });
       if (ticket !== this._openTicket) return { ok: false, superseded: true };
@@ -2478,7 +2521,7 @@ export class Controller {
   }
 
   /** Open the game inside a share link (the part after `#g=`). */
-  async openSharedToken(token) {
+  async openSharedToken(token, { force = false } = {}) {
     let record;
     try {
       record = await decodeShareToken(token);
@@ -2487,7 +2530,7 @@ export class Controller {
       this.ui.showFloatingToast?.({ title: 'เปิดลิงก์ไม่ได้', detail: message, actions: [['ตกลง']] });
       return { ok: false, error: message };
     }
-    return this.openRecordForReview(record, { source: 'import' });
+    return this.openRecordForReview(record, { source: 'import', force });
   }
 
   /** Save a game as a .pgn file. */

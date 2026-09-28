@@ -21,10 +21,8 @@ export function bookPlies(level) {
   return Math.min(12, 4 + level);
 }
 
-/** Position identity: the first four FEN fields (no move counters). */
-export function positionKey(fen) {
-  const text = fen.split(' ').slice(0, 4).join(' ');
-  // cyrb53 — a small, well-mixed 53-bit string hash; keeps the JSON compact.
+/** cyrb53 — a small, well-mixed 53-bit string hash, as base 36. */
+export function hashString(text) {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
   for (let i = 0; i < text.length; i++) {
@@ -35,6 +33,11 @@ export function positionKey(fen) {
   h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/** Position identity: the first four FEN fields (no move counters). */
+export function positionKey(fen) {
+  return hashString(fen.split(' ').slice(0, 4).join(' '));
 }
 
 export class BotBook {

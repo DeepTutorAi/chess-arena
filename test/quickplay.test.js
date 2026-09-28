@@ -91,22 +91,47 @@ test('our own waiting table is never "found" again', async () => {
   assert.equal(result.outcome, 'created');
 });
 
-test('cancelling stops before joining or creating anything', async () => {
+test('cancelling while the lobby is being read stops before joining or creating anything', async () => {
   let cancelled = false;
   const { deps: d, log } = deps({ rooms: [room('a')] });
   const original = d.listLobby;
   d.listLobby = async (f) => { const r = await original(f); cancelled = true; return r; };
   const result = await runQuickPlay(d, { timeControlId: 'blitz_5_0', cancelled: () => cancelled });
   assert.equal(result.outcome, 'cancelled');
-  assert.deepEqual(log.map((l) => l[0]), ['list']);
+  assert.deepEqual(log.map((l) => l[0]), ['list'], 'no seat taken, no table opened behind the player\'s back');
+});
 
-  cancelled = false;
-  const second = deps({ rooms: [room('a', { createdAt: 1 }), room('b', { createdAt: 2 })], joinFails: ['a'] });
-  const origJoin = second.deps.join;
-  second.deps.join = async (r) => { try { await origJoin(r); } finally { cancelled = true; } };
-  const r2 = await runQuickPlay(second.deps, { timeControlId: 'blitz_5_0', cancelled: () => cancelled });
-  assert.equal(r2.outcome, 'cancelled');
-  assert.equal(second.log.filter((l) => l[0] === 'create').length, 0, 'a cancelled search never opens a table behind the player\'s back');
+test('the phases are reported, so the UI can stop offering "cancel" once a join is under way', async () => {
+  const phases = [];
+  const { deps: d } = deps({ rooms: [room('a')] });
+  await runQuickPlay(d, { timeControlId: 'blitz_5_0', onPhase: (p) => phases.push(p) });
+  assert.deepEqual(phases, ['searching', 'joining']);
+
+  const created = [];
+  await runQuickPlay(deps().deps, { timeControlId: 'blitz_5_0', onPhase: (p) => created.push(p) });
+  assert.deepEqual(created, ['searching', 'creating']);
+});
+
+test('a table of ours that is still waiting on this clock is resumed, not duplicated', async () => {
+  const { deps: d, log } = deps({ rooms: [room('mine'), room('other', { createdAt: 5 })] });
+  const resumed = [];
+  d.resume = async (r) => { resumed.push(r.roomId); log.push(['resume', r.roomId]); };
+  const result = await runQuickPlay(d, { timeControlId: 'blitz_5_0', ownRoomIds: ['mine'] });
+  assert.equal(result.outcome, 'resumed');
+  assert.deepEqual(resumed, ['mine']);
+  assert.deepEqual(log.map((l) => l[0]), ['list', 'resume'], 'nobody else\'s table is joined and none is created');
+});
+
+test('our waiting table on a different clock, or one that cannot be resumed, does not block a normal search', async () => {
+  const other = deps({ rooms: [room('mine', { timeControlId: 'rapid_10_0' })] });
+  other.deps.resume = async () => { throw new Error('should not be tried'); };
+  assert.equal((await runQuickPlay(other.deps, { timeControlId: 'blitz_5_0', ownRoomIds: ['mine'] })).outcome, 'created');
+
+  const gone = deps({ rooms: [room('mine'), room('other', { createdAt: 5 })] });
+  gone.deps.resume = async () => { throw new Error('session lost'); };
+  const result = await runQuickPlay(gone.deps, { timeControlId: 'blitz_5_0', ownRoomIds: ['mine'] });
+  assert.equal(result.outcome, 'joined', 'falls through to the other table');
+  assert.equal(result.room.roomId, 'other');
 });
 
 test('only the offered time controls are accepted', async () => {

@@ -2676,6 +2676,8 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
   animation: toast-in 0.25s ease-out;
 }
+/* A pending question sits under the ordinary notices instead of on top of them. */
+.floating-toast[data-channel="offer"] { top: 118px; }
 @keyframes toast-in { from { transform: translateY(-12px); opacity: 0; } }
 .floating-toast-title { font-weight: 800; font-size: 13.5px; }
 .floating-toast-detail { color: var(--muted); font-size: 12px; margin-top: 3px; }

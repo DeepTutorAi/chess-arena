@@ -7,7 +7,7 @@
 // comes back later, miss it and it drops to the bottom to be asked again. It all
 // lives in this browser's localStorage; a corrupt store just starts empty.
 
-import { positionKey } from './botbook.js';
+import { hashString, positionKey } from './botbook.js';
 
 export const MISTAKES_KEY = 'chess-arena-mistakes-v1';
 export const MAX_MISTAKES = 400;
@@ -17,6 +17,13 @@ export const BOX_DELAYS_MS = [0, DAY, 3 * DAY, 7 * DAY, 21 * DAY];
 export const TOP_BOX = BOX_DELAYS_MS.length - 1;
 export const PRACTICE_BATCH = 10;
 const PRACTICE_TIERS = new Set(['mistake', 'blunder', 'miss']);
+
+/** A stable identity for a finished game (start position + moves), so reviewing the
+ *  same game twice — or after re-importing it — never files its mistakes twice. */
+export function gameKey(record) {
+  const moves = (record?.moves ?? []).map((m) => `${m.from}${m.to}${m.promotion ?? ''}`).join(' ');
+  return hashString(`${record?.initialFen ?? ''}|${moves}`);
+}
 
 const moveOk = (m) => m && /^[a-h][1-8]$/.test(m.from) && /^[a-h][1-8]$/.test(m.to);
 

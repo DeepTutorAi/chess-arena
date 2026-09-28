@@ -816,7 +816,7 @@ ui.refs.historyBtn.onclick = () => openHistoryDialog();
 function openQuickPlayDialog() {
   const browseClient = new OnlineRoomClient();
   const savedTime = localStorage.getItem(QUICK_PLAY_KEY);
-  let cancelled = false;
+  let run = null; // the search under way — each start gets its own, so a late cancel cannot touch the next
   const remember = (roomId, title, hostName, status) => saveRoom({
     id: roomId, roomId, kind: 'online', title, hostName, status, createdAt: Date.now(),
   });
@@ -829,9 +829,10 @@ function openQuickPlayDialog() {
     },
     times: QUICK_TIMES,
     timeControlId: isQuickTime(savedTime) ? savedTime : DEFAULT_QUICK_TIME,
-    onCancel: () => { cancelled = true; },
-    onStart: async ({ playerName, avatar, timeControlId }) => {
-      cancelled = false;
+    onCancel: () => { if (run) run.cancelled = true; },
+    onStart: async ({ playerName, avatar, timeControlId }, { setCancelable }) => {
+      const mine = { cancelled: false };
+      run = mine;
       storeLocal(PLAYER_NAME_KEY, playerName);
       storeLocal('chess-arena-player-avatar', avatar);
       storeLocal(QUICK_PLAY_KEY, timeControlId);
@@ -846,16 +847,22 @@ function openQuickPlayDialog() {
             await controller.start(MODES.ONLINE, { action: 'joinPublic', roomId: room.roomId, playerName, avatar });
             remember(room.roomId, room.title, room.host?.name || 'ผู้เล่นออนไลน์', 'ACTIVE');
           },
+          resume: (room) => controller.start(MODES.ONLINE, { action: 'resume', roomId: room.roomId }),
           create: async () => {
             await controller.start(MODES.ONLINE, quickPlayRoom({ playerName, avatar, timeControlId }));
             remember(controller.onlineRoomId, 'Quick Play', playerName, 'WAITING');
           },
-        }, { timeControlId, ownRoomIds, cancelled: () => cancelled });
+        }, {
+          timeControlId,
+          ownRoomIds,
+          cancelled: () => mine.cancelled,
+          onPhase: (phase) => setCancelable(phase === 'searching'),
+        });
         if (result.outcome === 'cancelled') return { ok: true };
         modal.close();
-        if (result.outcome === 'created') {
+        if (result.outcome === 'created' || result.outcome === 'resumed') {
           ui.showFloatingToast({
-            title: 'เปิดโต๊ะรอคู่แข่งแล้ว',
+            title: result.outcome === 'resumed' ? 'กลับเข้าโต๊ะที่รอคู่แข่งอยู่' : 'เปิดโต๊ะรอคู่แข่งแล้ว',
             detail: 'ยังไม่มีโต๊ะว่าง — ผู้เล่นที่กด Quick Play ต่อไปจะเข้ามานั่งเอง',
             autoCloseMs: 6000,
           });
@@ -1209,7 +1216,7 @@ function openSharedFromHash() {
   // A link pasted into a tab that is mid-game must not silently end that game.
   if (controller.hasGameInProgress()
     && !window.confirm('มีเกมที่กำลังเล่นอยู่ — เปิดเกมจากลิงก์นี้จะจบเกมปัจจุบัน ต้องการเปิดไหม?')) return;
-  controller.openSharedToken(token);
+  controller.openSharedToken(token, { force: true }); // the player has just confirmed
 }
 window.addEventListener('hashchange', openSharedFromHash);
 openSharedFromHash();

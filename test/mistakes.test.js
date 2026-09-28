@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 import {
   BOX_DELAYS_MS, MAX_MISTAKES, MISTAKES_KEY, PRACTICE_BATCH, TOP_BOX,
-  createMistakeBank, mistakesFromAnalysis, practiceAnalysis,
+  createMistakeBank, gameKey, mistakesFromAnalysis, practiceAnalysis,
 } from '../src/mistakes.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -240,4 +240,22 @@ test('practiceAnalysis gives the puzzle machinery everything it reads', () => {
   assert.equal(a.plies[0].tier, 'blunder');
   assert.equal(a.practice, true);
   assert.equal(practiceAnalysis([]).plies.length, 0);
+});
+
+test('gameKey is the same for the same game however it arrives, and differs for another', () => {
+  const rec = (moves, extra = {}) => ({ initialFen: START, moves: moves.map(([from, to]) => ({ from, to })), ...extra });
+  const a = rec([['e2', 'e4'], ['e7', 'e5']]);
+  assert.equal(gameKey(a), gameKey(rec([['e2', 'e4'], ['e7', 'e5']], { players: { white: { name: 'x' } }, playedAt: 5 })), 'names and dates do not matter');
+  assert.notEqual(gameKey(a), gameKey(rec([['e2', 'e4'], ['c7', 'c5']])));
+  assert.notEqual(gameKey(a), gameKey(rec([['e2', 'e4'], ['e7', 'e5']], { initialFen: AFTER_E4 })));
+  assert.equal(typeof gameKey({}), 'string');
+});
+
+test('a mastered mistake is not re-filed when the same game is reviewed again, even without a history id', () => {
+  const bank = createMistakeBank({ storage: memoryStorage(), now: () => 1000 });
+  const a = analysis([ply(0, 'w', 'blunder')]);
+  const record = { initialFen: START, moves: [{ from: 'e2', to: 'e4' }] };
+  assert.equal(bank.addFromAnalysis(a, 'w', gameKey(record)), 1);
+  bank.remove(bank.all[0].id); // the player mastered / dismissed it
+  assert.equal(bank.addFromAnalysis(a, 'w', gameKey(record)), 0, 'the game was already read');
 });

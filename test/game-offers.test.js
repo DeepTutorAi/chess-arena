@@ -292,3 +292,24 @@ test('stale revisions are refused', () => {
   const stale = applyGameCommand(state, HOST, { type: 'draw-offer', expectedRevision: state.revision - 1 }, 30_000);
   assert.equal(stale.error.code, 'stale_revision');
 });
+
+test('the public state says who is blocked from offering again', () => {
+  let state = must(send(afterTwo(), HOST, { type: 'draw-offer' }));
+  state = must(send(state, GUEST, { type: 'draw-decline' }));
+  assert.equal(toPublicState(state).drawBlock, 'w');
+  assert.equal(toPublicState(state).takebackBlock, null);
+  const old = afterTwo();
+  delete old.drawBlock;
+  assert.equal(toPublicState(old).drawBlock, null, 'older stored rooms read as not blocked');
+});
+
+test('a game ended by the AFK rules carries no open offers', async () => {
+  const { realizeAfk } = await import('../worker/afk-state.js');
+  const state = must(send(move(active({ timeControlId: 'blitz_5_0', timeControl: { initialMs: 300_000, incrementMs: 0 } }), HOST, 'e2', 'e4'), HOST, { type: 'takeback-request' }));
+  assert.equal(state.takebackOffer.by, 'w');
+  const late = realizeAfk(state, state.afk.openingDeadlineAt + 1);
+  assert.equal(late.changed, true);
+  assert.equal(late.state.status, 'finished');
+  assert.equal(late.state.takebackOffer, null);
+  assert.equal(late.state.drawOffer, null);
+});

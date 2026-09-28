@@ -9,22 +9,23 @@ import { iconClose, iconEqual, iconUndo } from './icons.js';
  * @param {'w'|'b'|null} side  the local player's colour
  * @returns {null | {
  *   abort: boolean,
- *   draw: 'unavailable'|'available'|'waiting'|'incoming',
- *   takeback: 'unavailable'|'available'|'waiting'|'incoming',
+ *   draw: 'unavailable'|'available'|'blocked'|'waiting'|'incoming',
+ *   takeback: 'unavailable'|'available'|'blocked'|'waiting'|'incoming',
  * }}
  */
 export function onlineActionAvailability(state, side) {
   if (!state || state.status !== 'active' || (side !== 'w' && side !== 'b')) return null;
   const moves = state.moves.length;
-  const offerState = (offer, allowed) => {
+  const offerState = (offer, allowed, block) => {
     if (offer) return offer.by === side ? 'waiting' : 'incoming';
-    return allowed ? 'available' : 'unavailable';
+    if (!allowed) return 'unavailable';
+    return block === side ? 'blocked' : 'available'; // declined: not again until you have moved
   };
   return {
     abort: moves < 2,
-    draw: offerState(state.drawOffer, moves >= 2),
+    draw: offerState(state.drawOffer, moves >= 2, state.drawBlock),
     // Only your own last move, until the opponent has answered it.
-    takeback: offerState(state.takebackOffer, moves >= 1 && state.turn !== side),
+    takeback: offerState(state.takebackOffer, moves >= 1 && state.turn !== side, state.takebackBlock),
   };
 }
 
@@ -81,6 +82,7 @@ export function createOnlineActionRows({ document, availability, actions, close 
   const draw = {
     unavailable: { sub: 'ขอเสมอได้หลังเดินกันคนละตา', buttons: [{ label: 'ขอเสมอ', disabled: true }] },
     available: { sub: 'เสนอให้จบเกมเสมอ — ฝ่ายตรงข้ามต้องยอมรับ', buttons: [{ label: 'ขอเสมอ', className: 'btn primary', onClick: then(actions.drawOffer) }] },
+    blocked: { sub: 'ฝ่ายตรงข้ามปฏิเสธไปแล้ว — เดินหมากก่อนจึงจะขอใหม่ได้', buttons: [{ label: 'ขอเสมอ', disabled: true }] },
     waiting: { sub: 'ส่งข้อเสนอแล้ว — รอคำตอบ', buttons: [{ label: 'ยกเลิกข้อเสนอ', onClick: then(actions.drawCancel) }] },
     incoming: {
       sub: 'ฝ่ายตรงข้ามเสนอเสมอ',
@@ -95,6 +97,7 @@ export function createOnlineActionRows({ document, availability, actions, close 
   const takeback = {
     unavailable: { sub: 'ย้อนตาได้เฉพาะตาที่เพิ่งเดินและฝ่ายตรงข้ามยังไม่ได้ตอบ', buttons: [{ label: 'ขอย้อนตา', disabled: true }] },
     available: { sub: 'ขอให้ฝ่ายตรงข้ามยอมให้เดินตาล่าสุดใหม่', buttons: [{ label: 'ขอย้อนตา', className: 'btn primary', onClick: then(actions.takebackRequest) }] },
+    blocked: { sub: 'ฝ่ายตรงข้ามปฏิเสธไปแล้ว — เดินหมากก่อนจึงจะขอใหม่ได้', buttons: [{ label: 'ขอย้อนตา', disabled: true }] },
     waiting: { sub: 'ส่งคำขอแล้ว — รอคำตอบ', buttons: [{ label: 'ยกเลิกคำขอ', onClick: then(actions.takebackCancel) }] },
     incoming: {
       sub: 'ฝ่ายตรงข้ามขอย้อนตาล่าสุดของเขา',

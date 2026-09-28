@@ -45,18 +45,24 @@ export function quickPlayCandidates(rooms, { timeControlId, ownRoomIds = [], now
  * @param {object} deps
  * @param {(filters: object) => Promise<{rooms: object[], serverTime: number}>} deps.listLobby
  * @param {(room: object) => Promise<void>} deps.join     take a seat (throws when it is gone)
+ * @param {(room: object) => Promise<void>} [deps.resume] go back to a table of ours that is still waiting
  * @param {() => Promise<void>} deps.create               open a table and wait
  * @param {object} opts
  * @param {string} opts.timeControlId
  * @param {string[]} [opts.ownRoomIds]
  * @param {() => boolean} [opts.cancelled]  polled between steps: stop quietly when true
- * @returns {Promise<{outcome: 'joined'|'created'|'cancelled', room?: object, tried: number}>}
+ * @param {(phase: 'searching'|'joining'|'creating') => void} [opts.onPhase]  cancelling is only
+ *        possible while searching — a join or a create already under way runs to its end
+ * @returns {Promise<{outcome: 'joined'|'resumed'|'created'|'cancelled', room?: object, tried: number}>}
  */
-export async function runQuickPlay({ listLobby, join, create }, { timeControlId, ownRoomIds = [], cancelled = () => false }) {
+export async function runQuickPlay({ listLobby, join, resume, create }, {
+  timeControlId, ownRoomIds = [], cancelled = () => false, onPhase = () => {},
+}) {
   if (!isQuickTime(timeControlId)) throw new Error('รูปแบบเวลาไม่ถูกต้อง');
   let tried = 0;
   let rooms = [];
   let now = Date.now();
+  onPhase('searching');
   try {
     const lobby = await listLobby({ status: 'open', time: 'all' });
     rooms = lobby.rooms ?? [];
@@ -66,17 +72,31 @@ export async function runQuickPlay({ listLobby, join, create }, { timeControlId,
     rooms = [];
   }
   if (cancelled()) return { outcome: 'cancelled', tried };
+
+  // A table of ours on this clock is still waiting: go back to it instead of
+  // opening a second one (and leaving the first standing empty in the lobby).
+  const own = new Set(ownRoomIds);
+  const mine = rooms.find((room) => own.has(room.roomId) && room.status === 'waiting' && !room.guest
+    && room.timeControlId === timeControlId && (!room.expiresAt || room.expiresAt > now));
+  if (mine && resume) {
+    onPhase('joining');
+    try {
+      await resume(mine);
+      return { outcome: 'resumed', room: mine, tried };
+    } catch { /* the seat is gone: carry on */ }
+  }
+
   for (const room of quickPlayCandidates(rooms, { timeControlId, ownRoomIds, now }).slice(0, MAX_JOIN_ATTEMPTS)) {
     tried += 1;
+    onPhase('joining');
     try {
       await join(room);
       return { outcome: 'joined', room, tried };
     } catch {
       // Someone else took that seat first: try the next table.
-      if (cancelled()) return { outcome: 'cancelled', tried };
     }
   }
-  if (cancelled()) return { outcome: 'cancelled', tried };
+  onPhase('creating');
   await create();
   return { outcome: 'created', tried };
 }

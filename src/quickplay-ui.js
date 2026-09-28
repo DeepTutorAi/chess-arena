@@ -20,7 +20,9 @@ function make(document, tag, className, text) {
  * @param {{name: string, avatar: string}} opts.profile
  * @param {ReadonlyArray<{id: string, label: string, sub: string}>} opts.times
  * @param {string} opts.timeControlId  the preselected clock
- * @param {(request: {playerName: string, avatar: string, timeControlId: string}) => Promise<{ok: boolean, message?: string}>} opts.onStart
+ * @param {(request: {playerName: string, avatar: string, timeControlId: string},
+ *          controls: {setCancelable: (on: boolean) => void}) => Promise<{ok: boolean, message?: string}>} opts.onStart
+ *        setCancelable: the cancel button is only offered while cancelling is still possible
  * @param {() => void} opts.onCancel  called when the player gives up the search
  * @returns {HTMLElement}
  */
@@ -95,7 +97,10 @@ export function createQuickPlayView({ document, apiReady, profile, times, timeCo
     cancel.hidden = false;
     show('กำลังหาโต๊ะที่รอผู้เล่น…');
     try {
-      const result = await onStart({ playerName, avatar: avatar.value, timeControlId: chosen });
+      const result = await onStart(
+        { playerName, avatar: avatar.value, timeControlId: chosen },
+        { setCancelable: (on) => { cancel.hidden = !on; } },
+      );
       if (!result.ok) show(result.message ?? 'เริ่มเกมไม่สำเร็จ', true);
     } catch (error) {
       show(`เริ่มเกมไม่สำเร็จ: ${error?.message ?? 'ข้อผิดพลาดที่ไม่ทราบสาเหตุ'}`, true);

@@ -466,6 +466,10 @@ export function toPublicState(state, connections = {}) {
     rematch: state.rematch ? { requestedBy: state.rematch.requestedBy } : null,
     drawOffer: state.drawOffer ? { by: state.drawOffer.by } : null,
     takebackOffer: state.takebackOffer ? { by: state.takebackOffer.by } : null,
+    // Who may not ask again until they have moved (after being declined) — so the
+    // client can grey the button out instead of offering something the server refuses.
+    drawBlock: state.drawBlock ?? null,
+    takebackBlock: state.takebackBlock ?? null,
     players: publicPlayers,
     clock: state.clock ? copy(state.clock) : null,
     afk: toPublicAfk(state),
