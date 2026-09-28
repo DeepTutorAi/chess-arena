@@ -9,6 +9,7 @@ import { getOpeningBook } from './openings.js';
 import { SpectatorEval as SpectatorAnalysisEngine } from './spectator-eval.js';
 import { AVATAR_GLYPHS, OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
+import { planThinkTime } from './thinktime.js';
 import { sounds } from './sounds.js';
 import {
   ENGINE_NAME,
@@ -1734,65 +1735,38 @@ export class Controller {
   }
 
   /**
-   * Humanized engine thinking: the bot pauses before moving with a
-   * time-control-scaled, position-aware delay — not just a random number.
-   *  - longer time controls get a longer base pause (unlimited/8-30min longest)
-   *  - Elo-based pace: strong engines answer quickly and confidently, weak
-   *    ones hem and haw (level 1 ×1.3 … level 11 ×0.3; default 1400 = ×1.0)
-   *  - complex positions (many legal moves) / endgames (little material)
-   *    make the engine "calculate" longer
-   *  - being in check or replying to a capture/check makes it think longer
-   *  - skewed distribution: mostly mid-range, occasionally a quick "obvious"
-   *    move, occasionally a deep "calculation" pause — human-like rhythm
-   * Returns { delay, search }: delay = thinking pause, search = UCI movetime.
+   * Humanized engine thinking (see src/thinktime.js): a time-control scaled,
+   * position-aware pause, capped by what the moving side's own clock can afford
+   * so the bot never flags itself. Returns { delay, search }: delay = thinking
+   * pause, search = UCI movetime for the timed modes.
    */
   _thinkTime() {
     const tc = TIME_CONTROLS.find((t) => t.id === this.timeControlId);
-    const ms = tc?.initialMs ?? 0;
-    let base;
-    let search;
-    if (this.timeControlId === 'blitz_5_0' || ms === 5 * 60000) {
-      base = 1400; search = 400;                                      // 5min blitz: faster pace
-    }
-    else if (this.timeControlId === 'rapid_10_0' || ms === 10 * 60000) {
-      base = 2000; search = 500;                                      // 10min rapid: faster pace requested
-    }
-    else if (ms <= 0 || ms >= 12 * 60000) { base = 7000; search = 1500; } // unlimited / 15-30min
-    else if (ms >= 4 * 60000) { base = 5000; search = 800; }          // 4-7min
-    else if (ms >= 60000) { base = 2000; search = 450; }              // 1-3min: snappy
-    else { base = 1200; search = 250; }                               // <1min: fastest
-
-    // Pace by the moving engine's strength (AI vs AI uses the side to move).
-    const level = this._activeEngineLevel();
-    base *= 1.3 - 0.1 * (level - 1);
-
-    // Opening: the first 3 plies come quick (~0.6-1.6s) whatever the control.
-    if (this.game.history().length < 3) {
-      return { delay: 600 + Math.floor(Math.random() * 1001), search };
-    }
-
-    let factor = 1;
+    const side = this.game.turn();
+    const timed = this.clock && !this.clock.unlimited;
+    let legalMoves = 25;
+    let pieceCount = 32;
+    let lastWasCaptureOrCheck = false;
     try {
-      const legal = this.game.moves().length;
-      if (legal > 30) factor *= 1.2;      // rich position -> more candidates to check
-      else if (legal < 10) factor *= 0.8; // few options -> quicker
-      const material = this.game.board().flat().filter(Boolean).length;
-      if (material <= 8) factor *= 1.15;  // endgame -> precise calculation
+      legalMoves = this.game.moves().length;
+      pieceCount = this.game.board().flat().filter(Boolean).length;
+      const history = this.game.history({ verbose: true });
+      const last = history[history.length - 1];
+      lastWasCaptureOrCheck = Boolean(last && (last.captured || last.san.includes('+')));
     } catch { /* custom boards without moves are handled elsewhere */ }
-
-    const history = this.game.history({ verbose: true });
-    const last = history[history.length - 1];
-    if (this.game.inCheck()) factor *= 1.4; // must find the escape
-    else if (last && (last.captured || last.san.includes('+'))) factor *= 1.25; // recapture/check follow-up
-
-    // Skewed human-like distribution: ~12% quick ("obvious"), 76% normal, 12% deep.
-    // Math.random is deliberate here — gameplay pacing jitter, not a security
-    // primitive (see docs/security-triage.md).
-    const u = Math.random();
-    const skew = u < 0.12 ? 0.55 : u < 0.88 ? 1 : 1.55;
-    const minDelay = this.timeControlId === 'blitz_5_0' ? 600 : this.timeControlId === 'rapid_10_0' ? 700 : 800;
-    const delay = Math.min(12000, Math.max(minDelay, Math.round(base * factor * skew + (Math.random() - 0.5) * base * 0.3)));
-    return { delay, search };
+    const plan = planThinkTime({
+      tcId: this.timeControlId,
+      initialMs: tc?.initialMs ?? 0,
+      level: this._activeEngineLevel(),
+      historyLength: this.game.history().length,
+      legalMoves,
+      pieceCount,
+      inCheck: this.game.inCheck(),
+      lastWasCaptureOrCheck,
+      remainingMs: timed ? this.clock.times[side] : null,
+      incrementMs: timed ? this.clock.incrementMs : 0,
+    });
+    return { delay: plan.delay, search: plan.search };
   }
 
   /** 1-based level of the engine whose turn it is (drives thinking pace). */
@@ -1814,8 +1788,10 @@ export class Controller {
     this._aiTimer = setTimeout(() => {
       if (this._isOver() || !this.engine || !this.engineReady) return;
       this.engine.setPosition(fen);
-      const isFastMode = this.timeControlId === 'blitz_5_0' || this.timeControlId === 'rapid_10_0';
-      const movetime = isFastMode ? Math.min(cfg.movetime, search ?? 500) : cfg.movetime;
+      // Timed games search for the clock-governed time (never more than the
+      // level's own movetime); untimed games use the level's full movetime.
+      const timed = this.clock && !this.clock.unlimited;
+      const movetime = timed ? Math.min(cfg.movetime, search ?? 500) : cfg.movetime;
       this.engine.go({ movetime, depth: cfg.depth });
     }, delay);
   }
