@@ -85,6 +85,13 @@ test('scoreOf is from the first player\'s point of view', () => {
 test('calibration arguments are validated (odd or non-numeric game counts would skew the colours)', () => {
   assert.equal(parseArgs(['--games', '10', '--parallel', '2', '--offset', '3']).games, 10);
   assert.equal(parseArgs([]).games, 6, 'defaults are valid');
+  for (const bad of [['--style', 'reckless'], ['--style', 'balanced', '--cross', '3'], ['--cross', '4']]) {
+    assert.throws(() => parseArgs(bad), /--style|--cross/u, bad.join(' '));
+  }
+  assert.equal(parseArgs(['--style', 'balanced', '--cross', '4', '--out', '/tmp/x.js']).cross, 4);
+  for (const out of ['src/level-ratings.js', './src/../src/level-ratings.js']) {
+    assert.throws(() => parseArgs(['--style', 'solid', '--out', out]), /must not overwrite/u, out);
+  }
   for (const bad of [['--games', '7'], ['--games', 'abc'], ['--games', '0'], ['--parallel', '0'], ['--offset', '-1'], ['--offset', 'x']]) {
     assert.throws(() => parseArgs(bad), /must be/u, bad.join(' '));
   }

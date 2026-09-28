@@ -26,6 +26,7 @@ export function summarize(entry) {
     reason: record.reason ?? '',
     plies: record.moves?.length ?? 0,
     botLevel: record.botLevel ?? null,
+    botStyle: record.botStyle ?? null,
     humanColor: record.humanColor ?? null,
     analyzed: Boolean(analysis),
     accuracy: analysis?.accuracy ?? null,

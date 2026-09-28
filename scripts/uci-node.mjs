@@ -39,7 +39,13 @@ export function finalLines(rawLines) {
       pv: m[5].trim().split(/\s+/),
     });
   }
-  return [...byIndex.values()].sort((a, b) => a.multipv - b.multipv);
+  // A search cut off mid-iteration leaves later slots stale: keep the fresher copy of a move.
+  const seen = new Set();
+  return [...byIndex.values()].sort((a, b) => a.multipv - b.multipv).filter((line) => {
+    if (seen.has(line.pv[0])) return false;
+    seen.add(line.pv[0]);
+    return true;
+  });
 }
 
 /** Mates clamp to ±1000 cp so they stay comparable on one scale. */

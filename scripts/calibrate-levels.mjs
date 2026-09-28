@@ -21,7 +21,7 @@
 // levels rank and how far apart they are, it is not a FIDE rating.
 //
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Chess } from 'chess.js';
 
@@ -111,7 +111,8 @@ export function parseArgs(argv) {
   args.cross = Number(args.cross);
   if (args.style !== 'standard' && !HUMAN_STYLES.includes(args.style)) throw new Error(`--style must be one of ${HUMAN_STYLES.join(', ')} (got ${args.style})`);
   // The shipped ratings describe the standard bots only: a human-style run must write elsewhere.
-  if (args.style !== 'standard' && !args.fit && args.out === join(ROOT, 'src/level-ratings.js')) throw new Error('a --style run needs its own --out (it must not overwrite src/level-ratings.js)');
+  if (args.style !== 'standard' && !args.fit && resolve(args.out) === resolve(ROOT, 'src/level-ratings.js')) throw new Error('a --style run needs its own --out (it must not overwrite src/level-ratings.js)');
+  if (args.cross && args.style === 'standard') throw new Error('--cross compares a human style with the standard bot: add --style balanced|aggressive|solid');
   if (args.cross && (!Number.isInteger(args.cross) || args.cross < 2 || args.cross % 2)) throw new Error(`--cross must be an even number >= 2 (got ${args.cross})`);
   // Games come in colour-swapped pairs; an odd count would favour one colour.
   if (!Number.isInteger(args.games) || args.games < 2 || args.games % 2) throw new Error(`--games must be an even number >= 2 (got ${args.games})`);
@@ -146,9 +147,14 @@ async function main() {
   const levelNumbers = parseLevels(args.levels);
   const anchorMean = levelNumbers.reduce((s, n) => s + LEVELS[n - 1].nominal, 0) / levelNumbers.length;
 
+  // Cross-play games (human style vs standard) are a separate measurement: they never
+  // feed the ladder fit, and a ladder run never mixes them into its own results.
+  const ladderOnly = (list) => list.filter((r) => !r.cross);
   let results = args.seed ? JSON.parse(readFileSync(args.seed, 'utf8')) : [];
+  results = args.cross ? results.filter((r) => r.cross) : ladderOnly(results);
   if (args.fit) {
     results = JSON.parse(readFileSync(args.fit, 'utf8'));
+    if (!args.cross) results = ladderOnly(results);
   } else {
     const engineDir = prepareEngineDir();
 

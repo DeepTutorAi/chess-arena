@@ -8,6 +8,22 @@ const infoRe =
   /^info .*?depth (\d+).*?score (cp|mate) (-?\d+).*?(?:nps (\d+))?.*?time (\d+).*?(?:pv (.+))?$/;
 const multipvRe = /\bmultipv (\d+)/;
 
+/**
+ * A search cut off mid-iteration leaves the later MultiPV slots holding lines from the
+ * iteration before, so a move that has since climbed to the top can appear twice. The
+ * fresher (lower-numbered) line wins and the stale copy is dropped.
+ */
+export function uniqueLines(lines) {
+  const seen = new Set();
+  return lines.filter((line) => {
+    const first = line.pv?.[0];
+    if (!first) return true;
+    if (seen.has(first)) return false;
+    seen.add(first);
+    return true;
+  });
+}
+
 export class Stockfish {
   /**
    * @param {object} opts
@@ -84,7 +100,7 @@ export class Stockfish {
         this._bestmove = uci;
       }
       const info = this._searchInfo;
-      const lines = [...this._lines.values()].sort((a, b) => a.multipv - b.multipv);
+      const lines = uniqueLines([...this._lines.values()].sort((a, b) => a.multipv - b.multipv));
       this._searchInfo = null;
       this._lines = new Map();
       this.onBestMove(this._bestmove, info, lines);

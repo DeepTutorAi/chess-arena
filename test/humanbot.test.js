@@ -83,6 +83,18 @@ test('a forced mate is always played, whatever the level', () => {
   }
 });
 
+test('the quickest mate is the one played', () => {
+  const candidates = [{ uci: 'slow', mate: 9 }, { uci: 'fast', mate: 1 }, { uci: 'mid', mate: 6 }, { uci: 'other', cp: 900 }];
+  for (const level of [1, 6, 11]) assert.equal(pickHumanMove(candidates, { level, style: 'aggressive', rng: () => 0.7 }), 'fast');
+});
+
+test('when mate is unavoidable the longest resistance scores best', () => {
+  assert.ok(lineScore({ mate: -9 }) > lineScore({ mate: -2 }));
+  assert.ok(lineScore({ mate: 1 }) > lineScore({ mate: 6 }));
+  assert.ok(lineScore({ cp: 900 }) < lineScore({ mate: 30 }));
+  assert.equal(pickHumanMove([{ uci: 'soon', mate: -2 }, { uci: 'later', mate: -9 }], { level: 11, rng: () => 0.5 }), 'later');
+});
+
 test('moves far worse than the best are never chosen, even by a beginner', () => {
   const candidates = lines(100, 60, -500, -900);
   const rng = seeded(5);
@@ -133,6 +145,17 @@ test('an aggressive bot reaches for captures and checks more than a solid one', 
   const solid = share(candidates, { level: 4, style: 'solid' }, forcing);
   assert.ok(aggressive > balanced + 0.08, `${aggressive} vs ${balanced}`);
   assert.ok(solid < balanced - 0.03, `${solid} vs ${balanced}`);
+});
+
+test('at the top level a style cannot beat a genuinely better move', () => {
+  // T is ~4 cp at level 11: a 30 cp style bonus would make a 25 cp deficit the favourite.
+  const aggressive = [{ uci: 'quiet', cp: 60 }, { uci: 'grab', cp: 35, capture: true }];
+  assert.ok(share(aggressive, { level: 11, style: 'aggressive' }, (m) => m === 'grab') < 0.02);
+  const solid = [{ uci: 'capture', cp: 60, capture: true }, { uci: 'quiet', cp: 45 }];
+  assert.ok(share(solid, { level: 11, style: 'solid' }, (m) => m === 'quiet') < 0.05);
+  // ...while a beginner is nudged the full way.
+  const flat = [{ uci: 'quiet', cp: 20 }, { uci: 'grab', cp: 5, capture: true }];
+  assert.ok(share(flat, { level: 1, style: 'aggressive' }, (m) => m === 'grab') > share(flat, { level: 1, style: 'balanced' }, (m) => m === 'grab') + 0.03);
 });
 
 test('style never makes a strong bot play a clearly worse move', () => {

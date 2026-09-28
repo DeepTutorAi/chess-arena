@@ -147,7 +147,8 @@ test('memory backend never shares references with the caller', async () => {
 
 test('summarize handles a bare record', () => {
   const s = summarize({ id: 'x', savedAt: 5, source: 'import', record: { moves: [{}, {}] } });
-  assert.deepEqual([s.plies, s.white, s.result, s.analyzed, s.botLevel], [2, '', '*', false, null]);
+  assert.deepEqual([s.plies, s.white, s.result, s.analyzed, s.botLevel, s.botStyle], [2, '', '*', false, null, null]);
+  assert.equal(summarize({ id: 'y', savedAt: 1, source: 'bot', record: { moves: [], botStyle: 'solid' } }).botStyle, 'solid');
 });
 
 // ---- IndexedDB adapter -----------------------------------------------------------------

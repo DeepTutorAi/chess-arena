@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
 
-import { Stockfish } from '../src/engine.js';
+import { Stockfish, uniqueLines } from '../src/engine.js';
 import { Controller, MODES } from '../src/controller.js';
 import { createStatsStore } from '../src/stats.js';
 import { LEVELS, levelRating } from '../src/config.js';
@@ -103,6 +103,7 @@ test('a human-style bot chooses among the lines; a standard bot always plays its
   const start = () => { const g = new Chess(); g.move('e4'); return g; };
   const human = makeBot(t, 'balanced', 1);
   human.controller.game = start();
+  human.controller._searchFen = human.controller.game.fen();
   t.mock.method(Math, 'random', () => 0.9999);
   human.controller._onEngineBestMove('e7e5', LINES);
   assert.deepEqual(human.controller.game.history(), ['e4', 'e6'], 'the roll landed on the third line');
@@ -118,11 +119,13 @@ test('a human-style bot falls back to the engine move when it has no lines to ch
   const g = new Chess();
   g.move('e4');
   controller.game = g;
+  controller._searchFen = g.fen();
   controller._onEngineBestMove('c7c5', []);
   assert.deepEqual(controller.game.history(), ['e4', 'c5']);
   const g2 = new Chess();
   g2.move('e4');
   controller.game = g2;
+  controller._searchFen = g2.fen();
   controller.engineBusy = true;
   controller._onEngineBestMove('e7e5', [{ multipv: 1, depth: 3, cp: 0, mate: null, pv: ['e7e5'] }]);
   assert.deepEqual(controller.game.history(), ['e4', 'e5'], 'one line is no choice');
@@ -180,4 +183,35 @@ test('saved records say which style the bot had', async (t) => {
   controller._addRecordExtras(record, null);
   assert.equal(record.botStyle, 'aggressive');
   assert.equal(record.botLevel, 5);
+});
+
+test('an answer for a position the board has left is played as the engine gave it, not re-chosen', (t) => {
+  const { controller } = makeBot(t, 'balanced', 1);
+  const g = new Chess();
+  g.move('e4');
+  controller.game = g;
+  controller._searchFen = 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1'; // searched another position
+  t.mock.method(Math, 'random', () => 0.9999);
+  controller._onEngineBestMove('e7e5', LINES);
+  assert.deepEqual(controller.game.history(), ['e4', 'e5'], 'lines of another position are not trusted');
+  assert.equal(controller._searchFen, null, 'the record of the search is consumed');
+});
+
+test('a search cut off mid-iteration reports no move twice', withWorker(() => {
+  const results = [];
+  const engine = new Stockfish({ onBestMove: (uci, info, lines) => results.push(lines) });
+  engine.go({ movetime: 100 });
+  const w = FakeWorker.latest;
+  // Depth 9 filled every slot; depth 10 got as far as line 1, and its best is the old line 2.
+  w.say('info depth 9 multipv 1 score cp 30 nodes 1 nps 1 time 1 pv e2e4 e7e5');
+  w.say('info depth 9 multipv 2 score cp 20 nodes 1 nps 1 time 1 pv d2d4 d7d5');
+  w.say('info depth 9 multipv 3 score cp 10 nodes 1 nps 1 time 1 pv g1f3 g8f6');
+  w.say('info depth 10 multipv 1 score cp 25 nodes 1 nps 1 time 1 pv d2d4 g8f6');
+  w.say('bestmove d2d4');
+  assert.deepEqual(results[0].map((l) => [l.multipv, l.depth, l.pv[0]]), [[1, 10, 'd2d4'], [3, 9, 'g1f3']]);
+}));
+
+test('uniqueLines keeps the first copy of each move and passes empty lines through', () => {
+  const lines = [{ multipv: 1, pv: ['a2a3'] }, { multipv: 2, pv: ['a2a3'] }, { multipv: 3, pv: [] }, { multipv: 4, pv: ['b2b3'] }];
+  assert.deepEqual(uniqueLines(lines).map((l) => l.multipv), [1, 3, 4]);
 });
