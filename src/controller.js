@@ -69,6 +69,7 @@ export class Controller {
     this.hintBusy = false;
     this._hintTimer = null;
     this.orientation = 'white';
+    this._playersByColor = null; // { w, b } name/avatar entries behind the two player bars
     this.levelIndex = 3; // level 4
     this.humanSide = 'w';
     this.engineSide = 'b';
@@ -201,9 +202,10 @@ export class Controller {
       this.game = new Chess();
     }
 
-    this.ui.setPlayers(
+    this.orientation = 'white'; // the editor's rank rules assume White at the bottom
+    this._setPlayersByColor(
+      { name: 'ฝ่ายขาว (ปรับแต่งสนาม)' },
       { name: 'ฝ่ายดำ (ปรับแต่งสนาม)' },
-      { name: 'ฝ่ายขาว (ปรับแต่งสนาม)' }
     );
     this.ui.setStatus('🛠️ Sandbox Setup — จัดแต่งหมากและเลือกโหมดการเล่น', '');
     this.ui.log('เข้าสู่โหมด Sandbox Setup — เลือกโหมดแถบซ้ายมือ และเลือกหมากแถบขวามือ', 'sys');
@@ -419,20 +421,22 @@ export class Controller {
   }
 
   _onClockTick(times, currentTurn) {
-    const topColor = this.orientation === 'white' ? 'b' : 'w';
-    const bottomColor = this.orientation === 'white' ? 'w' : 'b';
-
-    const topMs = times[topColor];
-    const bottomMs = times[bottomColor];
-
-    this.ui.setClock('top', ChessClock.formatTime(topMs), currentTurn === topColor, topMs <= 20000);
-    this.ui.setClock('bottom', ChessClock.formatTime(bottomMs), currentTurn === bottomColor, bottomMs <= 20000);
+    this._renderClockTimes(times, currentTurn);
 
     // Low-time warning — once per game, when the clock first turns red (≤20s).
-    if ((topMs <= 20000 || bottomMs <= 20000) && !this._lowTimePlayed) {
+    if ((times.w <= 20000 || times.b <= 20000) && !this._lowTimePlayed) {
       this._lowTimePlayed = true;
       sounds.playLowTime();
     }
+  }
+
+  /** Paint both clock badges for the current orientation. `activeTurn` is the
+   *  colour whose clock is running (null when stopped). */
+  _renderClockTimes(times, activeTurn) {
+    const topColor = this.orientation === 'white' ? 'b' : 'w';
+    const bottomColor = topColor === 'w' ? 'b' : 'w';
+    this.ui.setClock('top', ChessClock.formatTime(times[topColor]), activeTurn === topColor, times[topColor] <= 20000);
+    this.ui.setClock('bottom', ChessClock.formatTime(times[bottomColor]), activeTurn === bottomColor, times[bottomColor] <= 20000);
   }
 
   _onClockTimeout(loser) {
@@ -600,7 +604,16 @@ export class Controller {
   flip() {
     this.orientation = this.orientation === 'white' ? 'black' : 'white';
     this.ground.set({ orientation: this.orientation });
-    if (this._reviewActive) this.reviewUI?.rerender(); // badges follow the flip
+    // Everything that lives in the top/bottom player bars is keyed by colour,
+    // so it has to follow the board or a name ends up next to the wrong clock.
+    this._renderPlayers();
+    this._renderMaterial();
+    if (this._reviewActive) {
+      this.reviewUI?.rerender(); // badges + replayed clocks follow the flip
+    } else {
+      this._renderTurnIndicators();
+      this._refreshClockDisplay();
+    }
     this.ui.log(`กลับกระดาน — ${this.orientation === 'white' ? 'ขาว' : 'ดำ'} อยู่ด้านล่าง`, 'sys');
   }
 
@@ -687,9 +700,11 @@ export class Controller {
       }
     }
 
-    this.ui.setPlayers(
-      { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})` },
-      { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})` }
+    const engineEntry = { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})` };
+    const humanEntry = { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})` };
+    this._setPlayersByColor(
+      this.humanSide === 'w' ? humanEntry : engineEntry,
+      this.humanSide === 'w' ? engineEntry : humanEntry,
     );
     // The WASM download is several MB on first load — say so instead of a
     // silent gap between the dialog closing and the engine's first move.
@@ -725,6 +740,7 @@ export class Controller {
 
   _startAiVsAi({ levelWhite = 6, levelBlack = 3, initialFen } = {}) {
     this.viewerMode = true;
+    this.orientation = 'white'; // don't inherit a flipped board from the previous game
     this.aivaLevelW = Math.max(0, Math.min(LEVELS.length - 1, (levelWhite ?? 6) - 1));
     this.aivaLevelB = Math.max(0, Math.min(LEVELS.length - 1, (levelBlack ?? 3) - 1));
     const cfgW = LEVELS[this.aivaLevelW];
@@ -738,9 +754,9 @@ export class Controller {
       }
     }
 
-    this.ui.setPlayers(
+    this._setPlayersByColor(
+      { name: `${ENGINE_NAME} · Elo ${cfgW.elo} (ฝ่ายขาว)` },
       { name: `${ENGINE_NAME} · Elo ${cfgB.elo} (ฝ่ายดำ)` },
-      { name: `${ENGINE_NAME} · Elo ${cfgW.elo} (ฝ่ายขาว)` }
     );
     this.ui.setStatus(`AI vs AI · ขาว Elo ${cfgW.elo} ปะทะ ดำ Elo ${cfgB.elo}`, '');
     this.paused = false;
@@ -792,9 +808,10 @@ export class Controller {
   }
 
   _startAnalyze() {
-    this.ui.setPlayers(
+    this.orientation = 'white';
+    this._setPlayersByColor(
+      { name: 'ฝ่ายขาว (มือคุณ)' },
       { name: 'ฝ่ายดำ (มือคุณ)' },
-      { name: 'ฝ่ายขาว (มือคุณ)' }
     );
     this.ui.setStatus('โหมด Sandbox — เล่นได้ทั้งสองสี', '');
     this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, liveAnalysis: false, options: true });
@@ -969,18 +986,11 @@ export class Controller {
       this._reshowGameOver();
     }
     this.ui.setSpectators?.({ visible: state.allowSpectators, spectators: state.spectators ?? [] });
-    const topColor = this.orientation === 'white' ? 'b' : 'w';
-    const bottomColor = topColor === 'w' ? 'b' : 'w';
-    this.ui.setPlayers(
-      {
-        name: state.players[topColor].name || 'กำลังรอผู้เล่น',
-        avatar: AVATAR_GLYPHS[state.players[topColor].avatar] ?? '♟',
-      },
-      {
-        name: state.players[bottomColor].name || 'กำลังรอผู้เล่น',
-        avatar: AVATAR_GLYPHS[state.players[bottomColor].avatar] ?? '♟',
-      },
-    );
+    const onlinePlayer = (color) => ({
+      name: state.players[color].name || 'กำลังรอผู้เล่น',
+      avatar: AVATAR_GLYPHS[state.players[color].avatar] ?? '♟',
+    });
+    this._setPlayersByColor(onlinePlayer('w'), onlinePlayer('b'));
     this._syncBoard();
     this._renderMoves();
     this._renderOnlineClock(state);
@@ -1315,11 +1325,7 @@ export class Controller {
       return;
     }
     if (!this.clock) return;
-    const topColor = this.orientation === 'white' ? 'b' : 'w';
-    const bottomColor = topColor === 'w' ? 'b' : 'w';
-    const t = this.clock.times;
-    this.ui.setClock('top', ChessClock.formatTime(t[topColor]), false, t[topColor] <= 20_000);
-    this.ui.setClock('bottom', ChessClock.formatTime(t[bottomColor]), false, t[bottomColor] <= 20_000);
+    this._renderClockTimes(this.clock.times, null);
   }
 
   _finishReviewSession() {
@@ -1530,13 +1536,43 @@ export class Controller {
 
     this._renderMaterial();
 
-    const topTurn = this.orientation === 'white' ? this.game.turn() === 'b' : this.game.turn() === 'w';
-    const botTurn = this.orientation === 'white' ? this.game.turn() === 'w' : this.game.turn() === 'b';
-    this.ui.setPlayerActive('top', topTurn && !this._isOver());
-    this.ui.setPlayerActive('bottom', botTurn && !this._isOver());
+    this._renderTurnIndicators();
 
     // Spectator live eval (roadmap C1) follows every displayed position change.
     this.spectatorEval?.notifyPosition();
+  }
+
+  /** Highlight the player bar whose turn it is (follows the orientation). */
+  _renderTurnIndicators() {
+    const over = this._isOver();
+    const topTurn = this.orientation === 'white' ? this.game.turn() === 'b' : this.game.turn() === 'w';
+    this.ui.setPlayerActive('top', topTurn && !over);
+    this.ui.setPlayerActive('bottom', !topTurn && !over);
+  }
+
+  /** Remember who plays which colour and paint the two bars for the current
+   *  orientation. Modes call this instead of ui.setPlayers so a later flip can
+   *  re-render the bars from the same source of truth. */
+  _setPlayersByColor(white, black) {
+    this._playersByColor = { w: white, b: black };
+    this._renderPlayers();
+  }
+
+  _renderPlayers() {
+    if (!this._playersByColor) return;
+    const topColor = this.orientation === 'white' ? 'b' : 'w';
+    const bottomColor = topColor === 'w' ? 'b' : 'w';
+    this.ui.setPlayers(this._playersByColor[topColor], this._playersByColor[bottomColor]);
+  }
+
+  /** Repaint the clock badges after an orientation change. */
+  _refreshClockDisplay() {
+    if (this.mode === MODES.ONLINE) {
+      if (this.onlineState) this._renderOnlineClock(this.onlineState);
+      return;
+    }
+    if (!this.clock || this.clock.unlimited) return;
+    this._renderClockTimes(this.clock.times, this.clock.active ? this.clock.turn : null);
   }
 
   /**
