@@ -20,7 +20,7 @@ import {
 } from './online.js';
 import { createLobbyView } from './lobby.js';
 import { sounds } from './sounds.js';
-import { iconBolt, iconBot, iconArena, iconWrench, iconHome, iconSound, iconMute, iconFlag, iconSettings } from './icons.js';
+import { iconBolt, iconHome, iconSound, iconMute, iconFlag, iconArrowRight } from './icons.js';
 
 const ui = new UI(document.getElementById('app'));
 const PLAYER_NAME_KEY = 'chess-arena-player-name';
@@ -48,7 +48,7 @@ function openPromotion(orig, dest) {
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'เลือกตัวหมากสำหรับโปรโมท');
-    box.appendChild(ui.el('div', 'promo-title', '♟️ โปรโมทเบี้ย — เลือกตัวหมาก'));
+    box.appendChild(ui.el('div', 'promo-title', 'โปรโมทเบี้ย — เลือกตัวหมาก'));
     const piecesRow = ui.el('div', 'promo-pieces');
     const white = dest[1] === '8'; // promoting side's pieces are the mover's color
     // chess.js uses single letters; chessground CSS keys icons by full role names.
@@ -417,7 +417,7 @@ function openJoinDialog(prefillInvite = null) {
 
 // 2-STEP CREATE ROOM DIALOG FLOW (CHESS.COM PLAY CHESS STYLE)
 function openModeDialog(targetMode = null) {
-  const modal = ui.openModal('♟️ Play Chess (เล่น / เลือกโหมด)');
+  const modal = ui.openModal('Play Chess (เล่น / เลือกโหมด)');
   const body = modal.body;
 
   const renderStep1 = () => {
@@ -470,7 +470,7 @@ function openModeDialog(targetMode = null) {
         <div class="c-body">
           <div class="c-header-row">
             <span class="c-tag ${opt.tagClass}">${opt.tag}</span>
-            <span class="c-arrow">➔</span>
+            <span class="c-arrow">${iconArrowRight({ size: 16 })}</span>
           </div>
           <div class="c-title">${opt.title}</div>
           <div class="c-desc">${opt.desc}</div>
@@ -887,14 +887,14 @@ ui.refs.sbToolMove.onclick = () => {
   controller.setSandboxTool('move');
   ui.refs.sbToolMove.classList.add('active');
   ui.refs.sbToolReplace.classList.remove('active');
-  ui.log('เปลี่ยนเป็นโหมด: 👆 ย้ายตำแหน่งหมาก', 'sys');
+  ui.log('เปลี่ยนเป็นโหมด: ย้ายตำแหน่งหมาก', 'sys');
 };
 
 ui.refs.sbToolReplace.onclick = () => {
   controller.setSandboxTool('replace');
   ui.refs.sbToolReplace.classList.add('active');
   ui.refs.sbToolMove.classList.remove('active');
-  ui.log('เปลี่ยนเป็นโหมด: 🎨 แทนที่ตัวหมาก (คลิกบนกระดานเพื่อเปลี่ยน)', 'sys');
+  ui.log('เปลี่ยนเป็นโหมด: แทนที่ตัวหมาก (คลิกบนกระดานเพื่อเปลี่ยน)', 'sys');
 };
 
 ui.refs.sbPieceGrid.querySelectorAll('.piece-btn').forEach((btn) => {
@@ -957,18 +957,18 @@ function setupSandboxLeftPanel() {
           ui.refs.sbColorLabel.textContent = 'คุณเล่นเป็นฝ่าย';
           ui.refs.sbSettingColor.classList.remove('hidden');
           ui.refs.sbSettingAiva.classList.add('hidden');
-          ui.log('เลือกโหมด: 🤖 เล่นกับบอท (Stockfish)', 'sys');
+          ui.log('เลือกโหมด: เล่นกับบอท (Stockfish)', 'sys');
         } else if (mode === 'online') {
           ui.refs.sbSettingBot.classList.add('hidden');
           ui.refs.sbColorLabel.textContent = 'คุณเล่นเป็นฝ่าย';
           ui.refs.sbSettingColor.classList.remove('hidden');
           ui.refs.sbSettingAiva.classList.add('hidden');
-          ui.log('เลือกโหมด: ⚡ เล่นออนไลน์', 'sys');
+          ui.log('เลือกโหมด: เล่นออนไลน์', 'sys');
         } else {
           ui.refs.sbSettingBot.classList.add('hidden');
           ui.refs.sbSettingColor.classList.add('hidden');
           ui.refs.sbSettingAiva.classList.remove('hidden');
-          ui.log('เลือกโหมด: ⚔️ AI vs AI Arena', 'sys');
+          ui.log('เลือกโหมด: AI vs AI Arena', 'sys');
         }
       }
     };
@@ -1025,8 +1025,8 @@ const resumeRoomArg = new URLSearchParams(window.location.search).get('room');
 // ---- boot --------------------------------------------------------------------
 
 ui.setPlayers(
-  { name: 'Stockfish 18', avatar: '🤖' },
-  { name: 'คุณ', avatar: '👤' }
+  { name: 'Stockfish 18', icon: 'robot' },
+  { name: 'คุณ', icon: 'user' },
 );
 ui.showHomeView();
 

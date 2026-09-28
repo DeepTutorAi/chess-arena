@@ -22,7 +22,7 @@ function svg(innerSvg, {
   viewBox = '0 0 24 24',
 } = {}) {
   const cls = `svg-icon ${className}`.trim();
-  return `<svg class="${cls}" width="${size}" height="${size}" viewBox="${viewBox}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${innerSvg}</svg>`;
+  return `<svg class="${cls}" width="${size}" height="${size}" viewBox="${viewBox}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${innerSvg}</svg>`;
 }
 
 // -----------------------------------------------------------------------------
@@ -53,12 +53,14 @@ export function iconPlay(opts) {
   return svg('<polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/>', opts);
 }
 
+const SPEAKER = '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>';
+
 export function iconSound(opts) {
-  return svg('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>', opts);
+  return svg(`${SPEAKER}<path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>`, opts);
 }
 
 export function iconMute(opts) {
-  return svg('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>', opts);
+  return svg(`${SPEAKER}<line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>`, opts);
 }
 
 export function iconHome(opts) {
@@ -92,10 +94,6 @@ export function iconSwords(opts) {
     <path d="M8 8l-4-4"/>
     <path d="M5 3L3 5"/>
   `, opts);
-}
-
-export function iconLink(opts) {
-  return svg('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>', opts);
 }
 
 export function iconBolt(opts) {
@@ -158,24 +156,8 @@ export function iconTrendingUp(opts) {
   return svg('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>', opts);
 }
 
-export function iconAward(opts) {
-  return svg('<circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/>', opts);
-}
-
-export function iconZap(opts) {
-  return svg('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>', opts);
-}
-
-export function iconSparkles(opts) {
-  return svg('<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/>', opts);
-}
-
 export function iconAlertTriangle(opts) {
   return svg('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>', opts);
-}
-
-export function iconCheckCircle(opts) {
-  return svg('<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>', opts);
 }
 
 // -----------------------------------------------------------------------------
@@ -188,4 +170,65 @@ export function iconList(opts) {
 
 export function iconTerminal(opts) {
   return svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>', opts);
+}
+
+// -----------------------------------------------------------------------------
+// UI chrome: close, navigation, review actions (replace text/emoji glyphs so
+// every platform renders the same shapes and they follow currentColor)
+// -----------------------------------------------------------------------------
+
+export function iconClose(opts) {
+  return svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>', opts);
+}
+
+export function iconMinus(opts) {
+  return svg('<line x1="5" y1="12" x2="19" y2="12"/>', opts);
+}
+
+export function iconEye(opts) {
+  return svg('<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>', opts);
+}
+
+export function iconChevronUp(opts) {
+  return svg('<polyline points="18 15 12 9 6 15"/>', opts);
+}
+
+export function iconChevronLeft(opts) {
+  return svg('<polyline points="15 18 9 12 15 6"/>', opts);
+}
+
+export function iconChevronRight(opts) {
+  return svg('<polyline points="9 18 15 12 9 6"/>', opts);
+}
+
+export function iconSkipBack(opts) {
+  return svg('<polyline points="19 20 9 12 19 4"/><line x1="5" y1="19" x2="5" y2="5"/>', opts);
+}
+
+export function iconSkipForward(opts) {
+  return svg('<polyline points="5 4 15 12 5 20"/><line x1="19" y1="5" x2="19" y2="19"/>', opts);
+}
+
+export function iconArrowRight(opts) {
+  return svg('<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>', opts);
+}
+
+export function iconSearch(opts) {
+  return svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>', opts);
+}
+
+export function iconTarget(opts) {
+  return svg('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>', opts);
+}
+
+export function iconBook(opts) {
+  return svg('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>', opts);
+}
+
+export function iconClock(opts) {
+  return svg('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>', opts);
+}
+
+export function iconPin(opts) {
+  return svg('<path d="M12 17v5"/><path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7z"/>', opts);
 }

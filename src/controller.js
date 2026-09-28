@@ -215,10 +215,10 @@ export class Controller {
 
     this.orientation = 'white'; // the editor's rank rules assume White at the bottom
     this._setPlayersByColor(
-      { name: 'ฝ่ายขาว (ปรับแต่งสนาม)' },
-      { name: 'ฝ่ายดำ (ปรับแต่งสนาม)' },
+      { name: 'ฝ่ายขาว (ปรับแต่งสนาม)', icon: 'user' },
+      { name: 'ฝ่ายดำ (ปรับแต่งสนาม)', icon: 'user' },
     );
-    this.ui.setStatus('🛠️ Sandbox Setup — จัดแต่งหมากและเลือกโหมดการเล่น', '');
+    this.ui.setStatus('Sandbox Setup — จัดแต่งหมากและเลือกโหมดการเล่น', '');
     this.ui.log('เข้าสู่โหมด Sandbox Setup — เลือกโหมดแถบซ้ายมือ และเลือกหมากแถบขวามือ', 'sys');
 
     // Show the view first so the board is laid out before the first sync —
@@ -641,7 +641,7 @@ export class Controller {
       this.engineBusy = false;
       this.clock?.stop();
       this.ui.setBusy?.(false);
-      this.ui.setStatus('⏸ หยุดชั่วคราว — กด ▶️ ต่อเพื่อเล่นต่อ', '');
+      this.ui.setStatus('หยุดชั่วคราว — กดปุ่ม "ต่อ" เพื่อเล่นต่อ', '');
       this.ui.setPauseState(true);
     } else {
       if (!this._isOver()) this.clock?.start(this.game.turn());
@@ -712,8 +712,8 @@ export class Controller {
       }
     }
 
-    const engineEntry = { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})` };
-    const humanEntry = { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})` };
+    const engineEntry = { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'robot' };
+    const humanEntry = { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'user' };
     this._setPlayersByColor(
       this.humanSide === 'w' ? humanEntry : engineEntry,
       this.humanSide === 'w' ? engineEntry : humanEntry,
@@ -742,7 +742,7 @@ export class Controller {
       onError: (msg) => {
         this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err');
         if (!this.engineReady) {
-          this.ui.setStatus('โหลดเอนจินไม่สำเร็จ — กด 🔄 เริ่มเกมใหม่', 'err');
+          this.ui.setStatus('โหลดเอนจินไม่สำเร็จ — กลับหน้าแรกแล้วเริ่มเกมใหม่อีกครั้ง', 'err');
         }
       },
     });
@@ -767,8 +767,8 @@ export class Controller {
     }
 
     this._setPlayersByColor(
-      { name: `${ENGINE_NAME} · Elo ${cfgW.elo} (ฝ่ายขาว)` },
-      { name: `${ENGINE_NAME} · Elo ${cfgB.elo} (ฝ่ายดำ)` },
+      { name: `${ENGINE_NAME} · Elo ${cfgW.elo} (ฝ่ายขาว)`, icon: 'robot' },
+      { name: `${ENGINE_NAME} · Elo ${cfgB.elo} (ฝ่ายดำ)`, icon: 'robot' },
     );
     this.ui.setStatus(`AI vs AI · ขาว Elo ${cfgW.elo} ปะทะ ดำ Elo ${cfgB.elo}`, '');
     this.paused = false;
@@ -822,8 +822,8 @@ export class Controller {
   _startAnalyze() {
     this.orientation = 'white';
     this._setPlayersByColor(
-      { name: 'ฝ่ายขาว (มือคุณ)' },
-      { name: 'ฝ่ายดำ (มือคุณ)' },
+      { name: 'ฝ่ายขาว (มือคุณ)', icon: 'user' },
+      { name: 'ฝ่ายดำ (มือคุณ)', icon: 'user' },
     );
     this.ui.setStatus('โหมด Sandbox — เล่นได้ทั้งสองสี', '');
     this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, liveAnalysis: false, options: true });
@@ -1869,7 +1869,7 @@ export class Controller {
     }
     this.hintBusy = true;
     this.ui.setBusy?.(true);
-    this.ui.setStatus('💡 บอท GM กำลังคิดคำใบ้…', 'busy');
+    this.ui.setStatus('บอท GM กำลังคิดคำใบ้…', 'busy');
     if (!this.hintEngine) {
       this.hintEngine = new Stockfish({
         workerUrl: getStrongEnginePreference() && isCrossOriginIsolated() ? ENGINE_MULTI_URL : ENGINE_HINT_URL,
@@ -1917,7 +1917,7 @@ export class Controller {
     this.hintBusy = false;
     this.ui.setBusy?.(false);
     if (!uci || uci === '(none)') {
-      this.ui.log('💡 ไม่มีคำใบ้สำหรับตำแหน่งนี้', 'warn');
+      this.ui.log('ไม่มีคำใบ้สำหรับตำแหน่งนี้', 'warn');
       return;
     }
     const orig = uci.slice(0, 2);
@@ -1931,8 +1931,8 @@ export class Controller {
     this.ground.set({
       highlight: { custom: new Map([[orig, 'hint-from'], [dest, 'hint-dest']]) },
     });
-    this.ui.log(`💡 คำใบ้: เดิน ${pieceLabel} ${orig} → ${dest}`, 'hint');
-    this.ui.setStatus('💡 คำใบ้แสดงบนกระดานแล้ว', '');
+    this.ui.log(`คำใบ้: เดิน ${pieceLabel} ${orig} → ${dest}`, 'hint');
+    this.ui.setStatus('คำใบ้แสดงบนกระดานแล้ว', '');
   }
 
   _maybeStartAiLoop() {

@@ -15,7 +15,6 @@ import {
   iconRefresh,
   iconSwords,
   iconTrendingUp,
-  iconLink,
   iconBolt,
   iconBot,
   iconArena,
@@ -30,9 +29,24 @@ import {
   iconTerminal,
   iconBarChart,
   iconSettings,
+  iconClose,
+  iconMinus,
+  iconEye,
+  iconChevronUp,
+  iconPin,
 } from './icons.js';
 
 const $ = (sel) => document.querySelector(sel);
+
+// Text glyphs (from AVATAR_GLYPHS) → the chessground piece role that draws the
+// same figure. Glyphs like ♟ render as colour emoji on some phones, so avatars
+// and the sandbox palette draw the bundled cburnett pieces instead.
+const GLYPH_ROLE = { '♞': 'knight', '♚': 'king', '♜': 'rook', '♝': 'bishop', '♟': 'pawn', '♛': 'queen' };
+
+/** Markup for a real chess piece (needs the chessground cburnett CSS). */
+export function pieceMarkup(role, color = 'white', className = '') {
+  return `<span class="cg-wrap piece-icon ${className}" aria-hidden="true"><piece class="${color} ${role}"></piece></span>`;
+}
 
 export class UI {
   constructor(root) {
@@ -40,7 +54,7 @@ export class UI {
     root.innerHTML = `
       <header class="topbar">
         <button class="brand" id="brand-home" type="button">
-          <span class="brand-mark">♞</span> Chess Arena
+          <span class="brand-mark">${pieceMarkup('knight')}</span> Chess Arena
         </button>
 
         <!-- PROFILE PLACEHOLDER (RIGHT TOPBAR) -->
@@ -208,13 +222,13 @@ export class UI {
 
               <div class="spectator-control hidden" id="spectator-control">
                 <button id="spectator-btn" class="spectator-eye-btn" type="button" aria-haspopup="dialog" aria-expanded="false">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                  ${iconEye({ size: 19 })}
                   <span id="spectator-count">0</span>
                 </button>
                 <div id="spectator-panel" class="spectator-panel" role="dialog" aria-modal="false" aria-label="รายชื่อผู้ชม" hidden>
                   <div class="spectator-panel-head">
                     <strong>ผู้ชมการแข่งขัน</strong>
-                    <button id="spectator-close" type="button" aria-label="ปิดรายชื่อผู้ชม">✕</button>
+                    <button id="spectator-close" type="button" aria-label="ปิดรายชื่อผู้ชม">${iconClose({ size: 16 })}</button>
                   </div>
                   <div id="spectator-list" class="spectator-list"></div>
                 </div>
@@ -293,16 +307,16 @@ export class UI {
 
               <div class="sandbox-palette-label">เลือกตัวหมากมาวางแทนที่:</div>
               <div class="sandbox-piece-grid" id="sandbox-piece-grid">
-                <button class="piece-btn active" data-piece="q"><span class="p-icon">♛</span><span class="p-name">Queen</span></button>
-                <button class="piece-btn" data-piece="r"><span class="p-icon">♜</span><span class="p-name">Rook</span></button>
-                <button class="piece-btn" data-piece="b"><span class="p-icon">♝</span><span class="p-name">Bishop</span></button>
-                <button class="piece-btn" data-piece="n"><span class="p-icon">♞</span><span class="p-name">Knight</span></button>
-                <button class="piece-btn" data-piece="p"><span class="p-icon">♟</span><span class="p-name">Pawn</span></button>
+                <button class="piece-btn active" data-piece="q"><span class="p-icon">${pieceMarkup('queen')}</span><span class="p-name">Queen</span></button>
+                <button class="piece-btn" data-piece="r"><span class="p-icon">${pieceMarkup('rook')}</span><span class="p-name">Rook</span></button>
+                <button class="piece-btn" data-piece="b"><span class="p-icon">${pieceMarkup('bishop')}</span><span class="p-name">Bishop</span></button>
+                <button class="piece-btn" data-piece="n"><span class="p-icon">${pieceMarkup('knight')}</span><span class="p-name">Knight</span></button>
+                <button class="piece-btn" data-piece="p"><span class="p-icon">${pieceMarkup('pawn')}</span><span class="p-name">Pawn</span></button>
                 <button class="piece-btn delete-btn" data-piece="delete"><span class="p-icon">${iconTrash({ size: 18 })}</span><span class="p-name">ลบหมาก</span></button>
               </div>
 
               <div class="sandbox-rule-notice">
-                📌 <b>กฎการจัดกระดาน:</b><br/>
+                ${iconPin({ size: 14 })} <b>กฎการจัดกระดาน:</b><br/>
                 • King สามารถย้ายตำแหน่งได้เฉพาะใน 2 แถวแรก<br/>
                 • การเพิ่ม/แทนที่หมากทำได้เฉพาะใน 2 แถวแรกของแต่ละฝั่ง
               </div>
@@ -487,8 +501,10 @@ export class UI {
     const glyphs = AVATAR_GLYPHS;
     for (const profile of spectators) {
       const item = this.el('div', 'spectator-profile');
+      const avatar = this.el('span', `spectator-avatar avatar-${profile.avatar}`);
+      this._fillAvatar(avatar, { avatar: glyphs[profile.avatar] ?? '♞' });
       item.append(
-        this.el('span', `spectator-avatar avatar-${profile.avatar}`, glyphs[profile.avatar] ?? '♞'),
+        avatar,
         this.el('span', 'spectator-name', profile.name),
         this.el('span', 'spectator-state', 'Watching'),
       );
@@ -590,8 +606,20 @@ export class UI {
     // Long names are truncated in the bar — keep the full text on hover.
     this.refs.nameTop.title = top.name ?? '';
     this.refs.nameBottom.title = bottom.name ?? '';
-    if (top.avatar) this.refs.avatarTop.textContent = top.avatar;
-    if (bottom.avatar) this.refs.avatarBottom.textContent = bottom.avatar;
+    this._fillAvatar(this.refs.avatarTop, top);
+    this._fillAvatar(this.refs.avatarBottom, bottom);
+  }
+
+  /** Draw one avatar: { icon: 'robot' | 'user' } for the built-in players, or
+   *  { avatar: '♞' } (an AVATAR_GLYPHS value) for online profiles. */
+  _fillAvatar(el, entry = {}) {
+    if (entry.icon) {
+      el.innerHTML = entry.icon === 'robot' ? iconRobot({ size: 22 }) : iconUser({ size: 22 });
+    } else if (entry.avatar) {
+      const role = GLYPH_ROLE[entry.avatar];
+      if (role) el.innerHTML = pieceMarkup(role, 'white', 'avatar-piece');
+      else el.textContent = entry.avatar;
+    }
   }
 
   setPlayerActive(side, active) {
@@ -665,7 +693,7 @@ export class UI {
     overlay.setAttribute('aria-label', title);
     overlay.innerHTML = `
       <div class="modal" tabindex="-1">
-        <div class="modal-head"><h2></h2><button class="modal-close" type="button" aria-label="ปิด">✕</button></div>
+        <div class="modal-head"><h2></h2><button class="modal-close" type="button" aria-label="ปิด">${iconClose({ size: 16 })}</button></div>
         <div class="modal-body"></div>
       </div>
     `;
@@ -765,7 +793,8 @@ export class UI {
     // board; dragging repositions it, clicking restores the full card.
     const head = overlay.body.closest('.modal')?.querySelector('.modal-head');
     if (head) {
-      const minimize = this.el('button', 'modal-close gameover-minimize', '–');
+      const minimize = this.el('button', 'modal-close gameover-minimize');
+      minimize.innerHTML = iconMinus({ size: 16 });
       minimize.type = 'button';
       minimize.setAttribute('aria-label', 'ย่อการ์ดผลการแข่งขัน (ไม่บังกระดาน)');
       minimize.title = 'ย่อการ์ด — ลากแถบป้ายย้ายได้ กดเพื่อเปิดใหม่';
@@ -786,7 +815,7 @@ export class UI {
     pill.append(
       this.el('span', 'pill-title', title),
       this.el('span', 'pill-detail', detail),
-      this.el('span', 'pill-expand', '▲'),
+      this._iconSpan('pill-expand', iconChevronUp({ size: 12 })),
     );
     pill.title = 'กดเพื่อเปิดการ์ด · ลากเพื่อย้าย';
 
@@ -858,6 +887,12 @@ export class UI {
     }
     document.body.appendChild(toast);
     return toast;
+  }
+
+  _iconSpan(className, svgMarkup) {
+    const span = this.el('span', className);
+    span.innerHTML = svgMarkup;
+    return span;
   }
 
   el(tag, className, text) {

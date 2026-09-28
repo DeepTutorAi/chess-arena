@@ -23,6 +23,7 @@ const images = walk(assetsDir).filter((file) => RASTER.test(file));
 const sourceText = [
   ...readdirSync(join(root, 'src')).filter((f) => /\.(js|css)$/u.test(f)).map((f) => readFileSync(join(root, 'src', f), 'utf8')),
   readFileSync(join(root, 'index.html'), 'utf8'),
+  readFileSync(join(root, 'public', 'manifest.webmanifest'), 'utf8'),
 ].join('\n');
 
 test('there are raster images to check (guard against a broken glob)', () => {

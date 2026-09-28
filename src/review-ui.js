@@ -9,7 +9,11 @@ import { sounds } from './sounds.js';
 import { ChessClock } from './clock.js';
 import { Stockfish } from './engine.js';
 import { TIERS, TIER_BY_KEY, pvToSan, ANALYSIS_DEPTH, convertCentipawnsToWinProbability } from './analyzer.js';
-import { iconBarChart, iconTrendingUp, iconFlip } from './icons.js';
+import {
+  iconBarChart, iconTrendingUp, iconFlip, iconClose, iconSkipBack, iconChevronLeft,
+  iconChevronRight, iconSkipForward, iconPlay, iconPause, iconSearch, iconTarget,
+  iconBook, iconRefresh, iconHint, iconClock, iconAlertTriangle,
+} from './icons.js';
 import { escapeHtml } from './html.js';
 
 const BAD_TIERS = new Set(['inaccuracy', 'mistake', 'blunder', 'miss']);
@@ -17,6 +21,13 @@ const RETRYABLE_TIERS = new Set(['inaccuracy', 'mistake', 'blunder', 'miss']);
 // Beat between the user's wrong move landing and the opponent's answer — long
 // enough to SEE the played move, short enough to feel responsive.
 const RETRY_REPLY_DELAY_MS = 650;
+
+// Small inline icon markup shared by the review templates (replaces emoji).
+const glyph = (icon, size = 15) => `<span class="btn-svg">${icon({ size })}</span>`;
+// Tier symbols are text ('!!', '?', '✓' …) except Book, whose emoji renders as a
+// colour picture on some platforms — draw it as an icon instead.
+const tierSymbol = (tier) => (tier?.key === 'book' ? iconBook({ size: 15 }) : (tier?.symbol ?? ''));
+const RETRY_HEAD = `<div class="coach-head">${glyph(iconHint, 16)} ลองเดินแก้ตัว</div>`;
 
 const HEADLINES = {
   brilliant: 'ตาเดินสุดฉลาด (Brilliant)',
@@ -109,7 +120,7 @@ export class ReviewUI {
     overlay.className = 'review-modal-overlay';
     overlay.innerHTML = `
       <div class="review-modal review-progress-modal" role="dialog" aria-modal="true" aria-label="กำลังวิเคราะห์เกม">
-        <button class="review-modal-close" type="button" aria-label="ยกเลิกการวิเคราะห์">✕</button>
+        <button class="review-modal-close" type="button" aria-label="ยกเลิกการวิเคราะห์">${iconClose({ size: 16 })}</button>
         <div class="review-progress-icon">${iconBarChart({ size: 28 })}</div>
         <div class="review-progress-title">กำลังวิเคราะห์รูปเกม…</div>
         <div class="review-progress-sub" data-sub>เตรียมเอนจิน</div>
@@ -150,9 +161,9 @@ export class ReviewUI {
     const runCount = analysis.plies.filter((p) => RETRYABLE_TIERS.has(p.tier) && p.bestMove).length;
     overlay.innerHTML = `
       <div class="review-modal review-summary-modal" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
-        <button class="review-modal-close" type="button" aria-label="ปิด">✕</button>
+        <button class="review-modal-close" type="button" aria-label="ปิด">${iconClose({ size: 16 })}</button>
         <div class="review-summary-title">Game Review · การรีวิวเกม</div>
-        ${analysis.opening ? `<div class="review-opening">📖 ${escapeHtml(analysis.opening.eco)} · ${escapeHtml(analysis.opening.name)}</div>` : ''}
+        ${analysis.opening ? `<div class="review-opening">${glyph(iconBook, 14)} ${escapeHtml(analysis.opening.eco)} · ${escapeHtml(analysis.opening.name)}</div>` : ''}
 
         <div class="review-section-label">ACCURACY SECTION</div>
         <div class="review-gauges">
@@ -174,10 +185,10 @@ export class ReviewUI {
 
         <div class="review-summary-actions">
           <button class="btn primary review-step-btn" type="button" data-step>
-            🔍 ดูตาเดินบนกระดาน (Review Moves)
+            ${glyph(iconSearch, 16)} ดูตาเดินบนกระดาน
           </button>
-          ${runCount ? `<button class="btn primary review-puzzle-btn" type="button" data-puzzle-run>🎯 ฝึกแก้ตาพลาด (${runCount} ตา)</button>` : ''}
-          <button class="btn" type="button" data-again>↺ เล่นกันใหม่</button>
+          ${runCount ? `<button class="btn primary review-puzzle-btn" type="button" data-puzzle-run>${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด (${runCount} ตา)</button>` : ''}
+          <button class="btn" type="button" data-again>${glyph(iconRefresh, 16)} เล่นกันใหม่</button>
         </div>
       </div>
     `;
@@ -193,7 +204,7 @@ export class ReviewUI {
       const cell = document.createElement('div');
       cell.className = `tier-cell tier-${tier.key}`;
       cell.innerHTML = `
-        <span class="tier-symbol" style="color:${tier.color}">${tier.symbol}</span>
+        <span class="tier-symbol" style="color:${tier.color}">${tierSymbol(tier)}</span>
         <span class="tier-name">${tier.label}</span>
         <span class="tier-count" style="color:${tier.color}">${count}</span>
       `;
@@ -277,7 +288,12 @@ export class ReviewUI {
     let ticks = '';
     for (let t = 0; t < tickCount; t++) {
       const idx = Math.round((t / Math.max(1, tickCount - 1)) * (pts.length - 1));
-      ticks += `<text class="adv-tick" x="${x(idx).toFixed(1)}" y="${H + 14}">ตา ${idx}</text>`;
+      // Position idx = after idx plies; label it with the full-move number like
+      // the rest of the UI, and anchor the end labels inward so they aren't
+      // clipped by the viewBox edge.
+      const anchor = t === 0 ? 'start' : (t === tickCount - 1 && tickCount > 1 ? 'end' : 'middle');
+      const label = idx === 0 ? 'เริ่ม' : `ตา ${Math.ceil(idx / 2)}`;
+      ticks += `<text class="adv-tick" text-anchor="${anchor}" x="${x(idx).toFixed(1)}" y="${H + 14}">${label}</text>`;
     }
     return `
       <svg class="advantage-graph-svg" viewBox="0 0 ${W} ${H + 22}" preserveAspectRatio="none" role="img" aria-label="กราฟความได้เปรียบ">
@@ -367,12 +383,12 @@ export class ReviewUI {
       <div class="review-movelist" data-movelist></div>
       <div class="coach-card" data-coach></div>
       <div class="stepper-controls">
-        <button class="step-btn" type="button" data-first title="ต้นเกม">|&lt;&lt;</button>
-        <button class="step-btn" type="button" data-prev title="ตาก่อน">&lt;</button>
-        <button class="step-btn" type="button" data-play title="เล่นอัตโนมัติ">▶</button>
-        <button class="step-btn" type="button" data-next title="ตาถัดไป">&gt;</button>
-        <button class="step-btn" type="button" data-last title="ตาสุดท้าย">&gt;&gt;|</button>
-        <button class="step-btn" type="button" data-flip title="กลับกระดาน">${iconFlip({ size: 15 })}</button>
+        <button class="step-btn" type="button" data-first title="ต้นเกม" aria-label="ไปต้นเกม">${iconSkipBack({ size: 18 })}</button>
+        <button class="step-btn" type="button" data-prev title="ตาก่อน" aria-label="ตาก่อนหน้า">${iconChevronLeft({ size: 18 })}</button>
+        <button class="step-btn" type="button" data-play title="เล่นอัตโนมัติ" aria-label="เล่นอัตโนมัติ" aria-pressed="false">${iconPlay({ size: 18 })}</button>
+        <button class="step-btn" type="button" data-next title="ตาถัดไป" aria-label="ตาถัดไป">${iconChevronRight({ size: 18 })}</button>
+        <button class="step-btn" type="button" data-last title="ตาสุดท้าย" aria-label="ไปตาสุดท้าย">${iconSkipForward({ size: 18 })}</button>
+        <button class="step-btn" type="button" data-flip title="กลับกระดาน" aria-label="กลับกระดาน">${iconFlip({ size: 18 })}</button>
       </div>
       <button class="btn review-exit-btn" type="button" data-exit>ออกจากการรีวิว</button>
     `;
@@ -473,19 +489,27 @@ export class ReviewUI {
     if (this._autoplayTimer) {
       clearInterval(this._autoplayTimer);
       this._autoplayTimer = null;
-      if (btn) btn.textContent = '▶';
+      this._syncPlayButton(btn, false);
       return;
     }
-    if (btn) btn.textContent = '⏸';
+    this._syncPlayButton(btn, true);
     this._autoplayTimer = setInterval(() => {
       if (this._viewPly >= this._analysis.plies.length - 1) {
         clearInterval(this._autoplayTimer);
         this._autoplayTimer = null;
-        if (btn) btn.textContent = '▶';
+        this._syncPlayButton(btn, false);
         return;
       }
       this.stepTo(this._viewPly + 1, true);
     }, 900);
+  }
+
+  /** Play/pause icon + accessible state for the autoplay button. */
+  _syncPlayButton(btn, playing) {
+    if (!btn) return;
+    btn.innerHTML = playing ? iconPause({ size: 18 }) : iconPlay({ size: 18 });
+    btn.setAttribute('aria-pressed', String(playing));
+    btn.setAttribute('aria-label', playing ? 'หยุดเล่นอัตโนมัติ' : 'เล่นอัตโนมัติ');
   }
 
   renderStepperPly(plyIndex) {
@@ -577,7 +601,8 @@ export class ReviewUI {
     const badge = document.createElement('span');
     badge.className = `review-square-badge tier-${move.tier}`;
     if (move.tier === 'blunder') badge.classList.add('pulse');
-    badge.textContent = tier.symbol;
+    if (tier.key === 'book') badge.innerHTML = tierSymbol(tier);
+    else badge.textContent = tier.symbol;
     badge.style.color = tier.color;
     const [file, rank] = this._squareXY(move.to);
     badge.style.left = `${file * 12.5 + 6.25}%`;
@@ -625,7 +650,7 @@ export class ReviewUI {
         <span>ขาว ${escapeHtml(a.players.white?.name || '')} <b>${acc(a.accuracy.w)}</b></span>
         <span>ดำ ${escapeHtml(a.players.black?.name || '')} <b>${acc(a.accuracy.b)}</b></span>
       </div>
-      ${a.opening ? `<div class="review-opening">📖 ${escapeHtml(a.opening.eco)} · ${escapeHtml(a.opening.name)}</div>` : ''}
+      ${a.opening ? `<div class="review-opening">${glyph(iconBook, 14)} ${escapeHtml(a.opening.eco)} · ${escapeHtml(a.opening.name)}</div>` : ''}
     `;
   }
 
@@ -649,7 +674,7 @@ export class ReviewUI {
         cell.type = 'button';
         cell.className = `review-move-cell tier-${p.tier}`;
         cell.dataset.ply = String(j);
-        cell.innerHTML = `<span class="san">${escapeHtml(p.san)}</span><span class="sym" style="color:${tier.color}">${tier.symbol}</span>`;
+        cell.innerHTML = `<span class="san">${escapeHtml(p.san)}</span><span class="sym" style="color:${tier.color}">${tierSymbol(tier)}</span>`;
         cell.onclick = () => this.stepTo(j, true);
         row.appendChild(cell);
       }
@@ -670,7 +695,7 @@ export class ReviewUI {
     if (!card) return;
     if (!move) {
       card.innerHTML = `
-        <div class="coach-empty">เริ่มรีวิวจากต้นเกม — กด <b>&gt;</b> หรือ <b>▶</b> เพื่อดูตาแรก<br/>(ปุ่มลูกศร ← → ใช้ได้ด้วย)</div>
+        <div class="coach-empty">เริ่มรีวิวจากต้นเกม — กดปุ่มตาถัดไปหรือเล่นอัตโนมัติเพื่อดูตาแรก<br/>(ปุ่มลูกศรซ้าย/ขวาบนคีย์บอร์ดใช้ได้ด้วย)</div>
       `;
       return;
     }
@@ -684,7 +709,7 @@ export class ReviewUI {
       ? (this._analysis.positions[move.ply + 1]?.pvSan ?? [])
       : [];
     card.innerHTML = `
-      <div class="coach-head" style="color:${tier.color}">${tier.symbol} ${insight.headline}</div>
+      <div class="coach-head" style="color:${tier.color}">${tierSymbol(tier)} ${insight.headline}</div>
       <div class="coach-tag">${insight.tacticalTag} · เสียโอกาส ${move.deltaW}%</div>
       <div class="coach-compare">
         <span class="coach-played">คุณเดิน: <b>${escapeHtml(move.san)}</b></span>
@@ -696,7 +721,7 @@ export class ReviewUI {
           <span class="coach-forecast-label">คาดการณ์อนาคต (เส้นทางที่เอนจินคำนวณ)</span>
           ${escapeHtml(forecast.join(' → '))}
         </div>` : ''}
-      ${canRetry ? '<button class="btn primary coach-retry-btn" type="button">💡 ลองเดินแก้ตัว (Retry Mistake)</button>' : ''}
+      ${canRetry ? '<button class="btn primary coach-retry-btn" type="button">${glyph(iconHint, 16)} ลองเดินแก้ตัว</button>' : ''}
     `;
     card.querySelector('.coach-retry-btn')?.addEventListener('click', () => {
       this.startRetryMistake(move.ply);
@@ -974,7 +999,7 @@ export class ReviewUI {
     const actions = `
       <div class="retry-actions">
         ${extraButtons}
-        ${phase !== 'puzzle' ? '<button class="btn" type="button" data-restart>↺ เริ่มใหม่</button>' : ''}
+        ${phase !== 'puzzle' ? '<button class="btn" type="button" data-restart>${glyph(iconRefresh)} เริ่มใหม่</button>' : ''}
         ${phase !== 'puzzle' ? '<button class="btn" type="button" data-solution>ดูเฉลย</button>' : ''}
         <button class="btn" type="button" data-cancel>กลับไปรีวิว</button>
       </div>`;
@@ -982,20 +1007,20 @@ export class ReviewUI {
     let body = '';
     if (phase === 'puzzle') {
       body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
+        ${RETRY_HEAD}
         <p class="coach-explanation">กระดานอยู่ที่ตำแหน่งก่อนตาที่พลาด — ลากหมาก${moverName}หาตาที่ดีที่สุด
         เดินผิดแล้วฝ่ายตรงข้ามจะเดินตอบโต้ให้เห็นผลจริงบนกระดาน</p>`;
     } else if (phase === 'thinking') {
       body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
-        <div class="retry-status">⏳ ฝ่ายตรงข้ามกำลังคำนวณการตอบโต้…</div>`;
+        ${RETRY_HEAD}
+        <div class="retry-status">${glyph(iconClock, 14)} ฝ่ายตรงข้ามกำลังคำนวณการตอบโต้…</div>`;
     } else if (phase === 'consequence') {
       const evalText = formatSimScore(data.score);
       const rest = data.restSans?.length
         ? `<div class="retry-line">คาดการณ์ต่อ: ${data.restSans.join(' → ')}</div>`
         : '';
       body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
+        ${RETRY_HEAD}
         <div class="retry-feedback">
           <b>ยังไม่ใช่ตาที่ดีที่สุด</b> — ฝ่ายตรงข้ามตอบ <b>${data.reply?.san ?? '?'}</b> ${evalText}
           ${rest}
@@ -1004,22 +1029,22 @@ export class ReviewUI {
     } else if (phase === 'sim-mate' || phase === 'sim-draw') {
       const winner = retry.game.turn() === 'w' ? 'ดำ' : 'ขาว';
       body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
+        ${RETRY_HEAD}
         <div class="retry-feedback">
           ${phase === 'sim-mate' ? `หมาจบ! ${winner}ชนะในการจำลอง` : 'จบเกมแบบเสมอในการจำลอง'}
           <div class="retry-hint">กด เริ่มใหม่ เพื่อลองตาอื่น หรือกลับไปรีวิว</div>
         </div>`;
     } else if (phase === 'sim-error') {
       body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
-        <div class="retry-status">⚠ ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
+        ${RETRY_HEAD}
+        <div class="retry-status">${glyph(iconAlertTriangle, 14)} ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
     } else if (phase === 'solved') {
       body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
-        <div class="retry-feedback success">ถูกต้อง! นี่คือตาที่ดีที่สุด (${retry.ply.bestSan ?? '—'}) — กด ▶ หรือ → เพื่อดูต่อ</div>`;
+        ${RETRY_HEAD}
+        <div class="retry-feedback success">ถูกต้อง! นี่คือตาที่ดีที่สุด (${retry.ply.bestSan ?? '—'}) — กดปุ่มตาถัดไปหรือลูกศรขวาเพื่อดูต่อ</div>`;
     } else if (phase === 'solution') {
       body = `
-        <div class="retry-feedback success">เฉลย: ${retry.ply.bestSan ?? '—'} — กด ▶ หรือ → เพื่อดูต่อ</div>`;
+        <div class="retry-feedback success">เฉลย: ${retry.ply.bestSan ?? '—'} — กดปุ่มตาถัดไปหรือลูกศรขวาเพื่อดูต่อ</div>`;
     }
     card.innerHTML = body + (showActions ? actions : '');
     card.querySelector('[data-research]')?.addEventListener('click', () => this._onSimResearch());
@@ -1200,8 +1225,8 @@ export class ReviewUI {
     const total = run.plies.length;
     const retry = this._retry;
     const head = run.done
-      ? '🏁 จบการฝึก!'
-      : `🎯 ฝึกแก้ตาพลาด · ข้อ ${run.index + 1}/${total}`;
+      ? 'จบการฝึก!'
+      : `${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด · ข้อ ${run.index + 1}/${total}`;
     const scoreLine = `คะแนน ${run.score} · สตรีค ${run.streak}`;
     let body = '';
     let actions = '';
@@ -1213,7 +1238,7 @@ export class ReviewUI {
         <div class="coach-head">${head}</div>
         <div class="coach-tag">${scoreLine}</div>
         <p class="coach-explanation">ตาที่ ${moveNo} คุณเดิน ${retry?.ply.san ?? '?'}
-        <span style="color:${tier?.color ?? 'inherit'}">${tier?.symbol ?? ''}</span>
+        <span style="color:${tier?.color ?? 'inherit'}">${tierSymbol(tier)}</span>
         — ลากหมาก${mover}ลองหาตาที่ดีที่สุด</p>`;
       actions = `
         <div class="retry-actions">
@@ -1224,7 +1249,7 @@ export class ReviewUI {
       body = `
         <div class="coach-head">${head}</div>
         <div class="coach-tag">${scoreLine}</div>
-        <div class="retry-status">⏳ ฝ่ายตรงข้ามกำลังคำนวณการตอบโต้…</div>`;
+        <div class="retry-status">${glyph(iconClock, 14)} ฝ่ายตรงข้ามกำลังคำนวณการตอบโต้…</div>`;
       actions = `
         <div class="retry-actions">
           <button class="btn" type="button" data-finish>จบการฝึก</button>
@@ -1233,7 +1258,7 @@ export class ReviewUI {
       body = `
         <div class="coach-head">${head}</div>
         <div class="coach-tag">${scoreLine}</div>
-        <div class="retry-status">⚠ ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
+        <div class="retry-status">${glyph(iconAlertTriangle, 14)} ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
       actions = `
         <div class="retry-actions">
           <button class="btn primary" type="button" data-research>ลองคำนวณใหม่</button>
@@ -1267,7 +1292,7 @@ export class ReviewUI {
         <div class="retry-hint">สตรีคสูงสุดของเกมนี้: ${run.storedBest}</div>`;
       actions = `
         <div class="retry-actions">
-          <button class="btn" type="button" data-run-restart>↺ เริ่มฝึกใหม่</button>
+          <button class="btn" type="button" data-run-restart>${glyph(iconRefresh)} เริ่มฝึกใหม่</button>
           <button class="btn" type="button" data-run-review>กลับไปรีวิว</button>
         </div>`;
     }
@@ -1304,8 +1329,7 @@ export class ReviewUI {
     if (this._autoplayTimer) {
       clearInterval(this._autoplayTimer);
       this._autoplayTimer = null;
-      const btn = this._panel?.querySelector('[data-play]');
-      if (btn) btn.textContent = '▶';
+      this._syncPlayButton(this._panel?.querySelector('[data-play]'), false);
     }
   }
 

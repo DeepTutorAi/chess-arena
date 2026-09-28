@@ -58,3 +58,26 @@ test('install survives an offline first visit (shell precache is best-effort)', 
   const skipLine = install.indexOf('skipWaiting');
   assert.ok(catchLine > addLine && catchLine < skipLine, 'shell precache failure is caught, install still completes');
 });
+
+test('manifest ships raster icons (192, 512, maskable 512) besides the SVG', async () => {
+  const manifest = JSON.parse(await readFile(join(root, 'public', 'manifest.webmanifest'), 'utf8'));
+  const has = (sizes, purpose) => manifest.icons.some(
+    (icon) => icon.type === 'image/png' && icon.sizes === sizes && icon.purpose === purpose,
+  );
+  assert.ok(has('192x192', 'any'), '192px PNG (Android install)');
+  assert.ok(has('512x512', 'any'), '512px PNG (splash screen)');
+  assert.ok(has('512x512', 'maskable'), 'maskable PNG (adaptive icons)');
+});
+
+test('index.html links a real SVG favicon and an apple-touch-icon (no emoji data URI)', async () => {
+  const html = await readFile(join(root, 'index.html'), 'utf8');
+  assert.match(html, /rel="icon"[^>]*icon\.svg/u);
+  assert.match(html, /rel="apple-touch-icon"[^>]*\.png/u);
+  assert.doesNotMatch(html, /data:image\/svg\+xml/u, 'glyph-in-a-data-URI favicon is font dependent');
+});
+
+test('app icon artwork is vector paths, not a font glyph', async () => {
+  const svg = await readFile(join(root, 'public', 'assets', 'icons', 'icon.svg'), 'utf8');
+  assert.doesNotMatch(svg, /<text/u, 'a <text> icon renders differently per installed font');
+  assert.match(svg, /<path/u);
+});

@@ -9,6 +9,7 @@
   --muted: #bab8b6;
   --accent: #81b64c;
   --accent-hover: #a3d168;
+  --on-accent: #14200e; /* text on accent-green fills: 7.0:1 (white was 2.4:1) */
   --amber: #f59e0b;
   --red: #fa4141;
 
@@ -93,8 +94,28 @@ body {
 }
 
 .brand-mark {
-  color: var(--accent);
-  font-size: 22px;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+}
+
+/* Real chessground pieces used as icons (avatars, brand mark, sandbox palette) */
+.piece-icon {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.piece-icon piece {
+  position: static;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.avatar .avatar-piece {
+  width: 26px;
+  height: 26px;
 }
 
 /* PROFILE PLACEHOLDER (TOPBAR RIGHT) */
@@ -976,7 +997,9 @@ square.hint-dest {
 }
 
 .piece-btn .p-icon {
-  font-size: 24px;
+  display: block;
+  width: 30px;
+  height: 30px;
 }
 
 .piece-btn .p-name {
@@ -1012,7 +1035,7 @@ square.hint-dest {
   background: var(--accent);
   border: none;
   border-radius: 8px;
-  color: #ffffff;
+  color: var(--on-accent);
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(129, 182, 76, 0.4);
   transition: all 0.15s ease;
@@ -1051,7 +1074,7 @@ square.hint-dest {
   gap: 6px;
   background: #81b64c;
   border: 1px solid #99cc60;
-  color: #ffffff;
+  color: var(--on-accent);
   font-weight: 800;
   font-size: 14px;
   padding: 8px 16px;
@@ -1229,7 +1252,7 @@ square.hint-dest {
 
 .exact-card-action-btn.join {
   background: #81b64c;
-  color: #ffffff;
+  color: var(--on-accent);
   box-shadow: 0 4px 12px rgba(129, 182, 76, 0.4);
 }
 
@@ -1277,11 +1300,15 @@ square.hint-dest {
 }
 
 .modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--muted);
-  font-size: 18px;
   cursor: pointer;
+  min-width: 36px;
+  min-height: 36px;
   padding: 4px 8px;
   border-radius: 6px;
 }
@@ -1523,7 +1550,7 @@ square.hint-dest {
 }
 
 .c-arrow {
-  font-size: 13px;
+  display: inline-flex;
   color: var(--muted);
   transition: transform 0.2s ease, color 0.2s ease;
 }
@@ -1673,7 +1700,7 @@ input[type='range'] {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .btn.primary:hover {
@@ -1687,7 +1714,7 @@ input[type='range'] {
 }
 
 .btn.danger:hover:not(:disabled) {
-  background: var(--red);
+  background: #c62828; /* white on this is 5.6:1 (on --red it was 3.6:1) */
   color: #ffffff;
 }
 
@@ -1970,6 +1997,7 @@ input[type='range'] {
 .spectator-list { max-height:300px; overflow-y:auto; padding:8px; }
 .spectator-profile { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; padding:9px; border-radius:10px; }
 .spectator-profile:hover { background:rgba(255,255,255,.05); }
+.spectator-avatar .avatar-piece { width:24px; height:24px; }
 .spectator-avatar { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; color:#e7c76d; background:rgba(255,255,255,.07); font-size:19px; }
 .spectator-name { overflow:hidden; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
 .spectator-state { color:#93899e; font-size:11px; }
@@ -2016,7 +2044,8 @@ input[type='range'] {
   backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
-  padding: 22px;
+  --pad: 22px;
+  padding: var(--pad);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), inset 0 1px rgba(255, 255, 255, 0.06);
 }
 
@@ -2103,7 +2132,7 @@ input[type='range'] {
 .adv-line { fill: none; stroke: #2fd6c3; stroke-width: 2; }
 .adv-centerline { stroke: rgba(255, 255, 255, 0.18); stroke-dasharray: 4 4; }
 .adv-crosshair { stroke: #fff; opacity: 0.5; }
-.adv-tick { fill: var(--muted); font-size: 10px; text-anchor: middle; }
+.adv-tick { fill: var(--muted); font-size: 10px; } /* text-anchor is set per tick in review-ui */
 /* Critical moments (roadmap A1) */
 .adv-cm-dot {
   fill: #f97316;
@@ -2144,9 +2173,20 @@ input[type='range'] {
   white-space: nowrap;
 }
 
-.review-summary-actions { display: flex; gap: 10px; margin-top: 18px; }
-.review-summary-actions .review-step-btn { flex: 1; }
-.review-summary-actions .review-puzzle-btn { flex: 1; }
+/* Pinned to the bottom of the (scrolling) modal so the primary actions are
+   never cut off on shorter screens. */
+.review-summary-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px calc(var(--pad) * -1) calc(var(--pad) * -1);
+  padding: 14px var(--pad) var(--pad);
+  background: linear-gradient(180deg, rgba(18, 20, 24, 0), rgba(18, 20, 24, 0.97) 30%);
+}
+.review-summary-actions .btn { flex: 1 1 150px; white-space: nowrap; }
 
 /* Progress modal */
 .review-progress-modal { width: min(400px, 100%); text-align: center; }
@@ -2325,6 +2365,10 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
 /* Stepper controls */
 .stepper-controls { display: flex; gap: 6px; }
 .step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
   flex: 1;
   background: var(--panel-2);
   color: var(--text);
@@ -2362,7 +2406,7 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
 @media (max-width: 768px) {
   .review-gauges { gap: 18px; }
   .accuracy-gauge-svg { width: 104px; height: 104px; }
-  .review-modal { padding: 16px; max-height: calc(94 * var(--vh)); }
+  .review-modal { --pad: 16px; max-height: calc(94 * var(--vh)); }
   :root { --eval-w: 18px; --eval-gap: 5px; }
   /* Vertical stack: board on top, review panel below (plan Hole 10). */
   .chesscom-layout .review-panel { max-height: calc(46 * var(--vh)); }
@@ -2375,7 +2419,7 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
 
 /* Game-over card: minimize pill + coach forecast (round 2) ---------------- */
 
-.gameover-minimize { font-size: 15px; line-height: 1; padding: 4px 10px; }
+.gameover-minimize { padding: 4px 10px; }
 
 .gameover-pill {
   position: fixed;
@@ -2412,7 +2456,7 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.gameover-pill .pill-expand { color: var(--accent); font-size: 10px; }
+.gameover-pill .pill-expand { display: inline-flex; color: var(--accent); }
 
 .coach-forecast {
   margin-top: 8px;

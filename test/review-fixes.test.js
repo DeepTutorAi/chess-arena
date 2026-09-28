@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
+import { readFileSync } from 'node:fs';
 import { Chess } from 'chess.js';
 
 import { GameReviewAnalyzer } from '../src/analyzer.js';
@@ -264,4 +265,17 @@ test('coach: centipawn loss is reported in pawns, not tenths of a pawn', () => {
   assert.match(half.explanation, /~0\.5 ตัว/u);
   const mate = coach.generateInsight({ ...base, cpLoss: 20000 });
   assert.doesNotMatch(mate.explanation, /ตัว\)/u, 'a mate-sized loss is not "200 pawns"');
+});
+
+test('graph: end tick labels are anchored inward and use full-move numbers', (t) => {
+  installGlobals(t);
+  new ReviewUI().showReviewSummaryModal(graphAnalysis(4), () => {}, () => {}, () => {});
+  const ticks = [...document.querySelectorAll('.adv-tick')];
+  assert.ok(ticks.length >= 2);
+  assert.equal(ticks[0].getAttribute('text-anchor'), 'start');
+  assert.equal(ticks.at(-1).getAttribute('text-anchor'), 'end');
+  assert.equal(ticks[0].textContent, 'เริ่ม');
+  assert.equal(ticks.at(-1).textContent, 'ตา 2', 'position after 4 plies = move 2');
+  assert.doesNotMatch(readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8'), /\.adv-tick\s*\{[^}]*text-anchor/u,
+    'a CSS text-anchor would override the per-tick attribute');
 });
