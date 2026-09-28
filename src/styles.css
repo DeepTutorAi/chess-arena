@@ -1601,6 +1601,118 @@ square.hint-dest {
   line-height: 1.45;
 }
 
+/* ---- Game history / import ---- */
+
+.topbar-history {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 10px;
+  padding: 6px 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.topbar-history:hover {
+  border-color: var(--accent);
+}
+
+@media (max-width: 520px) {
+  .topbar-history-label { display: none; }
+  .topbar-history { padding: 7px; }
+}
+
+.history-card,
+.import-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(520px, 100%);
+}
+
+.history-bar {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(calc(52 * var(--vh)), 460px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border-radius: 10px;
+}
+
+.history-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.history-result {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.history-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.history-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.history-row-actions .btn {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.import-text {
+  width: 100%;
+  min-height: 150px;
+  padding: 10px 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
+.import-text:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.import-error {
+  color: var(--red);
+}
+
 /* ---- Profile / statistics card ---- */
 
 .profile-card {
@@ -2434,6 +2546,18 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
 .coach-tag { font-size: 10.5px; color: var(--muted); margin: 3px 0 8px; letter-spacing: 0.5px; text-transform: uppercase; }
 .coach-compare { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
 .coach-better b { color: var(--accent); }
+.coach-reasons {
+  margin: 6px 0 0;
+  padding: 0 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.coach-reasons li + li {
+  margin-top: 3px;
+}
+
 .coach-explanation { font-size: 12.5px; color: #cfccc8; margin: 8px 0 0; line-height: 1.55; }
 .coach-empty { color: var(--muted); font-size: 12.5px; text-align: center; line-height: 1.7; }
 .review-opening {

@@ -8,11 +8,12 @@ import { Chess } from 'chess.js';
 import { sounds } from './sounds.js';
 import { ChessClock } from './clock.js';
 import { Stockfish } from './engine.js';
-import { TIERS, TIER_BY_KEY, pvToSan, ANALYSIS_DEPTH, convertCentipawnsToWinProbability } from './analyzer.js';
+import { TIERS, TIER_BY_KEY, pvToSan, ANALYSIS_DEPTH, convertCentipawnsToWinProbability, isAcceptableMove } from './analyzer.js';
+import { explainGoodMove, explainMistake } from './motifs.js';
 import {
   iconBarChart, iconTrendingUp, iconFlip, iconClose, iconSkipBack, iconChevronLeft,
   iconChevronRight, iconSkipForward, iconPlay, iconPause, iconSearch, iconTarget,
-  iconBook, iconRefresh, iconHint, iconClock, iconAlertTriangle,
+  iconBook, iconRefresh, iconHint, iconClock, iconAlertTriangle, iconShare,
 } from './icons.js';
 import { escapeHtml } from './html.js';
 
@@ -47,7 +48,22 @@ export class CoachService {
     this.ttsProvider = ttsProvider; // null = silent visual mode (TTS later)
   }
 
-  generateInsight(ply) {
+  /** Concrete board reasons (hung piece, fork, missed mate...) from the position
+   *  the move was played in; empty when the board shows none. */
+  reasonsFor(ply, fenBefore) {
+    if (!fenBefore || ply.tier === 'book') return [];
+    const played = { from: ply.from, to: ply.to, promotion: ply.promotion ?? undefined };
+    if (BAD_TIERS.has(ply.tier)) {
+      return explainMistake({
+        fenBefore, played, best: ply.bestMove, reply: ply.reply, bestMate: ply.bestMate ?? null, afterMate: ply.afterMate ?? null,
+      });
+    }
+    return ['brilliant', 'great', 'best'].includes(ply.tier)
+      ? explainGoodMove({ fenBefore, played, reply: ply.reply })
+      : [];
+  }
+
+  generateInsight(ply, { fenBefore = null } = {}) {
     const tier = TIER_BY_KEY[ply.tier];
     // A negligible loss on a good move is not "lost advantage" — the tier decides.
     const lost = BAD_TIERS.has(ply.tier) || ply.deltaW > 2;
@@ -75,6 +91,7 @@ export class CoachService {
       tier: ply.tier,
       headline: HEADLINES[ply.tier] ?? ply.tier,
       explanation,
+      reasons: this.reasonsFor(ply, fenBefore),
       tacticalTag,
       winProbLoss: ply.deltaW,
       centipawnLoss: -ply.cpLoss,
@@ -86,6 +103,24 @@ export class CoachService {
     if (!this.ttsProvider) return; // silent mode until a TTS provider registers
     this.ttsProvider.synthesizeAndPlay(insight.speechScript);
   }
+}
+
+/** Remaining time for the progress card ("เหลือประมาณ 25 วินาที"); '' while unknown. */
+export function formatEta(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '';
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds <= 3) return 'เหลืออีกไม่กี่วินาที';
+  if (seconds < 60) return `เหลือประมาณ ${Math.ceil(seconds / 5) * 5} วินาที`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round((seconds % 60) / 10) * 10; // 0..60 in tens
+  if (rest === 0 || rest === 60) return `เหลือประมาณ ${minutes + (rest === 60 ? 1 : 0)} นาที`;
+  return `เหลือประมาณ ${minutes} นาที ${rest} วินาที`;
+}
+
+/** "ขาวชนะ 8% · เสมอ 91% · ดำชนะ 1%" from analyzer positions[].wdl (white's point of view). */
+export function wdlText(wdl) {
+  if (!wdl) return '';
+  return `ขาวชนะ ${Math.round(wdl.w)}% · เสมอ ${Math.round(wdl.d)}% · ดำชนะ ${Math.round(wdl.b)}%`;
 }
 
 /** Engine score is side-to-move pawn units (number) or a mate string. */
@@ -136,13 +171,14 @@ export class ReviewUI {
     this._progressOverlay = overlay;
   }
 
-  updateProgress(percentage, currentPly, totalPlies) {
+  updateProgress(percentage, currentPly, totalPlies, etaMs = null) {
     if (!this._progressOverlay) return;
     const fill = this._progressOverlay.querySelector('[data-fill]');
     fill.style.width = `${percentage}%`;
     this._progressOverlay.querySelector('[data-pct]').textContent = `${percentage}%`;
+    const eta = formatEta(etaMs);
     this._progressOverlay.querySelector('[data-sub]').textContent =
-      `ตำแหน่งที่ ${currentPly}/${totalPlies} (ความลึก 12)`;
+      `ตำแหน่งที่ ${currentPly}/${totalPlies} (ความลึก 12)${eta ? ` · ${eta}` : ''}`;
   }
 
   closeProgressModal() {
@@ -151,7 +187,7 @@ export class ReviewUI {
   }
 
   // ---- summary modal -------------------------------------------------------
-  showReviewSummaryModal(analysis, onStepThrough, onNewGame, onExit, onPuzzleRun = null) {
+  showReviewSummaryModal(analysis, onStepThrough, onNewGame, onExit, onPuzzleRun = null, share = null) {
     this.closeSummaryModal();
     this.closeProgressModal();
     const overlay = document.createElement('div');
@@ -190,9 +226,13 @@ export class ReviewUI {
           </button>
           ${runCount ? `<button class="btn primary review-puzzle-btn" type="button" data-puzzle-run>${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด (${runCount} ตา)</button>` : ''}
           <button class="btn" type="button" data-again>${glyph(iconRefresh, 16)} เล่นใหม่</button>
+          ${share ? `<button class="btn" type="button" data-pgn>${glyph(iconBook, 16)} บันทึก PGN</button>
+          <button class="btn" type="button" data-link>${glyph(iconShare, 16)} คัดลอกลิงก์</button>` : ''}
         </div>
       </div>
     `;
+    overlay.querySelector('[data-pgn]')?.addEventListener('click', () => share?.onPgn?.());
+    overlay.querySelector('[data-link]')?.addEventListener('click', () => share?.onLink?.());
 
     overlay.querySelector('[data-puzzle-run]')?.addEventListener('click', () => {
       this.closeSummaryModal();
@@ -331,7 +371,7 @@ export class ReviewUI {
       crosshair.style.display = ''; // SVG has no `hidden` property
       const moveLabel = ply > 0 ? `${analysis.plies[ply - 1].san}` : 'เริ่มเกม';
       tooltip.hidden = false;
-      tooltip.innerHTML = `<b>${escapeHtml(moveLabel)}</b> · ขาว ${p.whiteWinProb}% (${(p.whiteEvalCp / 100).toFixed(1)})`;
+      tooltip.innerHTML = `<b>${escapeHtml(moveLabel)}</b> · ขาว ${p.whiteWinProb}% (${(p.whiteEvalCp / 100).toFixed(1)})${p.wdl ? `<br><small>${escapeHtml(wdlText(p.wdl))}</small>` : ''}`;
       const wrapRect = wrap.getBoundingClientRect();
       const ratio = total > 1 ? ply / (total - 1) : 0;
       tooltip.style.left = `clamp(0px, calc(${(ratio * 100).toFixed(2)}% - 40px), ${Math.max(0, wrapRect.width - 90)}px)`;
@@ -634,6 +674,11 @@ export class ReviewUI {
     const label = bar.querySelector('[data-eval-label]');
     const cp = position?.whiteEvalCp ?? 0;
     label.textContent = Math.abs(cp) >= 10000 ? (cp > 0 ? 'M' : '-M') : (cp >= 0 ? '+' : '') + (cp / 100).toFixed(1);
+    // Engine win/draw/loss chances — the draw share is what a single number hides.
+    const chances = wdlText(position?.wdl);
+    bar.title = chances;
+    if (chances) bar.setAttribute('aria-label', `ประเมินตำแหน่ง ${label.textContent} · ${chances}`);
+    else bar.removeAttribute('aria-label');
   }
 
   hideEvalBar() {
@@ -700,7 +745,7 @@ export class ReviewUI {
       `;
       return;
     }
-    const insight = this._coach.generateInsight(move);
+    const insight = this._coach.generateInsight(move, { fenBefore: this._analysis.fens?.[move.ply] ?? null });
     this._coach.speak(insight);
     const tier = TIER_BY_KEY[move.tier];
     const canRetry = RETRYABLE_TIERS.has(move.tier) && move.bestMove && !this._retry;
@@ -717,6 +762,7 @@ export class ReviewUI {
         ${move.bestSan && move.bestSan !== move.san ? `<span class="coach-better">ตาที่ดีกว่า: <b>${escapeHtml(move.bestSan)}!</b></span>` : ''}
       </div>
       <p class="coach-explanation">${escapeHtml(insight.explanation)}</p>
+      ${insight.reasons.length ? `<ul class="coach-reasons">${insight.reasons.map((r) => `<li data-reason="${escapeHtml(r.key)}">${escapeHtml(r.text)}</li>`).join('')}</ul>` : ''}
       ${forecast.length ? `
         <div class="coach-forecast">
           <span class="coach-forecast-label">คาดการณ์อนาคต (เส้นทางที่เอนจินคำนวณ)</span>
@@ -823,12 +869,10 @@ export class ReviewUI {
       return;
     }
     sounds.play(move.captured ? 'capture' : 'move');
-    if (
-      retry.judging
-      && retry.ply.bestMove.from === orig
-      && retry.ply.bestMove.to === dest
-      && (retry.ply.bestMove.promotion ?? 'q') === (promotion ?? 'q')
-    ) {
+    // The engine's move — or an alternative it rates as good as its own (equal
+    // alternatives are real solutions, not "wrong" answers).
+    if (retry.judging && isAcceptableMove(retry.ply, orig, dest, promotion)) {
+      retry.solvedWith = move;
       if (retry.run) {
         // Puzzle run: score it and move straight to the next puzzle.
         sounds.play('check');
@@ -865,16 +909,18 @@ export class ReviewUI {
    *  re-rendered the stepper straight over it, so the confirm never showed. */
   _showRetrySolved(retry) {
     sounds.play('check');
-    const best = retry.ply.bestMove;
-    let fenAfterBest = retry.beforeFen;
+    // What the player actually played stays on the board (it may be an equal
+    // alternative rather than the engine's own choice).
+    const played = retry.solvedWith ?? retry.ply.bestMove;
+    let fenAfter = retry.beforeFen;
     try {
       const solved = new Chess(retry.beforeFen);
-      solved.move({ from: best.from, to: best.to, promotion: best.promotion || undefined });
-      fenAfterBest = solved.fen();
+      solved.move({ from: played.from, to: played.to, promotion: played.promotion || undefined });
+      fenAfter = solved.fen();
     } catch { /* keep pre-move view */ }
-    this._setRetryBoard(fenAfterBest, [best.from, best.to], null);
+    this._setRetryBoard(fenAfter, [played.from, played.to], null);
     this._controller.ground.setAutoShapes([
-      { orig: best.from, dest: best.to, brush: 'green' },
+      { orig: played.from, dest: played.to, brush: 'green' },
     ]);
     this._renderRetryCard('solved');
     this._endRetry(true);
@@ -1040,9 +1086,15 @@ export class ReviewUI {
         ${RETRY_HEAD}
         <div class="retry-status">${glyph(iconAlertTriangle, 14)} ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
     } else if (phase === 'solved') {
-      body = `
+      const played = retry.solvedWith;
+      const isEngineChoice = !played || (played.from === retry.ply.bestMove?.from && played.to === retry.ply.bestMove?.to);
+      body = isEngineChoice
+        ? `
         ${RETRY_HEAD}
-        <div class="retry-feedback success">ถูกต้อง! นี่คือตาที่ดีที่สุด (${retry.ply.bestSan ?? '—'}) — กดปุ่มตาถัดไปหรือลูกศรขวาเพื่อดูต่อ</div>`;
+        <div class="retry-feedback success">ถูกต้อง! นี่คือตาที่ดีที่สุด (${escapeHtml(retry.ply.bestSan ?? '—')}) — กดปุ่มตาถัดไปหรือลูกศรขวาเพื่อดูต่อ</div>`
+        : `
+        ${RETRY_HEAD}
+        <div class="retry-feedback success">ถูกต้อง! <b>${escapeHtml(played.san)}</b> ก็ดีเท่ากัน — เอนจินให้คะแนนใกล้เคียงกับตาที่มันเลือก (${escapeHtml(retry.ply.bestSan ?? '—')}) — กดปุ่มตาถัดไปหรือลูกศรขวาเพื่อดูต่อ</div>`;
     } else if (phase === 'solution') {
       body = `
         <div class="retry-feedback success">เฉลย: ${retry.ply.bestSan ?? '—'} — กดปุ่มตาถัดไปหรือลูกศรขวาเพื่อดูต่อ</div>`;

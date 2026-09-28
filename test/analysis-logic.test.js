@@ -151,3 +151,83 @@ test('...but a large drop after the engine\'s own choice is real (a tactic the f
   assert.ok(['blunder', 'miss', 'mistake'].includes(result.plies[0].tier), result.plies[0].tier);
   assert.ok(result.plies[0].cpLoss > 300);
 });
+
+// ---- engine win/draw/loss chances (info only — grading stays on the logistic) ----
+
+import { GameReviewAnalyzer, isWdl, whiteWdlPercent, winProbFromEval, convertCentipawnsToWinProbability } from '../src/analyzer.js';
+import { wdlText } from '../src/review-ui.js';
+
+test('isWdl accepts only a real triple', () => {
+  assert.equal(isWdl([85, 910, 5]), true);
+  assert.equal(isWdl(null), false);
+  assert.equal(isWdl([1, 2]), false);
+  assert.equal(isWdl([0, 0, 0]), false);
+  assert.equal(isWdl([-1, 500, 500]), false);
+  assert.equal(isWdl([NaN, 1, 1]), false);
+});
+
+test('whiteWdlPercent is expressed from white\'s side whoever is to move', () => {
+  const stm = { cp: 38, mate: null, wdl: [85, 910, 5] };
+  assert.deepEqual(whiteWdlPercent(stm, 'w'), { w: 8.5, d: 91, b: 0.5 });
+  assert.deepEqual(whiteWdlPercent(stm, 'b'), { w: 0.5, d: 91, b: 8.5 }, 'black to move: the mover\'s win is black\'s');
+  assert.equal(whiteWdlPercent({ cp: 0, mate: null }, 'w'), null, 'no engine WDL');
+  assert.equal(whiteWdlPercent(null, 'w'), null);
+  const odd = whiteWdlPercent({ cp: 1, mate: null, wdl: [1, 1, 1] }, 'w');
+  assert.ok(Math.abs(odd.w + odd.d + odd.b - 100) < 0.2, 'sums to 100 (rounding aside)');
+});
+
+test('grading ignores WDL: the same cp grades the same with or without it', () => {
+  const plain = { cp: 150, mate: null };
+  const withWdl = { cp: 150, mate: null, wdl: [700, 290, 10] };
+  assert.equal(winProbFromEval(withWdl), winProbFromEval(plain));
+  assert.equal(winProbFromEval(withWdl), convertCentipawnsToWinProbability(150));
+});
+
+test('buildAnalysisResult exposes each position\'s WDL and terminal positions have a settled one', () => {
+  const record = { initialFen: null, moves: [{ from: 'f2', to: 'f3' }, { from: 'e7', to: 'e5' }, { from: 'g2', to: 'g4' }, { from: 'd8', to: 'h4' }], result: '0-1' };
+  const replay = buildReplay(record);
+  const evals = replay.fens.map((_, j) => (replay.terminal[j]
+    ? { cp: null, mate: -1, wdl: [0, 0, 1000] }
+    : { cp: 0, mate: null, wdl: [50, 900, 50] }));
+  const result = buildAnalysisResult(record, replay, evals, replay.fens.map(() => null), replay.fens.map(() => null));
+  assert.deepEqual(result.positions[0].wdl, { w: 5, d: 90, b: 5 });
+  const last = result.positions.at(-1);
+  assert.deepEqual(last.wdl, { w: 0, d: 0, b: 100 }, 'white is mated: black wins');
+  assert.equal(last.whiteWinProb, 0);
+});
+
+class WdlWorker {
+  static instances = [];
+  constructor() { WdlWorker.instances.push(this); this.sent = []; }
+  postMessage(cmd) {
+    this.sent.push(cmd);
+    if (typeof cmd === 'string' && cmd.startsWith('go ')) {
+      queueMicrotask(() => {
+        this.onmessage?.({ data: 'info depth 12 seldepth 14 multipv 1 score cp 38 wdl 85 910 5 nodes 100 pv e2e4 e7e5' });
+        this.onmessage?.({ data: 'info depth 12 seldepth 14 multipv 2 score cp 20 wdl 40 950 10 nodes 100 pv d2d4 d7d5' });
+        this.onmessage?.({ data: 'bestmove e2e4' });
+      });
+    }
+  }
+  terminate() {}
+}
+
+test('the analyzer turns UCI_ShowWDL on and carries the engine\'s WDL into the result', async () => {
+  const OriginalWorker = globalThis.Worker;
+  globalThis.Worker = WdlWorker;
+  try {
+    const analyzer = new GameReviewAnalyzer({ idleTimeoutMs: 5_000, firstIdleTimeoutMs: 5_000 });
+    const result = await analyzer.analyzeGame({ initialFen: null, moves: [{ from: 'e2', to: 'e4' }], result: '*' });
+    const worker = WdlWorker.instances.at(-1);
+    assert.ok(worker.sent.includes('setoption name UCI_ShowWDL value true'));
+    assert.deepEqual(result.positions[0].wdl, { w: 8.5, d: 91, b: 0.5 });
+    assert.deepEqual(result.positions[1].wdl, { w: 0.5, d: 91, b: 8.5 }, 'black to move after 1.e4');
+  } finally {
+    globalThis.Worker = OriginalWorker;
+  }
+});
+
+test('wdlText reads naturally and is empty without data', () => {
+  assert.equal(wdlText({ w: 8.5, d: 91, b: 0.5 }), 'ขาวชนะ 9% · เสมอ 91% · ดำชนะ 1%');
+  assert.equal(wdlText(null), '');
+});

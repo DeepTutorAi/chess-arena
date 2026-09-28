@@ -59,6 +59,10 @@ export class UI {
           <span class="brand-mark">${pieceMarkup('knight')}</span> Chess Arena
         </button>
 
+        <button class="topbar-history" id="history-btn" type="button" title="ประวัติเกมและนำเข้า PGN">
+          ${iconList({ size: 16 })}<span class="topbar-history-label">ประวัติเกม</span>
+        </button>
+
         <!-- PROFILE (RIGHT TOPBAR): your rating from games against the bots -->
         <button class="profile-badge-placeholder" id="profile-btn" type="button" title="โปรไฟล์และสถิติของคุณ">
           <span class="user-avatar">${iconUser({ size: 16 })}</span>
@@ -343,6 +347,7 @@ export class UI {
 
       brandHome: $('#brand-home'),
       profileBtn: $('#profile-btn'),
+      historyBtn: $('#history-btn'),
       profileRating: $('#profile-rating'),
       heroCreateBtn: $('#hero-create-btn'),
       heroJoinBtn: $('#hero-join-btn'),
@@ -878,7 +883,7 @@ export class UI {
 
   /** Non-blocking corner toast — used during review for online events
    *  (opponent disconnect, future rematch offers). Never covers the board. */
-  showFloatingToast({ title, detail = '', actions = [] } = {}) {
+  showFloatingToast({ title, detail = '', actions = [], autoCloseMs = 0 } = {}) {
     document.querySelectorAll('.floating-toast').forEach((t) => t.remove());
     const toast = this.el('div', 'floating-toast');
     toast.setAttribute('role', 'status');
@@ -899,6 +904,7 @@ export class UI {
       toast.appendChild(row);
     }
     document.body.appendChild(toast);
+    if (autoCloseMs > 0) setTimeout(() => toast.remove(), autoCloseMs);
     return toast;
   }
 

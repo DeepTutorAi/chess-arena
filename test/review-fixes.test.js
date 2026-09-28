@@ -128,13 +128,13 @@ test('analyzer: abort() before the run starts sticks and never spawns an engine'
 
 test('analyzer: healthy run completes, depth alone ends a search, no timers left behind', async (t) => {
   installGlobals(t);
-  const analyzer = new GameReviewAnalyzer({ firstIdleTimeoutMs: 50, idleTimeoutMs: 50 });
+  const analyzer = new GameReviewAnalyzer({ firstIdleTimeoutMs: 50, idleTimeoutMs: 50, workers: 1 });
   const result = await analyzer.analyzeGame(RECORD);
   assert.equal(result.plies.length, 2);
   const goLines = FakeWorker.instances[0].messages.filter((m) => m.startsWith('go '));
   assert.ok(goLines.length > 0);
   assert.ok(goLines.every((m) => m === 'go depth 12'), `no movetime cap (results must not depend on device speed): ${goLines.join('|')}`);
-  assert.equal(analyzer._watchdog, null, 'watchdog cleared');
+  assert.equal(analyzer.hasPendingTimers(), false, 'watchdog cleared');
   await sleep(80); // a leaked timer would fire here and flip analyzer state
   assert.equal(analyzer._fatal, null);
 });
@@ -213,7 +213,7 @@ test('controller: re-entering review of the same game reuses the finished analys
   controller.startReview();
   await until(() => document.querySelector('.review-summary-modal'), { label: 'summary' });
   const workersAfterFirst = FakeWorker.instances.length;
-  assert.equal(workersAfterFirst, 1);
+  assert.ok(workersAfterFirst >= 1 && workersAfterFirst <= 4, `${workersAfterFirst} analysis workers`);
 
   document.querySelector('.review-modal-close').click(); // exit review
   assert.equal(controller._reviewActive, false);

@@ -34,15 +34,30 @@ export const TIERS = [
 export const TIER_BY_KEY = Object.fromEntries(TIERS.map((t) => [t.key, t]));
 
 /** Eval object: { cp: number, mate: null } or { cp: null, mate: ±N } — always
- *  from the perspective of the side to move at the evaluated position. */
+ *  from the perspective of the side to move at the evaluated position. When the
+ *  engine reports it (UCI_ShowWDL) it also carries wdl: [win, draw, loss] in
+ *  per-mille for that same side. */
 
-// plan.md §3.1 — logistic win probability in [0, 100] for the mover.
+// plan.md §3.1 — logistic win probability in [0, 100] for the mover. Blind to
+// the phase of the game: +150 cp reads the same in a rook ending as in a
+// middlegame. This is the curve every grade is computed on.
 export function convertCentipawnsToWinProbability(cp, mate = null) {
   if (mate !== null && mate !== undefined) return mate > 0 ? 100 : 0;
   const p = 2 / (1 + Math.exp(-LOGISTIC_K * cp)) - 1;
   return 50 + 50 * p;
 }
 
+/** A usable WDL triple: three non-negative per-mille numbers. */
+export function isWdl(wdl) {
+  return Array.isArray(wdl) && wdl.length === 3 && wdl.every((n) => Number.isFinite(n) && n >= 0)
+    && wdl[0] + wdl[1] + wdl[2] > 0;
+}
+
+// Grading deliberately stays on the logistic above: it is fitted to how HUMAN
+// games end, which is what "how much did this move cost" should mean here. The
+// engine's WDL comes from engine-vs-engine play (an equal middlegame reads ≈91%
+// draw and a 100 cp swing looks ~1.4× bigger), so it is shown to the player as
+// extra information (draw chances, decisive positions) rather than used to grade.
 export function winProbFromEval(evalObj) {
   if (!evalObj) return 50;
   return convertCentipawnsToWinProbability(evalObj.cp ?? 0, evalObj.mate);
@@ -241,12 +256,14 @@ function parseInfoEval(line) {
   if (!depth || !score) return null;
   const multipv = line.match(/\bmultipv (\d+)/);
   const pv = line.match(/\bpv (.+)$/);
+  const wdlMatch = line.match(/\bwdl (\d+) (\d+) (\d+)/);
+  const wdl = wdlMatch ? [Number(wdlMatch[1]), Number(wdlMatch[2]), Number(wdlMatch[3])] : null;
   return {
     depth: Number(depth[1]),
     multipv: multipv ? Number(multipv[1]) : 1,
     eval: score[1] === 'mate'
-      ? { cp: null, mate: Number(score[2]) }
-      : { cp: Number(score[2]), mate: null },
+      ? { cp: null, mate: Number(score[2]), wdl }
+      : { cp: Number(score[2]), mate: null, wdl },
     pv: pv ? pv[1].trim().split(/\s+/) : [],
   };
 }
@@ -309,12 +326,19 @@ export function findCriticalMoments(positions, plies, { threshold = 15, maxMomen
 }
 
 /**
- * Analyzes a completed game ply-by-ply at ANALYSIS_DEPTH with MultiPV 2.
+ * Analyzes a completed game ply-by-ply at ANALYSIS_DEPTH with MultiPV 3.
  * The second line powers the plan's "Great" rule (sole good move among
- * alternatives). Terminal positions (checkmate/ draw) are scored without the
- * engine. onProgress streams { currentPly, totalPlies, percentage }.
+ * alternatives); all three lines give same-search grades for moves near the top
+ * and the alternatives a puzzle may accept. Terminal positions (checkmate/ draw)
+ * are scored without the engine. onProgress streams
+ * { currentPly, totalPlies, percentage, etaMs }.
  * openingBook (src/openings.js) is optional: when set, the "Book" tier follows
  * the matched theory line instead of the early-ply heuristic.
+ *
+ * Positions are independent searches spread over several workers. The hash is
+ * cleared before every position, so a position's result does not depend on which
+ * worker took it or what that worker searched before — the review of a game is
+ * the same on a 2-core phone and an 8-core desktop.
  */
 // Watchdogs. Every engine line proves the engine is alive and re-arms the timer:
 // - until the FIRST line arrives the worker may still be downloading/compiling
@@ -325,6 +349,133 @@ export function findCriticalMoments(positions, plies, { threshold = 15, maxMomen
 // the device is.
 export const SEARCH_IDLE_TIMEOUT_MS = 20_000;
 export const FIRST_SEARCH_IDLE_TIMEOUT_MS = 120_000;
+export const ANALYSIS_MULTIPV = 3;
+
+/** Workers for a review: leave one core for the page, never more than 4 (each
+ *  holds a copy of the engine), 2 when the browser will not say. */
+export function defaultWorkerCount(hardwareConcurrency = globalThis.navigator?.hardwareConcurrency) {
+  if (!Number.isFinite(hardwareConcurrency) || hardwareConcurrency < 1) return 2;
+  return Math.max(1, Math.min(4, Math.floor(hardwareConcurrency) - 1));
+}
+
+/** One engine worker that runs one search at a time and watches its own health. */
+class EngineSearcher {
+  constructor({ workerUrl, multiPv, hashMb, idleTimeoutMs, firstIdleTimeoutMs, depth, onFail }) {
+    this.workerUrl = workerUrl;
+    this.multiPv = multiPv;
+    this.hashMb = hashMb;
+    this.idleTimeoutMs = idleTimeoutMs;
+    this.firstIdleTimeoutMs = firstIdleTimeoutMs;
+    this.depth = depth;
+    this.onFail = onFail;
+    this.worker = null;
+    this.pending = null;
+    this.info = null;
+    this.watchdog = null;
+    this.heard = false; // has this worker said anything yet?
+  }
+
+  get hasTimer() { return this.watchdog !== null; }
+
+  spawn() {
+    this.heard = false;
+    const worker = new Worker(this.workerUrl);
+    worker.onmessage = (e) => this._handleLine(e.data);
+    worker.onerror = () => this.onFail('engine_error');
+    this.worker = worker;
+    this._send('uci');
+    this._send('isready');
+    this._send(`setoption name MultiPV value ${this.multiPv}`);
+    this._send('setoption name UCI_ShowWDL value true'); // win/draw/loss chances shown in the review
+    this._send(`setoption name Hash value ${this.hashMb}`);
+  }
+
+  _send(cmd) {
+    this.worker?.postMessage(cmd);
+  }
+
+  search(fen) {
+    this.info = { lines: [] };
+    const promise = new Promise((resolve, reject) => {
+      this.pending = { resolve, reject };
+    });
+    this._armWatchdog();
+    this._send('ucinewgame'); // fresh hash: the result must not depend on what came before
+    this._send(`position fen ${fen}`);
+    this._send(`go depth ${this.depth}`);
+    return promise;
+  }
+
+  rejectPending(error) {
+    if (!this.pending) return;
+    const { reject } = this.pending;
+    this.pending = null;
+    reject(error);
+  }
+
+  teardown() {
+    this._clearWatchdog();
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+    }
+  }
+
+  _clearWatchdog() {
+    if (this.watchdog !== null) {
+      clearTimeout(this.watchdog);
+      this.watchdog = null;
+    }
+  }
+
+  /** (Re)arm the idle timer — every engine line proves it is alive. */
+  _armWatchdog() {
+    this._clearWatchdog();
+    if (!this.pending) return;
+    const ms = this.heard ? this.idleTimeoutMs : this.firstIdleTimeoutMs;
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      if (this.pending) this.onFail('engine_timeout');
+    }, ms);
+  }
+
+  _handleLine(line) {
+    if (typeof line !== 'string') return;
+    this.heard = true;
+    if (this.pending) this._armWatchdog();
+    if (!this.info) return; // stray line after a finished/aborted search
+    if (line.startsWith('info ')) {
+      const parsed = parseInfoEval(line);
+      if (!parsed) return;
+      const slot = this.info.lines[parsed.multipv - 1];
+      if (slot && parsed.depth < slot.depth) return;
+      this.info.lines[parsed.multipv - 1] = {
+        depth: parsed.depth,
+        eval: parsed.eval,
+        pv: parsed.pv.length ? parsed.pv : (slot?.pv ?? []),
+      };
+    } else if (line.startsWith('bestmove ')) {
+      const uci = line.split(' ')[1];
+      const lines = this.info.lines.filter(Boolean).map((l) => ({
+        eval: l.eval,
+        pv: l.pv,
+        move: l.pv.length ? uciToMove(l.pv[0]) : null,
+      }));
+      const payload = {
+        best: uci && uci !== '(none)' ? uciToMove(uci) : null,
+        eval1: lines[0]?.eval ?? { cp: 0, mate: null },
+        eval2: lines[1]?.eval ?? null,
+        pv: lines[0]?.pv ?? [],
+        lines,
+      };
+      this.info = null;
+      this._clearWatchdog();
+      const { resolve } = this.pending ?? {};
+      this.pending = null;
+      resolve?.(payload);
+    }
+  }
+}
 
 export class GameReviewAnalyzer {
   constructor({
@@ -333,20 +484,27 @@ export class GameReviewAnalyzer {
     openingBook = null,
     idleTimeoutMs = SEARCH_IDLE_TIMEOUT_MS,
     firstIdleTimeoutMs = FIRST_SEARCH_IDLE_TIMEOUT_MS,
+    workers = defaultWorkerCount(),
+    multiPv = ANALYSIS_MULTIPV,
+    now = () => Date.now(),
   } = {}) {
     this.workerUrl = workerUrl;
     this.depth = depth;
     this.openingBook = openingBook;
     this.idleTimeoutMs = idleTimeoutMs;
     this.firstIdleTimeoutMs = firstIdleTimeoutMs;
-    this.worker = null;
-    this._pending = null;
-    this._info = null;
+    this.workerCount = Math.max(1, Math.floor(workers));
+    this.multiPv = multiPv;
+    this._now = now;
+    this._searchers = [];
     this._cancelled = false; // set only by abort(): the user (or dispose) gave up.
                              // An aborted analyzer is spent — create a new one.
     this._fatal = null;      // engine failure that ended the current run
-    this._watchdog = null;
-    this._heardFromEngine = false; // has the current worker said anything yet?
+  }
+
+  /** True while any worker's watchdog is armed (tests check nothing leaks). */
+  hasPendingTimers() {
+    return this._searchers.some((s) => s.hasTimer);
   }
 
   async analyzeGame(record, onProgress = () => {}) {
@@ -356,6 +514,7 @@ export class GameReviewAnalyzer {
     const secondEvals = new Array(total).fill(null);
     const bests = new Array(total).fill(null);
     const bestPvs = new Array(total).fill(null);
+    const lines = new Array(total).fill(null);
     const opening = isStandardStart(replay.startFen)
       ? (this.openingBook?.lookup(replay.moves.map((m) => m.san)) ?? null)
       : null;
@@ -364,35 +523,81 @@ export class GameReviewAnalyzer {
     // still loading) must stick — never resurrect a cancelled analyzer.
     if (this._cancelled) throw new Error('review_aborted');
     this._fatal = null;
-    this._spawn();
-    try {
-      for (let j = 0; j < total; j++) {
-        if (this._cancelled) throw new Error('review_aborted');
-        if (this._fatal) throw this._fatal;
-        if (replay.terminal[j]) {
-          // Side to move is mated (W=0 for them) or the game is drawn.
-          evals[j] = replay.terminal[j] === 'checkmate' ? { cp: null, mate: -1 } : { cp: 0, mate: null };
-        } else {
-          const result = await this._search(replay.fens[j]);
+
+    // Terminal positions (mate / draw) are scored without the engine.
+    let done = 0;
+    const todo = [];
+    replay.fens.forEach((_, j) => {
+      if (replay.terminal[j]) {
+        // Side to move is mated (W=0 for them) or the game is drawn.
+        evals[j] = replay.terminal[j] === 'checkmate'
+          ? { cp: null, mate: -1, wdl: [0, 0, 1000] }
+          : { cp: 0, mate: null, wdl: [0, 1000, 0] };
+        done += 1;
+      } else {
+        todo.push(j);
+      }
+    });
+
+    const startedAt = this._now();
+    let searched = 0;
+    const report = () => {
+      const remaining = todo.length - searched;
+      // Average time per position so far, scaled to what is left. Held back until
+      // a few positions have finished (the first ones include engine start-up).
+      const etaMs = searched >= 3 && remaining > 0
+        ? Math.round(((this._now() - startedAt) / searched) * remaining)
+        : null;
+      onProgress({
+        currentPly: done,
+        totalPlies: total,
+        percentage: Math.round((done / total) * 100),
+        etaMs,
+      });
+    };
+    report();
+
+    if (todo.length) {
+      const count = Math.min(this.workerCount, todo.length);
+      this._searchers = Array.from({ length: count }, () => new EngineSearcher({
+        workerUrl: this.workerUrl,
+        multiPv: this.multiPv,
+        hashMb: count > 1 ? 32 : 64,
+        idleTimeoutMs: this.idleTimeoutMs,
+        firstIdleTimeoutMs: this.firstIdleTimeoutMs,
+        depth: this.depth,
+        onFail: (code) => this._fail(code),
+      }));
+      let next = 0;
+      const drain = async (searcher) => {
+        while (next < todo.length) {
+          if (this._cancelled) throw new Error('review_aborted');
+          if (this._fatal) throw this._fatal;
+          const j = todo[next++];
+          const result = await searcher.search(replay.fens[j]);
           evals[j] = result.eval1;
           secondEvals[j] = result.eval2;
           bests[j] = result.best;
           bestPvs[j] = result.pv;
+          lines[j] = result.lines;
+          done += 1;
+          searched += 1;
+          report();
         }
-        onProgress({
-          currentPly: j + 1,
-          totalPlies: total,
-          percentage: Math.round(((j + 1) / total) * 100),
-        });
+      };
+      try {
+        for (const searcher of this._searchers) searcher.spawn();
+        await Promise.all(this._searchers.map(drain));
+      } finally {
+        this._teardown();
       }
-    } finally {
-      this._teardown();
     }
-    return buildAnalysisResult(record, replay, evals, secondEvals, bests, bestPvs, opening);
+    if (this._cancelled) throw new Error('review_aborted');
+    return buildAnalysisResult(record, replay, evals, secondEvals, bests, bestPvs, opening, lines);
   }
 
-  /** Terminate the worker immediately — safe to call any time, any number of
-   *  times (plan Hole 3). An in-flight search rejects with 'review_aborted'. */
+  /** Terminate every worker immediately — safe to call any time, any number of
+   *  times (plan Hole 3). In-flight searches reject with 'review_aborted'. */
   abort() {
     this._cancelled = true;
     this._teardown();
@@ -402,6 +607,7 @@ export class GameReviewAnalyzer {
   /** The engine itself failed (worker error / silent engine). Distinct from
    *  abort(): the caller must tell the user, not treat it as a cancel. */
   _fail(code) {
+    if (this._fatal) return; // the first failure is the one reported
     const error = new Error(code);
     this._fatal = error;
     this._teardown();
@@ -409,93 +615,11 @@ export class GameReviewAnalyzer {
   }
 
   _teardown() {
-    this._clearWatchdog();
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
+    for (const searcher of this._searchers) searcher.teardown();
   }
 
   _rejectPending(error) {
-    if (!this._pending) return;
-    const { reject } = this._pending;
-    this._pending = null;
-    reject(error);
-  }
-
-  _clearWatchdog() {
-    if (this._watchdog !== null) {
-      clearTimeout(this._watchdog);
-      this._watchdog = null;
-    }
-  }
-
-  /** (Re)arm the idle timer — every engine line proves it is alive. */
-  _armWatchdog() {
-    this._clearWatchdog();
-    if (!this._pending) return;
-    const ms = this._heardFromEngine ? this.idleTimeoutMs : this.firstIdleTimeoutMs;
-    this._watchdog = setTimeout(() => {
-      this._watchdog = null;
-      if (this._pending) this._fail('engine_timeout');
-    }, ms);
-  }
-
-  _spawn() {
-    this._heardFromEngine = false;
-    const worker = new Worker(this.workerUrl);
-    worker.onmessage = (e) => this._handleLine(e.data);
-    worker.onerror = () => this._fail('engine_error');
-    this.worker = worker;
-    this._send('uci');
-    this._send('isready');
-    this._send('setoption name MultiPV value 2');
-    this._send('setoption name Hash value 64');
-  }
-
-  _send(cmd) {
-    this.worker?.postMessage(cmd);
-  }
-
-  _search(fen) {
-    this._info = { depth: -1, eval1: null, eval2: null };
-    const promise = new Promise((resolve, reject) => {
-      this._pending = { resolve, reject };
-    });
-    this._armWatchdog();
-    this._send(`position fen ${fen}`);
-    this._send(`go depth ${this.depth}`);
-    return promise;
-  }
-
-  _handleLine(line) {
-    if (typeof line !== 'string') return;
-    this._heardFromEngine = true;
-    if (this._pending) this._armWatchdog();
-    if (!this._info) return; // stray line after a finished/aborted search
-    if (line.startsWith('info ')) {
-      const parsed = parseInfoEval(line);
-      if (!parsed || parsed.depth < this._info.depth) return;
-      this._info.depth = parsed.depth;
-      if (parsed.multipv >= 2) this._info.eval2 = parsed.eval;
-      else {
-        this._info.eval1 = parsed.eval;
-        if (parsed.pv.length) this._info.pv1 = parsed.pv;
-      }
-    } else if (line.startsWith('bestmove ')) {
-      const uci = line.split(' ')[1];
-      const payload = {
-        best: uci && uci !== '(none)' ? uciToMove(uci) : null,
-        eval1: this._info.eval1 ?? { cp: 0, mate: null },
-        eval2: this._info.eval2,
-        pv: this._info.pv1 ?? [],
-      };
-      this._info = null;
-      this._clearWatchdog();
-      const { resolve } = this._pending ?? {};
-      this._pending = null;
-      resolve?.(payload);
-    }
+    for (const searcher of this._searchers) searcher.rejectPending(error);
   }
 }
 
@@ -507,9 +631,30 @@ export function uciToMove(uci) {
   };
 }
 
+/** Two moves are the same when squares and promotion agree (queen is the default). */
+export function sameMove(a, b) {
+  return Boolean(a && b && a.from === b.from && a.to === b.to
+    && (a.promotion || undefined) === (b.promotion || undefined));
+}
+
+/** An alternative within this many win-% points of the engine's first choice
+ *  (in the same search) is as good a solution as the first choice itself. */
+export const EQUAL_ALTERNATIVE_DELTA = 3;
+
+/** Is (from, to, promotion) a solution to the position this ply started from —
+ *  the engine's move, or an alternative it rates as good? Falls back to the
+ *  engine's move alone for analyses that predate the alternatives list. */
+export function isAcceptableMove(ply, from, to, promotion) {
+  const accepted = ply.acceptable?.length ? ply.acceptable : (ply.bestMove ? [ply.bestMove] : []);
+  return accepted.some((m) => m.from === from && m.to === to && (m.promotion ?? 'q') === (promotion ?? 'q'));
+}
+
 /** Assemble the full review payload consumed by review-ui.js. opening (from
- *  OpeningBook.lookup) is optional — null keeps the early-ply Book fallback. */
-export function buildAnalysisResult(record, replay, evals, secondEvals, bests, bestPvs = null, opening = null) {
+ *  OpeningBook.lookup) is optional — null keeps the early-ply Book fallback.
+ *  lines (optional): per position, the engine's top lines [{move, eval}] from
+ *  the same search; enables same-search grades and the acceptable-alternatives
+ *  list. */
+export function buildAnalysisResult(record, replay, evals, secondEvals, bests, bestPvs = null, opening = null, lines = null) {
   const plyCount = replay.moves.length;
   const scratch = new Chess();
 
@@ -525,14 +670,19 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
     // own top move can come out a couple of % "worse" from search noise alone.
     // Playing the engine's choice is by definition a zero-loss move.
     const engineChoice = bests[i];
-    const playedIsBest = Boolean(
-      engineChoice && engineChoice.from === move.from && engineChoice.to === move.to
-      && (engineChoice.promotion || undefined) === (move.promotion || undefined),
-    );
+    const playedIsBest = sameMove(engineChoice, move);
+    const alternatives = lines?.[i] ?? null;
+    // A move that is one of the engine's top lines has its own evaluation from
+    // the SAME search as the best move — a like-for-like comparison, free of the
+    // cross-search noise. (The top line itself has zero loss by definition.)
+    const playedLine = alternatives ? alternatives.find((l) => sameMove(l.move, move)) : null;
+    const lineDelta = playedLine ? Math.max(0, bestW - winProbFromEval(playedLine.eval)) : (playedIsBest ? 0 : null);
     // ...but only up to the noise level: if the deeper "after" search shows a
     // large drop the tactic is real and the move is graded by it.
     const rawDelta = Math.max(0, bestW - actualW);
-    const deltaW = playedIsBest && rawDelta <= SEARCH_NOISE_PCT ? 0 : rawDelta;
+    const deltaW = lineDelta !== null && rawDelta - lineDelta <= SEARCH_NOISE_PCT
+      ? Math.min(rawDelta, lineDelta)
+      : rawDelta;
     const secondW = secondEvals[i] ? winProbFromEval(secondEvals[i]) : null;
     const secondDelta = secondW === null ? null : Math.max(0, bestW - secondW);
 
@@ -589,17 +739,23 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
       san: move.san,
       from: move.from,
       to: move.to,
+      promotion: move.promotion ?? null,
       captured: move.captured ?? null,
       fenAfter: replay.fens[i + 1],
       turnAfter: replay.turns[i + 1],
       bestMove,
       bestSan,
+      acceptable: acceptableMoves(bestMove, bestEval, alternatives, bestW),
       reply: replyMove,
       replySan,
       tier,
       deltaW: round2(deltaW),
       cpLoss: deltaW === 0 && playedIsBest ? 0 : Math.max(0, Math.round(evalToCentipawns(bestEval) - evalToCentipawns(afterEval))),
       bestEvalCp: Math.round(evalToCentipawns(bestEval)),
+      // Forced mates from the mover's side (for the coach): >0 the mover had one
+      // before the move, <0 the mover gets mated after it.
+      bestMate: bestEval?.mate ?? null,
+      afterMate: afterEval?.mate ?? null,
     });
   }
 
@@ -625,6 +781,8 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
       turn: replay.turns[j],
       whiteWinProb: round2(replay.turns[j] === 'w' ? w : 100 - w),
       whiteEvalCp: Math.round(evalToCentipawns(evals[j]) * whiteSign),
+      // white / draw / black chances in percent, when the engine reported them
+      wdl: whiteWdlPercent(evals[j], replay.turns[j]),
       clock: clockFor(j),
       // Engine's predicted continuation from this position (SAN, ≤6 plies).
       pvSan: bestPvs?.[j]?.length ? pvToSan(fen, bestPvs[j]) : [],
@@ -657,6 +815,29 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
     players: record.players ?? { white: {}, black: {} },
     gamemode: record.gamemode ?? null,
   };
+}
+
+/** The engine's move plus its alternatives that score within EQUAL_ALTERNATIVE_DELTA
+ *  of it (and still mate when the best move mates). Never contains duplicates. */
+function acceptableMoves(bestMove, bestEval, alternatives, bestW) {
+  if (!bestMove) return [];
+  const accepted = [bestMove];
+  const mates = (bestEval?.mate ?? 0) > 0;
+  for (const line of alternatives ?? []) {
+    if (!line.move || accepted.some((m) => sameMove(m, line.move))) continue;
+    if (mates && !((line.eval?.mate ?? 0) > 0)) continue;
+    if (bestW - winProbFromEval(line.eval) <= EQUAL_ALTERNATIVE_DELTA) accepted.push(line.move);
+  }
+  return accepted;
+}
+
+/** {w, d, b} percentages from white's point of view, or null without engine WDL. */
+export function whiteWdlPercent(evalObj, turn) {
+  if (!evalObj || !isWdl(evalObj.wdl)) return null;
+  const total = evalObj.wdl[0] + evalObj.wdl[1] + evalObj.wdl[2];
+  const [win, draw, loss] = evalObj.wdl.map((n) => (100 * n) / total);
+  const [w, b] = turn === 'w' ? [win, loss] : [loss, win];
+  return { w: round1(w), d: round1(draw), b: round1(b) };
 }
 
 function emptyCounts() {

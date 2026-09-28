@@ -20,6 +20,8 @@ import {
 } from './online.js';
 import { createLobbyView } from './lobby.js';
 import { createProfileView } from './profile-ui.js';
+import { createHistoryView, createImportView } from './history-ui.js';
+import { shareTokenFromHash } from './pgn.js';
 import { sounds } from './sounds.js';
 import { iconBolt, iconHome, iconSound, iconMute, iconFlag, iconArrowRight } from './icons.js';
 
@@ -766,6 +768,40 @@ ui.refs.profileBtn.onclick = () => {
   }));
 };
 
+function openImportDialog() {
+  const modal = ui.openModal('นำเข้า PGN / FEN', createImportView({
+    document,
+    onSubmit: async (text) => {
+      const result = await controller.importText(text);
+      if (result.ok && !result.note) modal.close();
+      return result;
+    },
+  }));
+}
+
+function openHistoryDialog() {
+  const store = controller.history;
+  const withEntry = async (id, fn) => {
+    const entry = await store.get(id);
+    if (entry) fn(entry.record);
+  };
+  const modal = ui.openModal('ประวัติเกม', createHistoryView({
+    document,
+    store,
+    onOpen: async (id) => {
+      modal.close();
+      const result = await controller.openHistoryEntry(id);
+      if (!result.ok) ui.showFloatingToast({ title: 'เปิดเกมไม่ได้', detail: result.error, actions: [['ตกลง']] });
+    },
+    onPgn: (id) => withEntry(id, (record) => controller.exportPgn(record)),
+    onLink: (id) => withEntry(id, (record) => controller.copyShareLink(record)),
+    onImport: () => openImportDialog(),
+    confirm: (message) => window.confirm(message),
+  }));
+}
+
+ui.refs.historyBtn.onclick = () => openHistoryDialog();
+
 ui.refs.heroCreateBtn.onclick = () => openModeDialog();
 ui.refs.heroJoinBtn.onclick = () => openJoinDialog();
 
@@ -1076,6 +1112,17 @@ if (pendingInvite) {
       .catch(() => openJoinDialog());
   });
 }
+
+// Share links: `…#g=<token>` opens that game for review, on load and when a link
+// is pasted into an already-open tab.
+function openSharedFromHash() {
+  const token = shareTokenFromHash(location.hash);
+  if (!token) return;
+  history.replaceState(null, '', `${location.pathname}${location.search}`);
+  controller.openSharedToken(token);
+}
+window.addEventListener('hashchange', openSharedFromHash);
+openSharedFromHash();
 
 // Click sound ONLY on actual buttons (not the board, not empty space).
 // Piece moves already play their own move/capture sounds, so dragging stays

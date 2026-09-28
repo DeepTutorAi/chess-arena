@@ -13,6 +13,9 @@ import { planThinkTime } from './thinktime.js';
 import { bookPlies, getBotBook } from './botbook.js';
 import { createTurnAlert } from './turnalert.js';
 import { MIN_RATED_PLIES, createStatsStore } from './stats.js';
+import { createHistoryStore } from './history.js';
+import { ImportError, decodeShareToken, encodeShareToken, parseImport, recordToPgn } from './pgn.js';
+import { copyText, downloadTextFile, pgnFilename, shareUrl } from './share-ui.js';
 import { sounds } from './sounds.js';
 import {
   ENGINE_NAME,
@@ -45,12 +48,18 @@ export class Controller {
     turnAlert = createTurnAlert(),
     loadBotBook = getBotBook,
     stats = createStatsStore({ levelRating, levelCount: LEVELS.length }),
+    history = createHistoryStore(),
+    shareTools = { download: downloadTextFile, copy: copyText, url: shareUrl },
   }) {
     this.ui = ui;
     this.ground = ground;
     this.onPromotion = onPromotion;
     this._gameOverDelayMs = gameOverDelayMs;
     this.turnAlert = turnAlert; // blinks the tab title when it is our turn in a hidden tab
+    this.history = history; // finished games kept in this browser (src/history.js)
+    this.shareTools = shareTools;
+    this._historySlot = { id: null, saving: null }; // this game's history entry (see _saveToHistory)
+    this._importedRecord = null; // set while a game opened from history / a link is on screen
     this.stats = stats; // local rating + results against the bots (src/stats.js)
     this._assisted = false; // undo / hint used in this bot game: it is not rated
     this._statsRecorded = false;
@@ -146,6 +155,8 @@ export class Controller {
     this._assisted = false;
     this._statsRecorded = false;
     this._statsNote = ''; // rating line appended to the game-over card
+    this._historySlot = { id: null, saving: null }; // a fresh game gets a fresh entry
+    this._importedRecord = null;
 
     const initialFen = opts.initialFen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     try {
@@ -630,6 +641,11 @@ export class Controller {
   }
 
   newGame() {
+    // A game opened from history / a link has nothing to "play again": go home.
+    if (this._importedRecord) {
+      this.goHome();
+      return;
+    }
     const mode = this.mode;
     const opts = this._lastOpts ?? {};
     this.start(mode, opts);
@@ -872,7 +888,7 @@ export class Controller {
       { name: 'ฝ่ายดำ (มือคุณ)', icon: 'user' },
     );
     this.ui.setStatus('โหมด Sandbox — เล่นได้ทั้งสองสี', '');
-    this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, liveAnalysis: false, options: true });
+    this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, liveAnalysis: true, options: true });
     this._syncBoard();
     this._renderMoves();
   }
@@ -1274,6 +1290,8 @@ export class Controller {
         initial: this._recordInitialTimes(),
       };
       if (!fromState) this._recordBotStats(result, reason);
+      this._addRecordExtras(this._lastGameRecord, fromState);
+      this._saveToHistory(this._lastGameRecord, fromState);
     } catch (err) {
       // A broken record must never break the game-over flow — review is
       // simply unavailable for that game.
@@ -1291,6 +1309,39 @@ export class Controller {
       return { w: this.clock.initialMs, b: this.clock.initialMs };
     }
     return null;
+  }
+
+  /** Who the bot was and the time control — what a PGN header and the history list need. */
+  _addRecordExtras(record, fromState) {
+    if (!fromState && this.mode === MODES.HUMAN_VS_AI) {
+      record.botLevel = this.levelIndex + 1;
+      record.humanColor = this.humanSide;
+    }
+    const tc = TIME_CONTROLS.find((t) => t.id === this.timeControlId);
+    if (!fromState && tc && tc.initialMs > 0) record.timeControl = { initialMs: tc.initialMs, incMs: tc.incMs };
+  }
+
+  /**
+   * Keep the finished game in the browser's history (best effort, never blocks
+   * the game). Saves of one game run one after another and share one entry, so a
+   * game announced twice is stored once; a game that started meanwhile has its
+   * own slot and can never be overwritten by an older game's save.
+   */
+  _saveToHistory(record, fromState) {
+    if (!this.history || this._importedRecord || this.mode === MODES.ANALYZE) return;
+    const source = fromState ? 'online' : this.mode === MODES.AI_VS_AI ? 'arena' : 'bot';
+    const slot = this._historySlot;
+    slot.saving = Promise.resolve(slot.saving)
+      .then(() => this.history.save({ id: slot.id, record, source }))
+      .then((id) => { slot.id = id; return id; })
+      .catch(() => slot.id);
+  }
+
+  /** Remember the finished review with the saved game so it opens instantly next time. */
+  _persistAnalysis(record, analysis) {
+    const { saving } = this._historySlot;
+    if (!saving || record !== this._lastGameRecord) return;
+    saving.then((id) => (id ? this.history.setAnalysis(id, analysis) : null)).catch(() => {});
   }
 
   /** Feed a finished bot game into the local rating and remember what to tell the player. */
@@ -1403,7 +1454,7 @@ export class Controller {
         if (!isCurrent()) throw new Error('review_aborted'); // cancelled while the book loaded
         analyzer.openingBook = book;
         return analyzer.analyzeGame(record, (p) => {
-          if (isCurrent()) this.reviewUI.updateProgress(p.percentage, p.currentPly, p.totalPlies);
+          if (isCurrent()) this.reviewUI.updateProgress(p.percentage, p.currentPly, p.totalPlies, p.etaMs);
         });
       })
       .then((analysis) => {
@@ -1412,6 +1463,7 @@ export class Controller {
         this._analysis = analysis;
         this._lastAnalysis = analysis;
         this._lastAnalysisRecord = record;
+        this._persistAnalysis(record, analysis);
         this.reviewUI.closeProgressModal();
         this._showReviewSummary(analysis);
       })
@@ -1432,6 +1484,10 @@ export class Controller {
       () => { this._finishReviewSession(); this.newGame(); },
       () => { this._finishReviewSession(); this._reshowGameOver(); },
       () => { this.enterBoardStepper(0); this.reviewUI.startPuzzleRun(); },
+      {
+        onPgn: () => this.exportPgn(this._lastGameRecord),
+        onLink: () => this.copyShareLink(this._lastGameRecord),
+      },
     );
   }
 
@@ -1566,10 +1622,12 @@ export class Controller {
     return resolveEngineWorkerUrl({ strong: getStrongEnginePreference() && isCrossOriginIsolated() });
   }
 
-  /** Spectator live analysis (roadmap C1) — available only while WATCHING (AI
-   *  vs AI arena or an online room as spectator), never while playing. */
+  /** Live analysis (roadmap C1) — available while WATCHING (AI vs AI arena or an
+   *  online room as spectator) or exploring on the analysis board, never while
+   *  playing a game. */
   _spectatorAnalysisAllowed() {
     return this.mode === MODES.AI_VS_AI
+      || this.mode === MODES.ANALYZE // the sandbox / an imported position: an engine on demand
       || (this.mode === MODES.ONLINE && this.onlineRole === 'spectator');
   }
 
@@ -2145,6 +2203,136 @@ export class Controller {
   _renderMoves() {
     const history = this.game.history();
     this.ui.renderMoves(history);
+  }
+
+  // ---- history, import and sharing (roadmap B6) -------------------------------
+
+  /**
+   * Put a finished game on the board and start reviewing it — for a game opened
+   * from history, a pasted PGN or a share link.
+   * @returns {Promise<{ok: boolean, error?: string}>}
+   */
+  async openRecordForReview(record, { analysis = null, historyId = null, source = 'import' } = {}) {
+    let replayed;
+    try {
+      replayed = new Chess(record.initialFen || undefined);
+      for (const mv of record.moves) {
+        if (!replayed.move({ from: mv.from, to: mv.to, promotion: mv.promotion || undefined })) throw new Error('illegal');
+      }
+    } catch {
+      this.ui.log('เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา', 'err');
+      return { ok: false, error: 'เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา' };
+    }
+    await this.start(MODES.ANALYZE, { initialFen: record.initialFen || undefined });
+    this.game = replayed;
+    this._gameInitialFen = record.initialFen || this._gameInitialFen;
+    this._lastGameRecord = record;
+    this._importedRecord = record;
+    this._statsRecorded = true;
+    this.orientation = record.humanColor === 'b' ? 'black' : 'white';
+    this._setPlayersByColor(
+      { name: record.players?.white?.name || 'ขาว', icon: 'user' },
+      { name: record.players?.black?.name || 'ดำ', icon: 'user' },
+    );
+    if (analysis) {
+      this._lastAnalysis = analysis;
+      this._lastAnalysisRecord = record;
+    }
+    let id = historyId;
+    if (!id) {
+      try {
+        id = await this.history.save({ record, source });
+      } catch { id = null; }
+    }
+    this._historySlot = { id, saving: Promise.resolve(id) };
+    this._overPopupShown = true;
+    this._lastGameOver = {
+      title: 'เกมจากประวัติ',
+      detail: `${record.players?.white?.name || 'ขาว'} vs ${record.players?.black?.name || 'ดำ'} · ${record.result ?? '*'}`,
+    };
+    this._syncBoard();
+    this._renderMoves();
+    this.startReview();
+    return { ok: true };
+  }
+
+  /** A saved game from the history list. */
+  async openHistoryEntry(id) {
+    let entry = null;
+    try {
+      entry = await this.history.get(id);
+    } catch { entry = null; }
+    if (!entry) return { ok: false, error: 'ไม่พบเกมนี้ในประวัติแล้ว' };
+    return this.openRecordForReview(entry.record, { analysis: entry.analysis, historyId: entry.id });
+  }
+
+  /**
+   * Whatever the player pasted: a PGN opens for review, a FEN opens the analysis
+   * board on that position with the engine running.
+   * @returns {Promise<{ok: boolean, error?: string, note?: string}>}
+   */
+  async importText(text) {
+    let parsed;
+    try {
+      parsed = parseImport(text);
+    } catch (error) {
+      return { ok: false, error: error instanceof ImportError ? error.message : 'นำเข้าไม่สำเร็จ' };
+    }
+    if (parsed.kind === 'fen') {
+      await this.start(MODES.ANALYZE, { initialFen: parsed.fen });
+      this.toggleSpectatorAnalysis(true);
+      return { ok: true };
+    }
+    const opened = await this.openRecordForReview(parsed.record, { source: 'import' });
+    if (!opened.ok) return opened;
+    return { ok: true, note: parsed.gameCount > 1 ? `พบ ${parsed.gameCount} เกม — ใช้เกมแรก` : '' };
+  }
+
+  /** Open the game inside a share link (the part after `#g=`). */
+  async openSharedToken(token) {
+    let record;
+    try {
+      record = await decodeShareToken(token);
+    } catch (error) {
+      const message = error instanceof ImportError ? error.message : 'เปิดลิงก์แชร์ไม่สำเร็จ';
+      this.ui.showFloatingToast?.({ title: 'เปิดลิงก์ไม่ได้', detail: message, actions: [['ตกลง']] });
+      return { ok: false, error: message };
+    }
+    return this.openRecordForReview(record, { source: 'import' });
+  }
+
+  /** Save a game as a .pgn file. */
+  exportPgn(record) {
+    if (!record?.moves?.length) return false;
+    let pgn;
+    try {
+      pgn = recordToPgn(record);
+    } catch (error) {
+      this.ui.showFloatingToast?.({ title: 'บันทึก PGN ไม่สำเร็จ', detail: error.message, actions: [['ตกลง']] });
+      return false;
+    }
+    const ok = this.shareTools.download(pgnFilename(record), pgn);
+    this.ui.showFloatingToast?.(ok
+      ? { title: 'บันทึกไฟล์ PGN แล้ว', detail: pgnFilename(record), autoCloseMs: 2500 }
+      : { title: 'บันทึกไฟล์ไม่สำเร็จ', detail: 'เบราว์เซอร์ไม่ยอมให้ดาวน์โหลด', actions: [['ตกลง']] });
+    return ok;
+  }
+
+  /** Copy a link that opens this game for review anywhere. */
+  async copyShareLink(record) {
+    if (!record?.moves?.length) return false;
+    let link;
+    try {
+      link = this.shareTools.url(await encodeShareToken(record));
+    } catch {
+      this.ui.showFloatingToast?.({ title: 'สร้างลิงก์ไม่สำเร็จ', actions: [['ตกลง']] });
+      return false;
+    }
+    const ok = await this.shareTools.copy(link);
+    this.ui.showFloatingToast?.(ok
+      ? { title: 'คัดลอกลิงก์แล้ว', detail: 'ส่งให้ใครก็เปิดดูและรีวิวเกมนี้ได้', autoCloseMs: 2500 }
+      : { title: 'คัดลอกอัตโนมัติไม่ได้', detail: link, actions: [['ตกลง']] });
+    return ok;
   }
 
   goHome() {
