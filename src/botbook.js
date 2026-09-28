@@ -12,6 +12,10 @@
 
 const BOOK_URL = './assets/botbook.json';
 
+/** A move backed by fewer named lines than this is a curiosity (1...h6), played
+ *  only when the book has nothing better for the position. */
+export const MIN_LINE_COUNT = 3;
+
 /** How many plies of theory a level of the given strength may use. */
 export function bookPlies(level) {
   return Math.min(12, 4 + level);
@@ -43,7 +47,7 @@ export class BotBook {
   candidates(fen) {
     const list = this.positions[positionKey(fen)];
     if (!list) return [];
-    return list.map(([uci, count]) => ({ uci, weight: Math.sqrt(count) }));
+    return list.map(([uci, count]) => ({ uci, count, weight: Math.sqrt(count) }));
   }
 
   /**
@@ -52,16 +56,13 @@ export class BotBook {
    * @param {object} [opts]
    * @param {(uci: string) => boolean} [opts.isLegal]  drops entries the position does not allow
    *        (guards against a hash collision or a stale book)
-   * @param {string[]} [opts.prefer]  UCI moves to restrict to when present in the book
    * @param {() => number} [opts.rng]
    * @returns {string|null} UCI move, or null when the position is out of book
    */
-  pick(fen, { isLegal = () => true, prefer = null, rng = Math.random } = {}) {
+  pick(fen, { isLegal = () => true, rng = Math.random } = {}) {
     let options = this.candidates(fen).filter((c) => isLegal(c.uci));
-    if (prefer?.length) {
-      const wanted = options.filter((c) => prefer.includes(c.uci));
-      if (wanted.length) options = wanted;
-    }
+    const mainstream = options.filter((c) => c.count >= MIN_LINE_COUNT);
+    if (mainstream.length) options = mainstream;
     if (!options.length) return null;
     const total = options.reduce((sum, c) => sum + c.weight, 0);
     let roll = rng() * total;

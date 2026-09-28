@@ -55,10 +55,15 @@ export function suggestLevel(rating, levelRating, levelCount) {
  */
 export function createStatsStore({ storage = browserStorage(), now = Date.now, levelRating, levelCount } = {}) {
   let state = emptyState();
-  try {
-    const text = storage?.getItem(STATS_KEY);
-    if (text) state = sanitize(JSON.parse(text));
-  } catch { /* unreadable store: start fresh */ }
+  // Another tab may have saved since this one loaded: always start from what
+  // storage holds now, so two tabs never overwrite each other's games.
+  const reload = () => {
+    try {
+      const text = storage?.getItem(STATS_KEY);
+      if (text) state = sanitize(JSON.parse(text));
+    } catch { /* unreadable store: keep what we have */ }
+  };
+  reload();
 
   const save = () => {
     try { storage?.setItem(STATS_KEY, JSON.stringify(state)); } catch { /* private mode / quota */ }
@@ -71,6 +76,9 @@ export function createStatsStore({ storage = browserStorage(), now = Date.now, l
     get provisional() { return provisional(); },
     get results() { return state.results.slice(); },
 
+    /** Re-read storage (another tab may have played); call before showing the numbers. */
+    reload,
+
     /**
      * Record a finished game against a bot.
      * @param {{level: number, score: 0|0.5|1, color: 'w'|'b', plies: number, reason?: string, assisted?: boolean}} game
@@ -78,6 +86,7 @@ export function createStatsStore({ storage = browserStorage(), now = Date.now, l
      * @returns {{rated: boolean, delta: number, rating: number, provisional: boolean, suggestedLevel: number, hint: 'up'|'down'|null}}
      */
     recordBotGame({ level, score, color, plies, reason = null, assisted = false }) {
+      reload();
       const rated = !assisted && plies >= MIN_RATED_PLIES;
       const before = state.rating;
       const opponent = levelRating(level);

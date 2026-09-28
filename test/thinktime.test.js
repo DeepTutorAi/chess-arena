@@ -136,11 +136,13 @@ test('a level keeps its full search time whenever the clock can afford it', () =
   // untimed HVA: the level's own movetime
   const untimed = planThinkTime({ tcId: 'unlimited', initialMs: 0, level: 11, historyLength: 30, searchCeilingMs: 2800, rng: seeded(5) });
   assert.equal(untimed.search, 2800);
-  // the fast-paced controls keep their shorter human-like search
-  const blitz = planThinkTime({
-    tcId: 'blitz_5_0', initialMs: 300000, level: 11, historyLength: 30, remainingMs: 250000, searchCeilingMs: 2800, rng: seeded(5),
-  });
-  assert.equal(blitz.search, 400);
+  // 5+0 and 10+0 too: the level's rating assumes its full search
+  for (const [tcId, initialMs] of [['blitz_5_0', 300000], ['rapid_10_0', 600000]]) {
+    const fast = planThinkTime({
+      tcId, initialMs, level: 11, historyLength: 30, remainingMs: initialMs * 0.8, searchCeilingMs: 2800, rng: seeded(5),
+    });
+    assert.equal(fast.search, 2800, tcId);
+  }
   // ...and it only shrinks as far as the clock requires
   const bullet = planThinkTime({
     tcId: 'bullet_1_0', initialMs: 60000, level: 11, historyLength: 30, remainingMs: 30000, searchCeilingMs: 2800, rng: seeded(5),
@@ -159,6 +161,22 @@ test('the governor never flags the bot even when the level asks for a long searc
     remaining -= plan.delay + plan.search;
     assert.ok(remaining > 0, `flagged on move ${move + 1}`);
   }
+});
+
+test('5+0 with a full-strength level 11 never flags and keeps the whole search while time is comfortable', () => {
+  let remaining = 300000;
+  const rng = seeded(8);
+  let fullSearch = 0;
+  for (let move = 0; move < 100; move++) {
+    const plan = planThinkTime({
+      tcId: 'blitz_5_0', initialMs: 300000, level: 11, historyLength: move * 2 + 1, legalMoves: 30,
+      remainingMs: remaining, incrementMs: 0, searchCeilingMs: 2800, rng,
+    });
+    if (plan.search === 2800) fullSearch += 1;
+    remaining -= plan.delay + plan.search;
+    assert.ok(remaining > 0, `flagged on move ${move + 1}`);
+  }
+  assert.ok(fullSearch >= 25, `only ${fullSearch} full-strength moves`);
 });
 
 test('the governor keeps a latency allowance out of every move budget', () => {

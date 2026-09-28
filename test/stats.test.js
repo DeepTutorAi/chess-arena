@@ -139,3 +139,23 @@ test('reset wipes rating and history', () => {
   assert.equal(store.rating, INITIAL_RATING);
   assert.equal(store.results.length, 0);
 });
+
+test('two tabs sharing one storage never overwrite each other\'s games', () => {
+  const storage = memoryStorage();
+  const tabA = make(storage);
+  const tabB = make(storage); // loaded before tab A played
+  tabA.recordBotGame(win(3));
+  tabB.recordBotGame(loss(4));
+  const after = make(storage);
+  assert.equal(after.results.length, 2, 'both games survive');
+  assert.equal(after.ratedGames, 2);
+  tabA.reload();
+  assert.equal(tabA.results.length, 2, 'reload picks up the other tab\'s game');
+  assert.equal(tabA.rating, after.rating);
+});
+
+test('the end reason is stored with the result', () => {
+  const store = make();
+  store.recordBotGame(win(3, { reason: 'checkmate' }));
+  assert.equal(store.results[0].reason, 'checkmate');
+});

@@ -115,3 +115,56 @@ test('a flag fall against the bot is scored for the side that kept time', () => 
     mock.timers.reset();
   }
 });
+
+test('leaving an unfinished bot game counts as a loss', () => {
+  const { controller, stats } = setup({ humanSide: 'w' });
+  controller.game = lengthyGame();
+  controller.goHome();
+  assert.equal(stats.results.length, 1);
+  assert.equal(stats.results[0].score, 0);
+  assert.equal(stats.results[0].reason, 'abandoned');
+  controller.goHome();
+  assert.equal(stats.results.length, 1, 'not counted twice');
+});
+
+test('walking away from a game that just started, or one already decided, costs nothing', () => {
+  const started = setup({ humanSide: 'w' });
+  const opening = new Chess();
+  opening.move('e4');
+  started.controller.game = opening;
+  started.controller.goHome();
+  assert.equal(started.stats.results.length, 0, 'an aborted start is not a game');
+
+  const finished = setup({ humanSide: 'b' });
+  finished.controller.game = foolsMate();
+  finished.controller._announceGameOver(); // the human won: recorded once
+  finished.controller.goHome();
+  assert.equal(finished.stats.results.length, 1);
+  assert.equal(finished.stats.results[0].score, 1);
+
+  const analysing = setup({ humanSide: 'w' });
+  analysing.controller.mode = MODES.ANALYZE;
+  analysing.controller.game = lengthyGame();
+  analysing.controller.goHome();
+  assert.equal(analysing.stats.results.length, 0);
+});
+
+test('the reason for the end is passed on to the stats', () => {
+  const { controller, stats } = setup({ humanSide: 'w' });
+  controller.game = lengthyGame();
+  controller.resign();
+  assert.equal(stats.results[0].reason, 'resign');
+});
+
+test('undo after the result was recorded does not let the next end reuse the old rating line', () => {
+  const { controller, overlays } = setup({ humanSide: 'w' });
+  controller.game = lengthyGame();
+  controller.resign();
+  assert.match(overlays.at(-1).detail, /เรตติ้งของคุณ/u);
+  controller.game = foolsMate();
+  controller.game.undo();
+  controller.game.undo();
+  controller.game.undo(); // three plies back: an ordinary position to continue from
+  controller.undo();
+  assert.match(controller._statsNote, /บันทึกไปแล้ว/u);
+});

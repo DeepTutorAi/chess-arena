@@ -81,3 +81,11 @@ test('reset asks first and only clears after confirmation', (t) => {
   assert.equal(resets, 1);
   assert.equal(stats.results.length, 0);
 });
+
+test('recent games explain how they ended', (t) => {
+  const { document, stats } = setup(t);
+  stats.recordBotGame({ level: 2, score: 0, color: 'w', plies: 30, reason: 'abandoned' });
+  stats.recordBotGame({ level: 2, score: 1, color: 'w', plies: 30, reason: 'checkmate' });
+  const titles = [...createProfileView({ document, stats, levels }).querySelectorAll('.profile-chip')].map((c) => c.title);
+  assert.deepEqual(titles, ['รุกฆาต', 'ออกจากเกมกลางคัน']);
+});

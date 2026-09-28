@@ -12,7 +12,7 @@ import { ChessClock } from './clock.js';
 import { planThinkTime } from './thinktime.js';
 import { bookPlies, getBotBook } from './botbook.js';
 import { createTurnAlert } from './turnalert.js';
-import { createStatsStore } from './stats.js';
+import { MIN_RATED_PLIES, createStatsStore } from './stats.js';
 import { sounds } from './sounds.js';
 import {
   ENGINE_NAME,
@@ -57,6 +57,7 @@ export class Controller {
     this._statsNote = '';
     this._loadBotBook = loadBotBook;
     this.botBook = null; // sound opening theory the bot may repeat (src/botbook.js)
+    this.botOpeningMove = 'random';
 
     this.game = new Chess();
     this.mode = null;
@@ -600,6 +601,8 @@ export class Controller {
       if (this.mode === MODES.HUMAN_VS_AI) {
         this.game.undo(); // take back engine reply too
         this._assisted = true;
+        // A result already recorded stands; the next end of this game is not counted again.
+        this._statsNote = this._statsRecorded ? 'ผลของเกมนี้ถูกบันทึกไปแล้ว — ไม่นับซ้ำหลังย้อนตา' : '';
       }
       if (this.engine) this.engine.setPosition(this.game.fen());
 
@@ -675,7 +678,16 @@ export class Controller {
     }
   }
 
+  /** Leaving an unfinished bot game counts as a loss, like resigning — otherwise
+   *  a losing game could be walked away from to protect the rating. */
+  _settleAbandonedBotGame() {
+    if (this.mode !== MODES.HUMAN_VS_AI || this._statsRecorded || this._overPopupShown || this._isOver()) return;
+    if (this.game.history().length < MIN_RATED_PLIES) return; // an aborted start is not a game
+    this._recordBotStats(this.humanSide === 'w' ? '0-1' : '1-0', 'abandoned');
+  }
+
   dispose() {
+    this._settleAbandonedBotGame();
     if (this.clock) { this.clock.stop(); this.clock = null; }
     if (this.engine) { this.engine.quit(); this.engine = null; }
     if (this.engineBlack) { this.engineBlack.quit(); this.engineBlack = null; }
@@ -725,8 +737,9 @@ export class Controller {
 
   // ------------------------------------------------------------------ modes
 
-  _startHumanVsAi({ color = 'random', level = 4, initialFen } = {}) {
+  _startHumanVsAi({ color = 'random', level = 4, initialFen, openingMove = 'random' } = {}) {
     this.setLevel(level);
+    this.botOpeningMove = openingMove; // SAN of the bot's first move as White, or 'random'
     this.humanSide = color === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : color;
     this.orientation = this.humanSide === 'w' ? 'white' : 'black';
     const engineSide = this.humanSide === 'w' ? 'b' : 'w';
@@ -1260,7 +1273,7 @@ export class Controller {
         times: this._clockSnapshots.map((s) => ({ ply: s.ply, w: s.w, b: s.b })),
         initial: this._recordInitialTimes(),
       };
-      if (!fromState) this._recordBotStats(result);
+      if (!fromState) this._recordBotStats(result, reason);
     } catch (err) {
       // A broken record must never break the game-over flow — review is
       // simply unavailable for that game.
@@ -1281,7 +1294,7 @@ export class Controller {
   }
 
   /** Feed a finished bot game into the local rating and remember what to tell the player. */
-  _recordBotStats(result) {
+  _recordBotStats(result, reason = null) {
     if (this.mode !== MODES.HUMAN_VS_AI || this._statsRecorded || !this.stats) return;
     this._statsRecorded = true;
     const plies = this.game.history().length;
@@ -1290,7 +1303,7 @@ export class Controller {
     let outcome;
     try {
       outcome = this.stats.recordBotGame({
-        level: this.levelIndex + 1, score, color: this.humanSide, plies, assisted: this._assisted,
+        level: this.levelIndex + 1, score, color: this.humanSide, plies, reason, assisted: this._assisted,
       });
     } catch { return; } // stats must never break the game-over flow
     this.ui.setPlayerRating?.(outcome.rating, outcome.provisional);
@@ -1897,8 +1910,9 @@ export class Controller {
     // shortened only as far as the bot's clock requires.
     const bookMove = this._bookMove();
     const plan = this._thinkTime(bookMove ? 0 : cfg.movetime);
-    // Known theory comes out faster than a position the bot has to work out.
-    const delay = bookMove ? Math.max(400, Math.round(plan.delay * 0.6)) : plan.delay;
+    // Known theory comes out faster than a position the bot has to work out
+    // (never longer than the clock governor allowed).
+    const delay = bookMove ? Math.min(plan.delay, Math.max(400, Math.round(plan.delay * 0.6))) : plan.delay;
     const search = plan.search;
     const fen = this.game.fen();
     this._aiTimer = setTimeout(() => {
@@ -1914,7 +1928,13 @@ export class Controller {
 
   /** A sound opening move for the bot to play from theory, or null when out of book. */
   _bookMove() {
-    if (!this.botBook || this.game.history().length >= bookPlies(this.levelIndex + 1)) return null;
+    const plies = this.game.history().length;
+    if (plies === 0 && this.botOpeningMove && this.botOpeningMove !== 'random') {
+      // The player asked for a specific first move; that needs no book at all.
+      const chosen = this.game.moves({ verbose: true }).find((m) => m.san === this.botOpeningMove);
+      if (chosen) return chosen.from + chosen.to + (chosen.promotion ?? '');
+    }
+    if (!this.botBook || plies >= bookPlies(this.levelIndex + 1)) return null;
     const legal = new Set(this.game.moves({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? '')));
     return this.botBook.pick(this.game.fen(), { isLegal: (uci) => legal.has(uci) });
   }

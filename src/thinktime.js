@@ -52,9 +52,9 @@ export function clockBudgetMs({ remainingMs, incrementMs = 0, historyLength = 0 
  * @param {number|null} [ctx.remainingMs]   the bot side's clock now; null = no clock
  * @param {number} [ctx.incrementMs]
  * @param {number|null} [ctx.searchCeilingMs] the level's own search time (UCI movetime).
- *        Kept in full whenever the clock can afford it, so a level's strength does not
- *        change with the time control; the fast-paced controls (5+0, 10+0) still use the
- *        shorter human-like search. null = use the model's search time.
+ *        Kept in full whenever the clock can afford it, so a level plays at its rated
+ *        strength in every time control (the rating and level advice rely on that); only
+ *        the clock governor shortens it. null = use the model's search time.
  * @param {() => number} [ctx.rng]
  * @returns {{ delay: number, search: number, total: number }}
  */
@@ -73,10 +73,7 @@ export function planThinkTime({
   rng = Math.random,
 } = {}) {
   const { base: rawBase, search: modelSearch } = baseTimes(tcId, initialMs);
-  const fastPaced = tcId === 'blitz_5_0' || tcId === 'rapid_10_0';
-  const search = searchCeilingMs === null
-    ? modelSearch
-    : (fastPaced ? Math.min(searchCeilingMs, modelSearch) : searchCeilingMs);
+  const search = searchCeilingMs === null ? modelSearch : searchCeilingMs;
   // Pace by the moving engine's strength: level 1 ×1.3 … level 11 ×0.3.
   const base = rawBase * (1.3 - 0.1 * (level - 1));
 

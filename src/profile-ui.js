@@ -2,7 +2,12 @@
 // only — there are no accounts — so it is a plain DOM builder that takes its data
 // and callbacks as arguments and is easy to test.
 
+import { PROVISIONAL_GAMES } from './stats.js';
+
 const RESULT_LABEL = { 1: 'ชนะ', 0.5: 'เสมอ', 0: 'แพ้' };
+const REASON_LABEL = {
+  checkmate: 'รุกฆาต', stalemate: 'อับ', draw: 'เสมอ', timeout: 'หมดเวลา', resign: 'ยอมแพ้', abandoned: 'ออกจากเกมกลางคัน',
+};
 
 function make(document, tag, className, text) {
   const el = document.createElement(tag);
@@ -35,7 +40,7 @@ export function createProfileView({ document, stats, levels, onPlayLevel, onRese
   head.append(
     make(document, 'div', 'profile-rating-value', `${stats.rating}${stats.provisional ? '?' : ''}`),
     make(document, 'div', 'profile-rating-label', stats.provisional
-      ? `เรตติ้งชั่วคราว · ${stats.ratedGames}/10 เกมที่นับ`
+      ? `เรตติ้งชั่วคราว · ${stats.ratedGames}/${PROVISIONAL_GAMES} เกมที่นับ`
       : `เรตติ้งจาก ${stats.ratedGames} เกมกับบอท`),
   );
   root.append(head);
@@ -75,6 +80,7 @@ export function createProfileView({ document, stats, levels, onPlayLevel, onRese
     for (const r of results.slice(-8).reverse()) {
       const chip = make(document, 'span', `profile-chip result-${r.score === 1 ? 'win' : r.score === 0.5 ? 'draw' : 'loss'}`,
         `${RESULT_LABEL[r.score]} · Lv${r.level}${r.rated ? '' : ' *'}`);
+      if (r.reason && REASON_LABEL[r.reason]) chip.title = REASON_LABEL[r.reason];
       recent.append(chip);
     }
     if (results.some((r) => !r.rated)) {

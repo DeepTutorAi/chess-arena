@@ -418,7 +418,7 @@ function openJoinDialog(prefillInvite = null) {
 }
 
 // 2-STEP CREATE ROOM DIALOG FLOW (CHESS.COM PLAY CHESS STYLE)
-function openModeDialog(targetMode = null) {
+function openModeDialog(targetMode = null, { level = null } = {}) {
   const modal = ui.openModal('Play Chess (เล่น / เลือกโหมด)');
   const body = modal.body;
 
@@ -510,7 +510,7 @@ function openModeDialog(targetMode = null) {
       // Level 4 for a newcomer; once the player has rated games, the level that
       // matches their rating.
       const rated = controller.stats.ratedGames > 0;
-      const startLevel = rated ? controller.stats.suggestedLevel() : 4;
+      const startLevel = level ?? (rated ? controller.stats.suggestedLevel() : 4);
       const initialCfg = LEVELS[startLevel - 1];
       levelLabel.innerHTML = `ระดับเอนจิน: <b id="hva-level-label">Elo ${initialCfg.label}</b>`;
       levelWrap.appendChild(levelLabel);
@@ -530,10 +530,23 @@ function openModeDialog(targetMode = null) {
 
       levelWrap.appendChild(slider);
       body.appendChild(levelWrap);
-      if (rated) {
+      if (rated || level) {
         body.append(ui.el('p', 'dlg-hint',
           `แนะนำระดับ ${startLevel} ตามเรตติ้งของคุณ (${controller.stats.rating}) — เลื่อนเปลี่ยนได้`));
       }
+
+      const openingField = ui.el('label', 'field');
+      openingField.append(ui.el('span', 'field-label', 'ตาแรกของบอท (เมื่อบอทเล่นฝ่ายขาว)'));
+      const openingSelect = ui.el('select');
+      openingSelect.innerHTML = `
+        <option value="random">สุ่มจากตำราเปิดเกม</option>
+        <option value="e4">1.e4 — เปิดเกมคลาสสิก</option>
+        <option value="d4">1.d4 — เปิดเบี้ยราชินี</option>
+        <option value="c4">1.c4 — English</option>
+        <option value="Nf3">1.Nf3 — Réti</option>
+      `;
+      openingField.appendChild(openingSelect);
+      body.appendChild(openingField);
 
       body.append(ui.el('div', 'field-label', 'ตั้งค่าเวลา (Time Control)'));
       body.appendChild(timeControlRadios('hva-tc'));
@@ -548,6 +561,7 @@ function openModeDialog(targetMode = null) {
               color,
               level: Number(slider.value),
               timeControlId: tcId,
+              openingMove: openingSelect.value,
             });
             modal.close();
           },
@@ -735,14 +749,15 @@ function openModeDialog(targetMode = null) {
 ui.refs.brandHome.onclick = () => controller.goHome();
 ui.refs.profileBtn.onclick = () => {
   const { stats } = controller;
+  stats.reload(); // another tab may have played since this one loaded
   const modal = ui.openModal('โปรไฟล์และสถิติ', createProfileView({
     document,
     stats,
     levels: LEVELS,
     confirm: (message) => window.confirm(message),
-    onPlayLevel: () => {
+    onPlayLevel: (level) => {
       modal.close();
-      openModeDialog(MODES.HUMAN_VS_AI);
+      openModeDialog(MODES.HUMAN_VS_AI, { level });
     },
     onReset: () => {
       ui.setPlayerRating(stats.rating, stats.provisional);

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import { LEVELS, levelRating } from '../src/config.js';
 import { LEVEL_RATINGS } from '../src/level-ratings.js';
-import { OPENINGS, adjudicate, scoreOf } from '../scripts/calibrate-levels.mjs';
+import { OPENINGS, adjudicate, parseArgs, scoreOf } from '../scripts/calibrate-levels.mjs';
 import { Chess } from 'chess.js';
 
 test('11 levels, each stronger than the last in both settings and rating', () => {
@@ -80,4 +80,12 @@ test('scoreOf is from the first player\'s point of view', () => {
   assert.equal(scoreOf('0-1', true), 0);
   assert.equal(scoreOf('1/2-1/2', true), 0.5);
   assert.equal(scoreOf('1/2-1/2', false), 0.5);
+});
+
+test('calibration arguments are validated (odd or non-numeric game counts would skew the colours)', () => {
+  assert.equal(parseArgs(['--games', '10', '--parallel', '2', '--offset', '3']).games, 10);
+  assert.equal(parseArgs([]).games, 6, 'defaults are valid');
+  for (const bad of [['--games', '7'], ['--games', 'abc'], ['--games', '0'], ['--parallel', '0'], ['--offset', '-1'], ['--offset', 'x']]) {
+    assert.throws(() => parseArgs(bad), /must be/u, bad.join(' '));
+  }
 });

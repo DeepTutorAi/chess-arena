@@ -5,7 +5,7 @@ import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
 
-import { BotBook, bookPlies, positionKey } from '../src/botbook.js';
+import { BotBook, MIN_LINE_COUNT, bookPlies, positionKey } from '../src/botbook.js';
 import { collectEdges, filterEdges } from '../scripts/build-botbook.mjs';
 import { Controller, MODES } from '../src/controller.js';
 
@@ -30,21 +30,25 @@ test('a stronger level may use more theory, capped by what the book holds', () =
 });
 
 test('pick draws by sqrt(count) weight, skips illegal entries, and is null out of book', () => {
-  const book = new BotBook({ positions: { [positionKey(START)]: [['e2e4', 100], ['d2d4', 25], ['a2a3', 1]] } });
+  const book = new BotBook({ positions: { [positionKey(START)]: [['e2e4', 100], ['d2d4', 25], ['a2a3', 4]] } });
   assert.equal(book.pick('8/8/8/8/8/8/8/K6k w - - 0 1'), null, 'unknown position');
-  assert.deepEqual(book.candidates(START).map((c) => c.weight), [10, 5, 1]);
+  assert.deepEqual(book.candidates(START).map((c) => c.weight), [10, 5, 2]);
 
   // rng at the very start / end of the range lands on the first / last entry.
   assert.equal(book.pick(START, { rng: () => 0 }), 'e2e4');
   assert.equal(book.pick(START, { rng: () => 0.999999 }), 'a2a3');
-  // 10 of 16 weight units belong to e4: a roll of 0.6 (9.6) is still e4, 0.65 (10.4) is d4.
-  assert.equal(book.pick(START, { rng: () => 0.6 }), 'e2e4');
-  assert.equal(book.pick(START, { rng: () => 0.65 }), 'd2d4');
+  // 10 of 17 weight units belong to e4: a roll of 0.58 (9.9) is still e4, 0.6 (10.2) is d4.
+  assert.equal(book.pick(START, { rng: () => 0.58 }), 'e2e4');
+  assert.equal(book.pick(START, { rng: () => 0.6 }), 'd2d4');
 
   assert.equal(book.pick(START, { isLegal: (uci) => uci === 'd2d4' }), 'd2d4');
   assert.equal(book.pick(START, { isLegal: () => false }), null, 'a hash collision can never produce an illegal move');
-  assert.equal(book.pick(START, { prefer: ['a2a3'] }), 'a2a3', 'a preferred move wins when the book has it');
-  assert.ok(['e2e4', 'd2d4', 'a2a3'].includes(book.pick(START, { prefer: ['h2h4'] })), 'an unavailable preference is ignored');
+});
+
+test('rare curiosities are only played when nothing mainstream is left', () => {
+  const book = new BotBook({ positions: { [positionKey(START)]: [['e2e4', 50], ['h2h4', MIN_LINE_COUNT - 1]] } });
+  for (const roll of [0, 0.5, 0.999]) assert.equal(book.pick(START, { rng: () => roll }), 'e2e4');
+  assert.equal(book.pick(START, { isLegal: (uci) => uci === 'h2h4' }), 'h2h4', 'still available when it is all the book has');
 });
 
 test('collectEdges merges transpositions and counts how many lines use a move', () => {
@@ -197,6 +201,62 @@ test('vs bot: out of book, past the level\'s theory depth, or with no book loade
     controller._engineTurn();
     mock.timers.tick(30000);
     assert.equal(engineCalls.at(-1)[0], 'go', 'level 1 is out of theory at ply 5');
+    controller.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('a book move never waits longer than the clock governor allowed', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const afterE4 = new Chess();
+    afterE4.move('e4');
+    const book = new BotBook({ positions: { [positionKey(afterE4.fen())]: [['c7c5', 1]] } });
+    const { controller } = makeBotController(book);
+    controller.game = afterE4;
+    controller._thinkTime = () => ({ delay: 50, search: 20 }); // nearly out of time
+    controller._engineTurn();
+    mock.timers.tick(60);
+    assert.deepEqual(controller.game.history(), ['e4', 'c5'], 'played within the governed 50 ms, not a 400 ms floor');
+    controller.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('vs bot: a chosen first move is played as White even with no book loaded, then the book takes over', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { controller } = makeBotController(null);
+    controller.humanSide = 'b';
+    controller.engineSide = 'w';
+    controller.botBook = null;
+    controller.botOpeningMove = 'd4';
+    controller.game = new Chess();
+    controller._engineTurn();
+    mock.timers.tick(30000);
+    assert.deepEqual(controller.game.history(), ['d4']);
+    controller.dispose();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test('vs bot: the first-move choice only applies to the very first move, and "random" leaves it to the book', () => {
+  mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const book = new BotBook({ positions: { [positionKey(START)]: [['g1f3', 50]] } });
+    const { controller } = makeBotController(book);
+    controller.humanSide = 'b';
+    controller.botOpeningMove = 'random';
+    controller.game = new Chess();
+    controller._engineTurn();
+    mock.timers.tick(30000);
+    assert.deepEqual(controller.game.history(), ['Nf3'], 'random: the book decides');
+    controller.game.move('d5');
+    controller.botOpeningMove = 'e4'; // must not force e4 on move two
+    assert.equal(controller._bookMove(), null, 'out of book after 1.Nf3 d5 and no forced move');
     controller.dispose();
   } finally {
     mock.timers.reset();

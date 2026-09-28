@@ -3,6 +3,7 @@
 
 import { AVATAR_GLYPHS } from './online.js';
 import { HUMAN_NAME } from './config.js';
+import { PROVISIONAL_GAMES } from './stats.js';
 import {
   iconUndo,
   iconHint,
@@ -490,7 +491,7 @@ export class UI {
   setPlayerRating(rating, provisional = false) {
     this.refs.profileRating.textContent = `${rating}${provisional ? '?' : ''}`;
     this.refs.profileBtn.title = provisional
-      ? 'เรตติ้งชั่วคราว — เล่นกับบอทให้ครบ 10 เกมเพื่อให้แม่นยำขึ้น'
+      ? `เรตติ้งชั่วคราว — เล่นกับบอทให้ครบ ${PROVISIONAL_GAMES} เกมเพื่อให้แม่นยำขึ้น`
       : 'โปรไฟล์และสถิติของคุณ';
   }
 
