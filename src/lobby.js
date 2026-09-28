@@ -67,7 +67,7 @@ function element(document, tag, className, text) {
 function avatarEmblem(document, avatar, className = '') {
   const emblem = element(document, 'span', `lobby-atlas-emblem avatar-${avatar} ${className}`.trim(), AVATAR_GLYPHS[avatar] ?? '♞');
   emblem.style.backgroundPosition = AVATAR_ATLAS[avatar] ?? AVATAR_ATLAS.knight;
-  emblem.style.backgroundImage = `url("${new URL('./assets/lobby/lobby-emblems.png', document.baseURI).toString()}")`;
+  emblem.style.backgroundImage = `url("${new URL('./assets/lobby/lobby-emblems.webp', document.baseURI).toString()}")`;
   emblem.setAttribute('aria-hidden', 'true');
   return emblem;
 }

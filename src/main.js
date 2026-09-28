@@ -428,7 +428,7 @@ function openModeDialog(targetMode = null) {
     const options = [
       {
         mode: MODES.ONLINE,
-        banner: './assets/banners/banner_online.jpg',
+        banner: './assets/banners/banner_online.webp',
         tag: 'PVP ONLINE',
         tagClass: 'tag-cyan',
         title: 'Play Online (ผู้เล่นสองคน)',
@@ -436,7 +436,7 @@ function openModeDialog(targetMode = null) {
       },
       {
         mode: MODES.HUMAN_VS_AI,
-        banner: './assets/banners/banner_bots.jpg',
+        banner: './assets/banners/banner_bots.webp',
         tag: 'SOLO VS BOT',
         tagClass: 'tag-green',
         title: 'Play Bots (เล่น vs Stockfish 18)',
@@ -444,7 +444,7 @@ function openModeDialog(targetMode = null) {
       },
       {
         mode: MODES.AI_VS_AI,
-        banner: './assets/banners/banner_arena.jpg',
+        banner: './assets/banners/banner_arena.webp',
         tag: 'AI ARENA',
         tagClass: 'tag-amber',
         title: 'AI vs AI Arena (ชมการประลองสด)',
@@ -452,7 +452,7 @@ function openModeDialog(targetMode = null) {
       },
       {
         mode: 'sandbox_direct',
-        banner: './assets/banners/banner_sandbox.jpg',
+        banner: './assets/banners/banner_sandbox.webp',
         tag: 'BOARD EDITOR',
         tagClass: 'tag-purple',
         title: 'Sandbox (กระดานทดลอง / จัดวางหมาก)',
@@ -464,7 +464,7 @@ function openModeDialog(targetMode = null) {
       const card = ui.el('div', `chesscom-play-card card-${opt.mode}`);
       card.innerHTML = `
         <div class="c-banner-wrap">
-          <img src="${opt.banner}" alt="${opt.title}" class="c-banner-img" />
+          <img src="${opt.banner}" alt="${opt.title}" class="c-banner-img" width="360" height="240" loading="lazy" decoding="async" />
           <div class="c-banner-overlay"></div>
         </div>
         <div class="c-body">

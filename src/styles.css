@@ -193,7 +193,7 @@ body {
   margin: 0 auto;
   min-height: calc(100 * var(--vh) - 52px);
   background: linear-gradient(180deg, rgba(24, 22, 20, 0.75) 0%, rgba(24, 22, 20, 0.95) 100%),
-    url('../assets/chess_park_3d_bg.jpg') center/cover no-repeat;
+    url('./img/park-bg.webp') center/cover no-repeat;
 }
 
 .park-hero-container {
@@ -1913,8 +1913,12 @@ input[type='range'] {
 .live-lobby-hero h2 { margin:10px 0 8px; font-size:clamp(26px,4vw,46px); line-height:1.05; }
 .live-lobby-hero p { max-width:650px; margin:0; color:#c8bed4; line-height:1.65; }
 .lobby-profile-pill { position:relative; z-index:2; display:grid; grid-template-columns:auto minmax(130px,1fr); gap:8px 10px; width:min(310px,100%); padding:14px; border:1px solid rgba(255,255,255,.14); border-radius:16px; background:rgba(10,8,19,.68); backdrop-filter:blur(18px); }
-.lobby-avatar-glyph { grid-row:1/3; align-self:center; font-size:34px; color:var(--lobby-gold); }
-.lobby-atlas-emblem { background-repeat:no-repeat; background-size:300% 200%; }
+.lobby-avatar-glyph { grid-row:1/3; align-self:center; width:56px; height:56px; font-size:34px; color:var(--lobby-gold); }
+/* Sprite = 3x2 grid of square cells. Two-class selectors so .lobby-emblem's
+   `background` shorthand (declared later) can't reset size/repeat, and the
+   text glyph (kept only as an alt-text fallback) never draws over the art. */
+.lobby-atlas-emblem.lobby-emblem,
+.lobby-atlas-emblem.lobby-avatar-glyph { background-repeat:no-repeat; background-size:300% 200%; font-size:0; color:transparent; }
 .lobby-profile-name,.lobby-avatar-select,.lobby-search,.lobby-time-filter { border:1px solid rgba(255,255,255,.12); border-radius:9px; padding:10px 12px; color:#fff; background:rgba(5,5,12,.6); }
 .live-lobby-controls { display:grid; grid-template-columns:auto minmax(220px,1fr) auto auto; align-items:center; gap:12px; padding:14px; border:1px solid rgba(255,255,255,.1); border-radius:16px; background:rgba(255,255,255,.045); backdrop-filter:blur(16px); }
 .lobby-tabs { display:flex; gap:5px; }

@@ -1,8 +1,13 @@
 // Chess Arena service worker (roadmap.md D1) — hand-rolled, no dependencies.
 //
 // Caching policy:
-// - Same-origin static files (vite-hashed assets, engine, icons, manifest):
-//   cache-first — hashed names never collide, engine files never change.
+// - Immutable files (vite-hashed bundles in assets/, the engine): cache-first —
+//   hashed names never collide, engine files never change.
+// - Other static files (images, sounds, openings.json, icons, manifest — the
+//   names are NOT hashed): stale-while-revalidate, so a redeploy reaches
+//   returning users on their next visit instead of never.
+// - Range requests (audio elements) bypass the worker: a partial 206 response
+//   can't be cached (Cache.put throws) and Safari needs real 206s for media.
 // - Navigations (index.html): network-first with cache fallback, so new
 //   deploys are picked up on the next reload while offline still works.
 // - The online room / lobby API: NEVER cached — passed straight to the
@@ -11,7 +16,8 @@
 // Registration happens only off-localhost (see src/main.js) so Vite dev is
 // never intercepted.
 
-const CACHE_VERSION = 'chess-arena-v1';
+// Bump when the caching rules change; activate() drops every older version.
+const CACHE_VERSION = 'chess-arena-v2';
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const SHELL_URL = new URL('./', self.registration.scope).href;
 const SCOPE_PATH = new URL(self.registration.scope).pathname;
@@ -45,6 +51,14 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skip-waiting') self.skipWaiting();
 });
 
+// Vite writes hashed bundles as assets/<name>-<8+ char hash>.<ext> (top level
+// only); public/ files live in sub-folders or have no hash in the name.
+const HASHED_ASSET = new RegExp(`^${SCOPE_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}assets/[^/]+-[\\w-]{8,}\\.[a-z0-9]+$`);
+
+function isImmutableAsset(pathname) {
+  return pathname.startsWith(`${SCOPE_PATH}engine/`) || HASHED_ASSET.test(pathname);
+}
+
 function isStaticAsset(pathname) {
   return pathname.startsWith(`${SCOPE_PATH}assets/`)
     || pathname.startsWith(`${SCOPE_PATH}engine/`)
@@ -65,19 +79,42 @@ self.addEventListener('fetch', (event) => {
   if (!url.pathname.startsWith(SCOPE_PATH)) return;
   if (isApiPath(url.pathname)) return; // room/lobby state: network only, never cached
 
-  // Static assets: cache-first (hashed names / immutable engine files).
-  if (isStaticAsset(url.pathname)) {
+  // Range requests (media elements) go straight to the network.
+  if (request.headers.has('range')) return;
+
+  // Immutable static assets: cache-first (hashed names / engine files).
+  if (isImmutableAsset(url.pathname)) {
     event.respondWith((async () => {
       const cache = await caches.open(RUNTIME_CACHE);
       const cached = await cache.match(request);
       if (cached) return cached;
       try {
         const response = await fetch(request);
-        if (response.ok) cache.put(request, response.clone());
+        if (response.status === 200) cache.put(request, response.clone());
         return response;
       } catch {
         return new Response('', { status: 504, statusText: 'offline' });
       }
+    })());
+    return;
+  }
+
+  // Other static files: answer from cache now, refresh it in the background.
+  if (isStaticAsset(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(RUNTIME_CACHE);
+      const cached = await cache.match(request);
+      const refresh = fetch(request)
+        .then((response) => {
+          if (response.status === 200) cache.put(request, response.clone());
+          return response;
+        })
+        .catch(() => null);
+      if (cached) {
+        event.waitUntil(refresh);
+        return cached;
+      }
+      return (await refresh) ?? new Response('', { status: 504, statusText: 'offline' });
     })());
     return;
   }

@@ -8,7 +8,7 @@
     "dev": "vite",
     "openings": "node scripts/build-openings.mjs",
     "test": "npm run test:domain && npm run test:worker",
-    "test:domain": "node --test test/afk-state.test.js test/afk-ui.test.js test/clock.test.js test/game-state.test.js test/capabilities.test.js test/protocol.test.js test/rate-limit.test.js test/online.test.js test/lobby.test.js test/lobby-ui.test.js test/online-controller.test.js test/online-ui.test.js test/spectator-ui.test.js test/analyzer.test.js test/review-retry.test.js test/review-critical.test.js test/openings.test.js test/review-opening.test.js test/review-puzzle.test.js test/spectator-eval.test.js test/review-xss.test.js test/flip-bars.test.js test/online-sounds.test.js test/layout-css.test.js test/review-fixes.test.js",
+    "test:domain": "node --test test/afk-state.test.js test/afk-ui.test.js test/clock.test.js test/game-state.test.js test/capabilities.test.js test/protocol.test.js test/rate-limit.test.js test/online.test.js test/lobby.test.js test/lobby-ui.test.js test/online-controller.test.js test/online-ui.test.js test/spectator-ui.test.js test/analyzer.test.js test/review-retry.test.js test/review-critical.test.js test/openings.test.js test/review-opening.test.js test/review-puzzle.test.js test/spectator-eval.test.js test/review-xss.test.js test/flip-bars.test.js test/online-sounds.test.js test/layout-css.test.js test/review-fixes.test.js test/sw-cache.test.js test/assets.test.js",
     "test:worker": "vitest run test/lobby-registry.test.js test/worker.integration.test.js",
     "build": "vite build",
     "preview": "vite preview"

@@ -138,7 +138,7 @@ export class ReviewUI {
     this._progressOverlay = null;
   }
 
-  // ---- summary modal (mockup: review_modal_mockup.jpg) -------------------
+  // ---- summary modal -------------------------------------------------------
   showReviewSummaryModal(analysis, onStepThrough, onNewGame, onExit, onPuzzleRun = null) {
     this.closeSummaryModal();
     this.closeProgressModal();

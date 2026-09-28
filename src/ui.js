@@ -58,14 +58,14 @@ export class UI {
         <section id="home-view" class="home-view">
           <div class="park-hero-container">
             <div class="park-logo-wrap">
-              <img src="./assets/chess_arena_3d_logo.jpg" alt="Chess Arena 3D" class="park-logo-3d-img" />
+              <img src="./assets/chess_arena_3d_logo.webp" alt="Chess Arena 3D" class="park-logo-3d-img" width="840" height="469" decoding="async" fetchpriority="high" />
               <p class="park-logo-sub">BROWSER CHESS ARENA 2026</p>
             </div>
             
             <div class="park-hero-cards">
               <button id="hero-create-btn" class="park-action-card create-card">
                 <div class="card-icon-3d-wrap">
-                  <img src="./assets/icons/btn_create_3d.jpg" alt="Create Game" class="card-icon-3d-img" />
+                  <img src="./assets/icons/btn_create_3d.webp" alt="Create Game" class="card-icon-3d-img" width="256" height="256" decoding="async" />
                 </div>
                 <div class="card-text">CREATE GAME</div>
                 <div class="card-sub">สร้างห้อง / เลือกโหมด</div>
@@ -73,7 +73,7 @@ export class UI {
 
               <button id="hero-join-btn" class="park-action-card join-card">
                 <div class="card-icon-3d-wrap">
-                  <img src="./assets/icons/btn_join_3d.jpg" alt="Join Game" class="card-icon-3d-img" />
+                  <img src="./assets/icons/btn_join_3d.webp" alt="Join Game" class="card-icon-3d-img" width="256" height="256" decoding="async" />
                 </div>
                 <div class="card-text">JOIN GAME</div>
                 <div class="card-sub">เข้าร่วมห้องประลอง</div>
