@@ -99,6 +99,10 @@ export class UI {
                 <div class="card-sub">เข้าร่วมห้องประลอง</div>
               </button>
             </div>
+            <button id="hero-quick-btn" class="park-quick-btn" type="button">
+              ${iconBolt({ size: 18 })}
+              <span><b>เล่นด่วน · Quick Play</b> — หาคู่แข่งออนไลน์ให้ทันที</span>
+            </button>
           </div>
         </section>
 
@@ -351,6 +355,7 @@ export class UI {
       profileRating: $('#profile-rating'),
       heroCreateBtn: $('#hero-create-btn'),
       heroJoinBtn: $('#hero-join-btn'),
+      heroQuickBtn: $('#hero-quick-btn'),
 
       status: $('#status'),
       board: $('#board'),

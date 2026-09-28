@@ -9,6 +9,7 @@ import { Chess } from 'chess.js';
 import { Controller, MODES } from '../src/controller.js';
 import { createHistoryStore, createMemoryAdapter } from '../src/history.js';
 import { createStatsStore } from '../src/stats.js';
+import { createMistakeBank } from '../src/mistakes.js';
 import { LEVELS, levelRating } from '../src/config.js';
 import { encodeShareToken, parsePgn } from '../src/pgn.js';
 
@@ -48,7 +49,14 @@ function harness(t, { fetchImpl = async () => ({ ok: false }) } = {}) {
   Object.assign(globalThis, { window, document: window.document, Worker: FakeWorker, fetch: fetchImpl, requestAnimationFrame: (cb) => { cb(); return 1; } });
   FakeWorker.instances = [];
   const calls = { toasts: [], gameOvers: [], home: 0, ratings: [] };
+  const sidebar = window.document.createElement('div');
+  sidebar.innerHTML = '<div class="sidebar-header"></div><div class="sidebar-content"></div><div class="action-strip"></div>';
+  window.document.body.appendChild(sidebar);
+  const layer = window.document.createElement('div');
+  layer.id = 'review-badge-layer';
+  window.document.body.appendChild(layer);
   const ui = new Proxy({
+    refs: { gameSidebar: sidebar },
     showFloatingToast(opts) { calls.toasts.push(opts); },
     showGameOver(title, detail) {
       calls.gameOvers.push({ title, detail });
@@ -57,11 +65,14 @@ function harness(t, { fetchImpl = async () => ({ ok: false }) } = {}) {
     },
     showHomeView() { calls.home += 1; },
   }, { get(target, key) { return key in target ? target[key] : () => {}; } });
-  const ground = { state: { dom: { bounds: { clear() {} } } }, set() {}, setShapes() {}, setAutoShapes() {}, cancelPremove() {}, playPremove() {} };
+  const sets = [];
+  const ground = { state: { dom: { bounds: { clear() {} } } }, set(cfg) { sets.push(cfg); }, setShapes() {}, setAutoShapes() {}, cancelPremove() {}, playPremove() {} };
+  const bankStorage = (() => { const data = {}; return { getItem: (k) => data[k] ?? null, setItem: (k, v) => { data[k] = v; } }; })();
+  const mistakes = createMistakeBank({ storage: bankStorage });
   const history = createHistoryStore({ adapter: createMemoryAdapter(), now: (() => { let n = 1_000; return () => (n += 10); })() });
   const shared = { downloads: [], copies: [] };
   const controller = new Controller({
-    ui, ground, onPromotion: async () => 'q', gameOverDelayMs: 0, history,
+    ui, ground, onPromotion: async () => 'q', gameOverDelayMs: 0, history, mistakes,
     stats: createStatsStore({ storage: null, levelRating, levelCount: LEVELS.length }),
     loadBotBook: async () => null,
     turnAlert: { notify() {}, clear() {}, destroy() {} },
@@ -77,7 +88,7 @@ function harness(t, { fetchImpl = async () => ({ ok: false }) } = {}) {
     window.close();
     Object.assign(globalThis, { Worker: saved.Worker, fetch: saved.fetch, window: saved.window, document: saved.document, requestAnimationFrame: saved.raf });
   });
-  return { controller, history, calls, shared };
+  return { controller, history, calls, shared, mistakes, sets };
 }
 
 const foolsMate = () => { const g = new Chess(); for (const s of ['f3', 'e5', 'g4', 'Qh4#']) g.move(s); return g; };
@@ -358,4 +369,159 @@ test('a share link that is too long says why instead of pretending to copy', asy
   assert.equal(shared.copies.length, 0);
   assert.equal(calls.toasts.at(-1).title, 'สร้างลิงก์ไม่สำเร็จ');
   assert.match(calls.toasts.at(-1).detail, /PGN/u);
+});
+
+// ---- the mistake bank ---------------------------------------------------------------------------
+
+// 1.e4 e5 2.Qh5 Nc6 3.Bc4 Nf6?? 4.Qxf7#  — black's 3...Nf6 is the blunder
+const BLUNDER_GAME = `[White "Bot"]\n[Black "Me"]\n[Result "1-0"]\n\n1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0`;
+
+async function analysedGame(t, { humanColor }) {
+  const h = harness(t);
+  const record = parsePgn(BLUNDER_GAME).record;
+  Object.assign(record, humanColor ? { humanColor } : {});
+  await h.controller.openRecordForReview(record, { analysis: fakeAnalysis(record), historyId: null });
+  return { ...h, record };
+}
+
+/** The analysis the engine would produce: 3...Nf6 is a blunder with d5 as the only fix. */
+function fakeAnalysis(record) {
+  const g = new Chess();
+  const fens = [g.fen()];
+  const plies = record.moves.map((m, i) => {
+    const before = g.fen();
+    g.move({ from: m.from, to: m.to, promotion: m.promotion });
+    fens.push(g.fen());
+    const blunder = i === 5;
+    return {
+      ply: i, color: i % 2 ? 'b' : 'w', san: m.san, from: m.from, to: m.to, promotion: null, captured: null,
+      fenAfter: g.fen(), turnAfter: i % 2 ? 'w' : 'b', tier: blunder ? 'blunder' : 'best', deltaW: blunder ? 60 : 0, cpLoss: 0, bestEvalCp: 0,
+      bestMove: blunder ? { from: 'd8', to: 'e7' } : { from: m.from, to: m.to }, bestSan: blunder ? 'Qe7' : m.san,
+      acceptable: blunder ? [{ from: 'd8', to: 'e7' }, { from: 'g7', to: 'g6' }] : [{ from: m.from, to: m.to }],
+      reply: null, replySan: null, bestMate: null, afterMate: null, _before: before,
+    };
+  });
+  return {
+    initialFen: fens[0], fens, plies,
+    positions: fens.map((fen, j) => ({ ply: j, fen, turn: j % 2 ? 'b' : 'w', whiteWinProb: 50, whiteEvalCp: 0, clock: null, pvSan: [], wdl: null })),
+    criticalMoments: [], opening: null, accuracy: { w: 90, b: 40 }, counts: { w: {}, b: {} }, result: '1-0', reason: '', players: record.players,
+  };
+}
+
+test('a finished review files the player\'s own mistakes in the bank and says so', async (t) => {
+  const { controller, mistakes, calls } = harness(t);
+  controller.mode = MODES.HUMAN_VS_AI;
+  controller.humanSide = 'b';
+  const record = parsePgn(BLUNDER_GAME).record;
+  record.humanColor = 'b';
+  const analysis = fakeAnalysis(record);
+  controller._lastGameRecord = record;
+  controller._collectMistakes(record, analysis);
+  assert.equal(mistakes.all.length, 1);
+  assert.equal(mistakes.all[0].bestSan, 'Qe7');
+  assert.equal(mistakes.all[0].playedSan, 'Nf6');
+  assert.match(calls.toasts.at(-1).title, /เพิ่ม 1 ตาพลาด/u);
+
+  const before = calls.toasts.length;
+  controller._collectMistakes(record, analysis); // reviewing it again
+  assert.equal(mistakes.all.length, 1, 'no duplicates');
+  assert.equal(calls.toasts.length, before, 'and no repeated announcement');
+});
+
+test('imports and games with no known player side add nothing to the bank', async (t) => {
+  const { controller, mistakes } = harness(t);
+  const record = parsePgn(BLUNDER_GAME).record; // no humanColor
+  controller._collectMistakes(record, fakeAnalysis(record));
+  assert.equal(mistakes.all.length, 0);
+});
+
+test('the opponent\'s mistakes are not the player\'s', async (t) => {
+  const { controller, mistakes } = harness(t);
+  const record = parsePgn(BLUNDER_GAME).record;
+  record.humanColor = 'w'; // the player was white: black's blunder is the opponent's
+  controller._collectMistakes(record, fakeAnalysis(record));
+  assert.equal(mistakes.all.length, 0);
+});
+
+test('online games remember which side the player was on', async (t) => {
+  const { controller } = harness(t);
+  controller.onlineRole = 'player';
+  controller.onlineSide = 'b';
+  const record = { moves: [] };
+  controller._addRecordExtras(record, {});
+  assert.equal(record.humanColor, 'b');
+  const spectator = { moves: [] };
+  controller.onlineRole = 'spectator';
+  controller._addRecordExtras(spectator, {});
+  assert.equal(spectator.humanColor, undefined);
+});
+
+test('a practice session asks for the due mistakes, turns the board to the mover and records each answer', async (t) => {
+  const { controller, mistakes, sets } = harness(t);
+  const record = parsePgn(BLUNDER_GAME).record;
+  record.humanColor = 'b';
+  mistakes.addFromAnalysis(fakeAnalysis(record), 'b', 'g1');
+  const id = mistakes.all[0].id;
+
+  const started = await controller.startMistakePractice();
+  assert.deepEqual([started.ok, started.count], [true, 1]);
+  assert.equal(controller._practice !== null, true);
+  assert.equal(controller._reviewActive, true);
+  assert.equal(controller.orientation, 'black', 'black is to move in that position');
+  assert.match(document.querySelector('[data-coach]').textContent, /ทบทวนตาพลาด/u);
+  assert.match(document.querySelector('[data-coach]').textContent, /ครั้งก่อนตรงนี้คุณเดิน Nf6/u);
+
+  const puzzle = sets.at(-1);
+  assert.equal(puzzle.fen, mistakes.all[0].fen);
+  await puzzle.movable.events.after('g7', 'g6'); // an alternative the engine rates equally
+  const after = mistakes.all.find((m) => m.id === id);
+  assert.equal(after.box, 1, 'solved: up a box');
+  assert.equal(after.solved, 1);
+  assert.match(document.querySelector('[data-coach]').textContent, /ทบทวนได้ 1\/1/u, 'the summary is shown at the end of the batch');
+});
+
+test('a wrong answer sends the mistake back to the start of the schedule', async (t) => {
+  const { controller, mistakes, sets } = harness(t);
+  const record = parsePgn(BLUNDER_GAME).record;
+  mistakes.addFromAnalysis(fakeAnalysis(record), 'b', 'g1');
+  await controller.startMistakePractice();
+  await sets.at(-1).movable.events.after('a7', 'a6');
+  await sleep(1400); // the opponent's answer lands after a short beat, then the miss is recorded
+  assert.equal(mistakes.all[0].box, 0);
+  assert.equal(mistakes.all[0].missed, 1);
+});
+
+test('nothing due: practice says so, and "ahead" still works while there are unmastered mistakes', async (t) => {
+  const { controller, mistakes } = harness(t);
+  assert.equal((await controller.startMistakePractice()).ok, false);
+  assert.equal((await controller.startMistakePractice({ ahead: true })).ok, false);
+  const record = parsePgn(BLUNDER_GAME).record;
+  mistakes.addFromAnalysis(fakeAnalysis(record), 'b', 'g1');
+  mistakes.record(mistakes.all[0].id, true); // not due for a day
+  assert.equal((await controller.startMistakePractice()).error, 'ตอนนี้ยังไม่มีตาพลาดที่ถึงเวลาทบทวน');
+  const ahead = await controller.startMistakePractice({ ahead: true });
+  assert.equal(ahead.ok, true);
+});
+
+test('leaving a practice session goes home, not to a game-over card', async (t) => {
+  const { controller, mistakes, calls } = harness(t);
+  mistakes.addFromAnalysis(fakeAnalysis(parsePgn(BLUNDER_GAME).record), 'b', 'g1');
+  await controller.startMistakePractice();
+  const homeBefore = calls.home;
+  const gameOversBefore = calls.gameOvers.length;
+  controller.exitReview();
+  assert.equal(controller._practice, null);
+  assert.equal(controller._reviewActive, false);
+  assert.equal(calls.home, homeBefore + 1);
+  assert.equal(calls.gameOvers.length, gameOversBefore);
+});
+
+test('flipping the board in the middle of a practice puzzle does not end the session', async (t) => {
+  const { controller, mistakes } = harness(t);
+  mistakes.addFromAnalysis(fakeAnalysis(parsePgn(BLUNDER_GAME).record), 'b', 'g1');
+  await controller.startMistakePractice();
+  controller.flip();
+  controller.flip();
+  assert.ok(controller.reviewUI._puzzleRun, 'the run is still on');
+  assert.match(document.querySelector('[data-coach]').textContent, /ทบทวนตาพลาด/u);
 });

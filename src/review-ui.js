@@ -518,10 +518,9 @@ export class ReviewUI {
    *  unlocked retry board soft-locked the stepper. */
   rerender() {
     if (!this._analysis || !this._controller) return;
-    if (this._retry || this._puzzleRun) {
-      this._endRetry(false);
-      this._puzzleRun = null;
-    }
+    // A retry / puzzle run in progress keeps going: the board has already turned
+    // and the card needs nothing from the move list (flipping used to end the run).
+    if (this._retry || this._puzzleRun) return;
     this.renderStepperPly(this._viewPly);
   }
 
@@ -1181,7 +1180,14 @@ export class ReviewUI {
   // A scored pass over every retryable ply: correct move = +1; wrong move = the
   // simulated opponent answers on the board, the solution is revealed, then the
   // run advances. One engine worker serves the whole run.
-  startPuzzleRun() {
+  /**
+   * @param {object} [opts]
+   * @param {(plyIndex: number, solved: boolean) => void} [opts.onResult]  called after each puzzle
+   * @param {boolean} [opts.autoOrient]  turn the board to the side that must move (puzzles from many games)
+   * @param {{onAnother: () => void, onExit: () => void, remaining: () => number}|null} [opts.practice]
+   *        set for a session from the mistake bank: changes the wording and the way out
+   */
+  startPuzzleRun({ onResult = null, autoOrient = false, practice = null } = {}) {
     if (!this._analysis || !this._controller) return;
     this.stopAutoplayIfRunning();
     this._stopSimLine();
@@ -1190,6 +1196,12 @@ export class ReviewUI {
       .filter((p) => RETRYABLE_TIERS.has(p.tier) && p.bestMove)
       .map((p) => p.ply);
     if (!plies.length) return;
+    if (practice && this._panel) {
+      // A session from the mistake bank has no game to step through.
+      this._panel.classList.add('practice');
+      this._panel.querySelector('.review-mode-tag').lastChild.textContent = ' ทบทวนตาพลาด';
+      this._panel.querySelector('[data-exit]').textContent = 'กลับหน้าหลัก';
+    }
     this._puzzleRun = {
       plies,
       index: -1,
@@ -1199,6 +1211,9 @@ export class ReviewUI {
       results: [],
       lastPlyIndex: 0,
       storedBest: 0,
+      onResult,
+      autoOrient,
+      practice,
     };
     this._nextPuzzle();
   }
@@ -1223,6 +1238,10 @@ export class ReviewUI {
       return;
     }
     run.lastPlyIndex = plyIndex;
+    if (run.autoOrient) {
+      const mover = scratch.turn() === 'w' ? 'white' : 'black';
+      if (this._controller.orientation !== mover) this._controller.flip();
+    }
     this._retry = {
       plyIndex,
       onResolved: null,
@@ -1252,6 +1271,9 @@ export class ReviewUI {
       run.streak = 0;
     }
     run.results.push({ ply: run.plies[run.index], solved });
+    try {
+      run.onResult?.(run.plies[run.index], solved);
+    } catch { /* a bookkeeping failure must not break the puzzle flow */ }
   }
 
   _endPuzzleRun() {
@@ -1280,7 +1302,7 @@ export class ReviewUI {
     const retry = this._retry;
     const head = run.done
       ? 'จบการฝึก!'
-      : `${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด · ข้อ ${run.index + 1}/${total}`;
+      : `${glyph(iconTarget, 16)} ${run.practice ? 'ทบทวนตาพลาด' : 'ฝึกแก้ตาพลาด'} · ข้อ ${run.index + 1}/${total}`;
     const scoreLine = `คะแนน ${run.score} · สตรีค ${run.streak}`;
     let body = '';
     let actions = '';
@@ -1288,10 +1310,13 @@ export class ReviewUI {
       const mover = retry?.userColor === 'white' ? 'ขาว' : 'ดำ';
       const tier = retry ? TIER_BY_KEY[retry.ply.tier] : null;
       const moveNo = Math.floor((retry?.plyIndex ?? 0) / 2) + 1;
+      const asked = run.practice
+        ? `ครั้งก่อนตรงนี้คุณเดิน ${escapeHtml(retry?.ply.san ?? '?')}`
+        : `ตาที่ ${moveNo} คุณเดิน ${escapeHtml(retry?.ply.san ?? '?')}`;
       body = `
         <div class="coach-head">${head}</div>
         <div class="coach-tag">${scoreLine}</div>
-        <p class="coach-explanation">ตาที่ ${moveNo} คุณเดิน ${retry?.ply.san ?? '?'}
+        <p class="coach-explanation">${asked}
         <span style="color:${tier?.color ?? 'inherit'}">${tierSymbol(tier)}</span>
         — ลากหมาก${mover}ลองหาตาที่ดีที่สุด</p>`;
       actions = `
@@ -1332,12 +1357,23 @@ export class ReviewUI {
         <div class="retry-feedback">
           <b>ไม่ใช่ตาที่ดีที่สุด</b> — คำตอบคือ <b>${answer}</b>.${replyPart}
           ${rest}
-          <div class="retry-hint">จำเส้นนี้ไว้ แล้วไปข้อถัดไป</div>
+          <div class="retry-hint">${run.practice ? 'ตานี้จะกลับมาถามอีกในชุดถัดไป — จำเส้นนี้ไว้' : 'จำเส้นนี้ไว้ แล้วไปข้อถัดไป'}</div>
         </div>`;
       actions = `
         <div class="retry-actions">
           <button class="btn primary" type="button" data-next>ข้อถัดไป →</button>
           <button class="btn" type="button" data-finish>จบการฝึก</button>
+        </div>`;
+    } else if (phase === 'summary' && run.practice) {
+      const left = run.practice.remaining();
+      body = `
+        <div class="coach-head">${head}</div>
+        <div class="retry-feedback success">ทบทวนได้ ${run.score}/${total} · สตรีคยาวสุด ${run.bestStreak}</div>
+        <div class="retry-hint">${left > 0 ? `ยังมีอีก ${left} ตาที่ถึงเวลาทบทวน` : 'ทบทวนครบทุกตาที่ถึงกำหนดแล้ว — เก่งมาก!'}</div>`;
+      actions = `
+        <div class="retry-actions">
+          ${left > 0 ? `<button class="btn primary" type="button" data-practice-more>${glyph(iconRefresh)} ทบทวนต่ออีกชุด</button>` : ''}
+          <button class="btn ${left > 0 ? '' : 'primary'}" type="button" data-practice-exit>กลับหน้าหลัก</button>
         </div>`;
     } else if (phase === 'summary') {
       body = `
@@ -1365,6 +1401,8 @@ export class ReviewUI {
     card.querySelector('[data-next]')?.addEventListener('click', () => this._nextPuzzle());
     card.querySelector('[data-finish]')?.addEventListener('click', () => this._endPuzzleRun());
     card.querySelector('[data-run-restart]')?.addEventListener('click', () => this.startPuzzleRun());
+    card.querySelector('[data-practice-more]')?.addEventListener('click', () => run.practice?.onAnother());
+    card.querySelector('[data-practice-exit]')?.addEventListener('click', () => run.practice?.onExit());
     card.querySelector('[data-run-review]')?.addEventListener('click', () => {
       const lastPlyIndex = run.lastPlyIndex ?? 0;
       this._puzzleRun = null;

@@ -181,6 +181,11 @@ export function iconClose(opts) {
   return svg('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>', opts);
 }
 
+/** "=" — a draw. */
+export function iconEqual(opts) {
+  return svg('<line x1="5" y1="9" x2="19" y2="9"/><line x1="5" y1="15" x2="19" y2="15"/>', opts);
+}
+
 export function iconMinus(opts) {
   return svg('<line x1="5" y1="12" x2="19" y2="12"/>', opts);
 }

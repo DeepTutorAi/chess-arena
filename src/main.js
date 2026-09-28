@@ -21,6 +21,9 @@ import {
 import { createLobbyView } from './lobby.js';
 import { createProfileView } from './profile-ui.js';
 import { createHistoryView, createImportView } from './history-ui.js';
+import { createOnlineActionRows } from './online-actions.js';
+import { DEFAULT_QUICK_TIME, QUICK_PLAY_KEY, QUICK_TIMES, isQuickTime, quickPlayRoom, runQuickPlay } from './quickplay.js';
+import { createQuickPlayView } from './quickplay-ui.js';
 import { shareTokenFromHash } from './pgn.js';
 import { sounds } from './sounds.js';
 import { iconBolt, iconHome, iconSound, iconMute, iconFlag, iconArrowRight } from './icons.js';
@@ -752,11 +755,19 @@ ui.refs.brandHome.onclick = () => controller.goHome();
 ui.refs.profileBtn.onclick = () => {
   const { stats } = controller;
   stats.reload(); // another tab may have played since this one loaded
+  controller.mistakes.reload();
   const modal = ui.openModal('โปรไฟล์และสถิติ', createProfileView({
     document,
     stats,
     levels: LEVELS,
+    mistakes: controller.mistakes,
+    history: controller.history,
     confirm: (message) => window.confirm(message),
+    onPractice: async (options) => {
+      modal.close();
+      const result = await controller.startMistakePractice(options);
+      if (!result.ok) ui.showFloatingToast({ title: 'ทบทวนไม่ได้', detail: result.error, actions: [['ตกลง']] });
+    },
     onPlayLevel: (level) => {
       modal.close();
       openModeDialog(MODES.HUMAN_VS_AI, { level });
@@ -801,6 +812,64 @@ function openHistoryDialog() {
 }
 
 ui.refs.historyBtn.onclick = () => openHistoryDialog();
+
+function openQuickPlayDialog() {
+  const browseClient = new OnlineRoomClient();
+  const savedTime = localStorage.getItem(QUICK_PLAY_KEY);
+  let cancelled = false;
+  const remember = (roomId, title, hostName, status) => saveRoom({
+    id: roomId, roomId, kind: 'online', title, hostName, status, createdAt: Date.now(),
+  });
+  const view = createQuickPlayView({
+    document,
+    apiReady: Boolean(getOnlineApiUrl()),
+    profile: {
+      name: localStorage.getItem(PLAYER_NAME_KEY) || '',
+      avatar: localStorage.getItem('chess-arena-player-avatar') || 'knight',
+    },
+    times: QUICK_TIMES,
+    timeControlId: isQuickTime(savedTime) ? savedTime : DEFAULT_QUICK_TIME,
+    onCancel: () => { cancelled = true; },
+    onStart: async ({ playerName, avatar, timeControlId }) => {
+      cancelled = false;
+      storeLocal(PLAYER_NAME_KEY, playerName);
+      storeLocal('chess-arena-player-avatar', avatar);
+      storeLocal(QUICK_PLAY_KEY, timeControlId);
+      const stored = getRooms();
+      const ownRoomIds = (Array.isArray(stored) ? stored : [])
+        .filter((room) => room.kind === 'online' && room.roomId && room.status === 'WAITING')
+        .map((room) => room.roomId);
+      try {
+        const result = await runQuickPlay({
+          listLobby: (filters) => browseClient.listLobby(filters),
+          join: async (room) => {
+            await controller.start(MODES.ONLINE, { action: 'joinPublic', roomId: room.roomId, playerName, avatar });
+            remember(room.roomId, room.title, room.host?.name || 'ผู้เล่นออนไลน์', 'ACTIVE');
+          },
+          create: async () => {
+            await controller.start(MODES.ONLINE, quickPlayRoom({ playerName, avatar, timeControlId }));
+            remember(controller.onlineRoomId, 'Quick Play', playerName, 'WAITING');
+          },
+        }, { timeControlId, ownRoomIds, cancelled: () => cancelled });
+        if (result.outcome === 'cancelled') return { ok: true };
+        modal.close();
+        if (result.outcome === 'created') {
+          ui.showFloatingToast({
+            title: 'เปิดโต๊ะรอคู่แข่งแล้ว',
+            detail: 'ยังไม่มีโต๊ะว่าง — ผู้เล่นที่กด Quick Play ต่อไปจะเข้ามานั่งเอง',
+            autoCloseMs: 6000,
+          });
+        }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, message: error.message };
+      }
+    },
+  });
+  const modal = ui.openModal('เล่นด่วน · Quick Play', view);
+}
+
+ui.refs.heroQuickBtn.onclick = () => openQuickPlayDialog();
 
 ui.refs.heroCreateBtn.onclick = () => openModeDialog();
 ui.refs.heroJoinBtn.onclick = () => openJoinDialog();
@@ -912,7 +981,25 @@ function openOptionsDialog() {
     body.append(strongRow);
   }
 
-  body.append(soundRow, resignRow);
+  body.append(soundRow);
+  // Online players: draw offers, takebacks and (in the first moves) abort.
+  body.append(...createOnlineActionRows({
+    document,
+    availability: controller.onlineActionAvailability(),
+    close: () => modal.close(),
+    actions: {
+      abort: () => controller.abortOnlineGame(),
+      drawOffer: () => controller.offerDraw(),
+      drawAccept: () => controller.acceptDraw(),
+      drawDecline: () => controller.declineDraw(),
+      drawCancel: () => controller.cancelDraw(),
+      takebackRequest: () => controller.requestTakeback(),
+      takebackAccept: () => controller.acceptTakeback(),
+      takebackDecline: () => controller.declineTakeback(),
+      takebackCancel: () => controller.cancelTakeback(),
+    },
+  }));
+  body.append(resignRow);
   const modal = ui.openModal('ตัวเลือกของเกม (Options)', body);
 }
 ui.refs.btnShare.onclick = () => {

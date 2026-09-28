@@ -122,3 +122,11 @@ test('a rematch reset and later moves do not replay stale sounds', async (t) => 
   controller._onOnlineState(stateAfter(['d2d4'], { revision: 11 }));
   assert.deepEqual(played, ['move'], 'first move of the new game is heard');
 });
+
+test('a takeback is heard as a move, a rematch reset is not', async (t) => {
+  const { controller, played } = await startOnline(t, stateAfter(['e2e4']));
+  controller._onOnlineState(stateAfter(['e2e4', 'e7e5'], { revision: 3 }));
+  played.length = 0;
+  controller._onOnlineState(stateAfter(['e2e4'], { revision: 4 })); // black's e5 taken back
+  assert.deepEqual(played, ['move']);
+});

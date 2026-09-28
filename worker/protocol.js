@@ -14,6 +14,12 @@ export const VISIBILITIES = Object.freeze(['public', 'private']);
 export const LOBBY_STATUSES = Object.freeze(['all', 'open', 'watch']);
 export const LOBBY_TIMES = Object.freeze(['all', 'bullet', 'blitz', 'rapid', 'unlimited']);
 
+// Draw offers and takebacks: offer / accept / decline / withdraw, all bare commands.
+export const OFFER_COMMANDS = Object.freeze([
+  'draw-offer', 'draw-accept', 'draw-decline', 'draw-cancel',
+  'takeback-request', 'takeback-accept', 'takeback-decline', 'takeback-cancel',
+]);
+
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 const SQUARE_PATTERN = /^[a-h][1-8]$/u;
 
@@ -145,10 +151,16 @@ export function parseSocketCommand(input) {
     return { ok: true, value: { type: value.type, visibility: value.visibility } };
   }
 
-  if (value.type === 'resign') {
+  if (value.type === 'resign' || value.type === 'abort') {
     if (!hasOnlyKeys(value, ['type', 'expectedRevision'])) return invalid();
     if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) return invalid();
-    return { ok: true, value: { type: 'resign', expectedRevision: value.expectedRevision } };
+    return { ok: true, value: { type: value.type, expectedRevision: value.expectedRevision } };
+  }
+
+  if (OFFER_COMMANDS.includes(value.type)) {
+    if (!hasOnlyKeys(value, ['type', 'expectedRevision'])) return invalid();
+    if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) return invalid();
+    return { ok: true, value: { type: value.type, expectedRevision: value.expectedRevision } };
   }
 
   if (value.type === 'rematch-request' || value.type === 'rematch-accept' || value.type === 'rematch-decline') {

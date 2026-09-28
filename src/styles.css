@@ -255,6 +255,40 @@ body {
 
 /* PARK HERO CARDS (CREATE GAME / JOIN GAME) */
 
+.park-quick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 14px auto 0;
+  padding: 10px 20px;
+  max-width: 100%;
+  background: rgba(38, 36, 33, 0.85);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.park-quick-btn:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.park-quick-btn .svg-icon {
+  flex: none;
+}
+
+.quick-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(460px, 100%);
+}
+
 .park-hero-cards {
   display: flex;
   gap: 28px;
@@ -1954,6 +1988,13 @@ input[type='range'] {
   transition: all 0.18s ease;
 }
 
+.option-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .option-item-card:hover {
   border-color: rgba(255, 255, 255, 0.2);
   background: #2b2824;
@@ -2546,6 +2587,16 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
 .coach-tag { font-size: 10.5px; color: var(--muted); margin: 3px 0 8px; letter-spacing: 0.5px; text-transform: uppercase; }
 .coach-compare { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
 .coach-better b { color: var(--accent); }
+.review-panel.practice .review-overview,
+.review-panel.practice .review-movelist,
+.review-panel.practice .stepper-controls {
+  display: none;
+}
+
+.review-panel.practice .coach-card {
+  margin-top: auto;
+}
+
 .coach-reasons {
   margin: 6px 0 0;
   padding: 0 0 0 18px;

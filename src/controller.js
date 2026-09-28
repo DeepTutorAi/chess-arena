@@ -14,6 +14,8 @@ import { bookPlies, getBotBook } from './botbook.js';
 import { createTurnAlert } from './turnalert.js';
 import { MIN_RATED_PLIES, createStatsStore } from './stats.js';
 import { createHistoryStore } from './history.js';
+import { createMistakeBank, practiceAnalysis } from './mistakes.js';
+import { onlineActionAvailability } from './online-actions.js';
 import { ImportError, decodeShareToken, encodeShareToken, parseImport, recordToPgn } from './pgn.js';
 import { copyText, downloadTextFile, pgnFilename, shareUrl } from './share-ui.js';
 import { sounds } from './sounds.js';
@@ -49,6 +51,7 @@ export class Controller {
     loadBotBook = getBotBook,
     stats = createStatsStore({ levelRating, levelCount: LEVELS.length }),
     history = createHistoryStore(),
+    mistakes = createMistakeBank(),
     shareTools = { download: downloadTextFile, copy: copyText, url: shareUrl },
   }) {
     this.ui = ui;
@@ -57,6 +60,8 @@ export class Controller {
     this._gameOverDelayMs = gameOverDelayMs;
     this.turnAlert = turnAlert; // blinks the tab title when it is our turn in a hidden tab
     this.history = history; // finished games kept in this browser (src/history.js)
+    this.mistakes = mistakes; // the player's own mistakes, asked again on a schedule (src/mistakes.js)
+    this._practice = null;    // set during a session from the mistake bank
     this.shareTools = shareTools;
     this._historySlot = { id: null, saving: null }; // this game's history entry (see _saveToHistory)
     this._importedRecord = null; // set while a game opened from history / a link is on screen
@@ -86,6 +91,8 @@ export class Controller {
     this._onlineClockTimer = null;
     this._onlineAfkTimer = null;
     this._onlinePlyCount = null; // plies in the last accepted snapshot (null = none yet)
+    this._offerPrompt = null;    // toast asking us to answer a draw offer / takeback request
+    this._offerPromptKey = null;
     this.clock = null;
 
     this.engineReady = false;
@@ -158,6 +165,7 @@ export class Controller {
     this._statsNote = ''; // rating line appended to the game-over card
     this._historySlot = { id: null, saving: null }; // a fresh game gets a fresh entry
     this._importedRecord = null;
+    this._practice = null;
 
     const initialFen = opts.initialFen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     try {
@@ -723,6 +731,9 @@ export class Controller {
     this.onlineWatchInviteToken = null;
     this.onlineConnectionState = 'disconnected';
     this._onlinePlyCount = null;
+    if (this._offerPrompt?.isConnected) this._offerPrompt.remove();
+    this._offerPrompt = null;
+    this._offerPromptKey = null;
     this.engineReady = false;
     this.engineBusy = false;
     this.hintBusy = false;
@@ -999,8 +1010,10 @@ export class Controller {
 
     const wasFinished = this.onlineState?.status === 'finished';
 
+    const previousState = this.onlineState;
     this.onlineState = state;
-    this._playOnlineMoveSound(state);
+    this._playOnlineMoveSound(state, previousState);
+    this._syncOnlineOffers(previousState, state);
     // Rematch handshake (roadmap B): remember the live offer for the game-over
     // card, even while review owns the screen.
     this._onlineRematch = state.rematch ?? null;
@@ -1031,6 +1044,10 @@ export class Controller {
         this._finishReviewSession();
       }
       this.ui.log('รีเมตช์ได้รับการยอมรับ — เริ่มเกมใหม่แล้ว (สลับฝั่งกัน)', 'sys');
+    }
+    // A takeback shortens the game: snapshots of plies that no longer exist go.
+    while (this._clockSnapshots.length && this._clockSnapshots[this._clockSnapshots.length - 1].ply > state.moves.length) {
+      this._clockSnapshots.pop();
     }
     // Server clock truth at this revision — the review replay replays these.
     if (state.clock) {
@@ -1090,9 +1107,16 @@ export class Controller {
    *  makes noise: not the first snapshot (join / resume), not a rematch reset,
    *  not a game-ending move (the result sound covers that) and not while the
    *  review owns the screen. */
-  _playOnlineMoveSound(state) {
+  _playOnlineMoveSound(state, previousState = null) {
     const previous = this._onlinePlyCount;
     this._onlinePlyCount = state.moves.length;
+    // A takeback (one ply fewer in a game that was live) is heard as a move;
+    // a rematch reset (a finished game restarting at move 0) stays silent.
+    if (previous !== null && previousState?.status === 'active' && state.status === 'active'
+      && state.moves.length === previous - 1 && !this._reviewActive) {
+      sounds.play('move');
+      return;
+    }
     if (previous === null || state.moves.length <= previous) return;
     if (state.status !== 'active' || this._reviewActive) return;
     const last = this.game.history({ verbose: true }).at(-1);
@@ -1127,6 +1151,85 @@ export class Controller {
     }
     if (offer) return { mode: 'waiting' };
     return { mode: 'request', onRequest: () => this.online?.requestRematch(revision) };
+  }
+
+  // ---- draw offers, takebacks, abort (roadmap D2) ---------------------------------
+
+  /** Which of those the local player may use right now (null: not in a live game). */
+  onlineActionAvailability() {
+    if (this.mode !== MODES.ONLINE || this.onlineRole === 'spectator') return null;
+    return onlineActionAvailability(this.onlineState, this.onlineSide);
+  }
+
+  _sendOnlineAction(method, feedback) {
+    if (!this.online || !this.onlineState) return false;
+    try {
+      this.online[method](this.onlineState.revision);
+    } catch (err) {
+      this.ui.log(`ส่งคำสั่งไม่สำเร็จ: ${err.message}`, 'err');
+      return false;
+    }
+    if (feedback) this.ui.showFloatingToast?.({ ...feedback, autoCloseMs: 3000 });
+    return true;
+  }
+
+  abortOnlineGame() { return this._sendOnlineAction('abort'); }
+  offerDraw() { return this._sendOnlineAction('drawOffer', { title: 'ส่งข้อเสนอเสมอแล้ว', detail: 'รอคำตอบจากฝ่ายตรงข้าม' }); }
+  acceptDraw() { return this._sendOnlineAction('drawAccept'); }
+  declineDraw() { return this._sendOnlineAction('drawDecline'); }
+  cancelDraw() { return this._sendOnlineAction('drawCancel'); }
+  requestTakeback() { return this._sendOnlineAction('takebackRequest', { title: 'ส่งคำขอย้อนตาแล้ว', detail: 'รอคำตอบจากฝ่ายตรงข้าม' }); }
+  acceptTakeback() { return this._sendOnlineAction('takebackAccept'); }
+  declineTakeback() { return this._sendOnlineAction('takebackDecline'); }
+  cancelTakeback() { return this._sendOnlineAction('takebackCancel'); }
+
+  /**
+   * React to draw offers / takeback requests in a new snapshot: a prompt for an
+   * incoming one (accept / decline), and a note when one of OUR requests was
+   * answered. Called for every accepted snapshot, review or not.
+   */
+  _syncOnlineOffers(previous, state) {
+    if (this.onlineRole === 'spectator' || (this.onlineSide !== 'w' && this.onlineSide !== 'b')) return;
+    const me = this.onlineSide;
+    const live = state.status === 'active';
+
+    // Our own request was answered?
+    if (previous?.status === 'active') {
+      if (previous.drawOffer?.by === me && !state.drawOffer && live && state.moves.length === previous.moves.length) {
+        this.ui.showFloatingToast?.({ title: 'ฝ่ายตรงข้ามปฏิเสธข้อเสนอเสมอ', detail: 'เดินหมากต่อ — ขอใหม่ได้หลังเดินอีกตา', autoCloseMs: 4000 });
+      }
+      if (previous.takebackOffer?.by === me && !state.takebackOffer && live) {
+        // Fewer plies: accepted. The same number: declined. More: the opponent simply moved on.
+        const answer = state.moves.length < previous.moves.length
+          ? { title: 'ฝ่ายตรงข้ามยอมให้ย้อนตา', detail: 'เดินตาของคุณใหม่ได้เลย', autoCloseMs: 4000 }
+          : state.moves.length === previous.moves.length
+            ? { title: 'ฝ่ายตรงข้ามไม่ยอมให้ย้อนตา', detail: 'เดินหมากต่อ', autoCloseMs: 4000 }
+            : null;
+        if (answer) this.ui.showFloatingToast?.(answer);
+      }
+    }
+
+    // An incoming request: one prompt at a time, the draw first.
+    const draw = live && state.drawOffer && state.drawOffer.by !== me ? state.drawOffer : null;
+    const takeback = live && state.takebackOffer && state.takebackOffer.by !== me ? state.takebackOffer : null;
+    // An offer belongs to one position (any move clears it), so who + how many plies identifies it.
+    const key = draw ? `draw:${draw.by}:${state.moves.length}` : takeback ? `takeback:${takeback.by}:${state.moves.length}` : null;
+    if (key === this._offerPromptKey) return;
+    if (this._offerPrompt?.isConnected) this._offerPrompt.remove();
+    this._offerPrompt = null;
+    this._offerPromptKey = key;
+    if (!key) return;
+    this._offerPrompt = draw
+      ? this.ui.showFloatingToast?.({
+        title: 'ฝ่ายตรงข้ามเสนอเสมอ',
+        detail: 'ยอมรับเพื่อจบเกมเสมอ หรือปฏิเสธแล้วเล่นต่อ',
+        actions: [['ยอมรับ', () => this.acceptDraw(), true], ['ปฏิเสธ', () => this.declineDraw()]],
+      })
+      : this.ui.showFloatingToast?.({
+        title: 'ฝ่ายตรงข้ามขอย้อนตา',
+        detail: 'ขอเดินตาล่าสุดของเขาใหม่ — ยอมรับหรือไม่?',
+        actions: [['ยอมรับ', () => this.acceptTakeback(), true], ['ปฏิเสธ', () => this.declineTakeback()]],
+      });
   }
 
   /** Non-blocking toast while review owns the screen (roadmap B). */
@@ -1209,19 +1312,23 @@ export class Controller {
     }
     if (this._overPopupShown) return;
     this._overPopupShown = true;
+    const aborted = state.reason === 'aborted';
     const draw = state.result === '1/2-1/2';
-    const won = !draw && ((state.result === '1-0' && this.onlineSide === 'w') || (state.result === '0-1' && this.onlineSide === 'b'));
-    const title = this.onlineRole === 'spectator' ? 'เกมจบแล้ว' : draw ? 'เสมอกัน' : won ? 'คุณชนะ' : 'คุณแพ้';
+    const won = !draw && !aborted && ((state.result === '1-0' && this.onlineSide === 'w') || (state.result === '0-1' && this.onlineSide === 'b'));
+    const title = aborted ? 'ยกเลิกเกมแล้ว'
+      : this.onlineRole === 'spectator' ? 'เกมจบแล้ว' : draw ? 'เสมอกัน' : won ? 'คุณชนะ' : 'คุณแพ้';
     const reasons = {
       checkmate: 'รุกฆาต',
       draw: 'เสมอตามกติกา',
+      agreement: 'ตกลงเสมอกัน',
+      aborted: 'ยกเลิกเกมตั้งแต่ต้น — ไม่มีผู้แพ้ผู้ชนะ',
       resignation: 'มีผู้เล่นยอมแพ้',
       timeout: 'หมดเวลา',
       opening_afk_timeout: 'ไม่เดินหมากทันเวลาในช่วงเปิดเกม',
       unlimited_afk_timeout: 'หมดเวลานับถอยหลัง AFK',
       unlimited_afk_strikes: 'AFK ครบ 3 ครั้ง',
     };
-    const detail = `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
+    const detail = aborted ? reasons.aborted : `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
     this.ui.setStatus(`จบเกม · ${title}`, 'done');
     this.ui.log(`จบเกมออนไลน์: ${title} — ${detail}`, 'sys');
     this.turnAlert?.notify(`จบเกม · ${title}`);
@@ -1235,7 +1342,7 @@ export class Controller {
     });
     this._showGameOverSoon(title, detail);
     const afkResult = ['opening_afk_timeout', 'unlimited_afk_timeout', 'unlimited_afk_strikes'].includes(state.reason);
-    sounds.play(afkResult ? 'afk' : draw ? 'draw' : won ? 'victory' : 'lose');
+    sounds.play(afkResult ? 'afk' : (draw || aborted) ? 'draw' : won ? 'victory' : 'lose');
   }
 
   // ------------------------------------------------------------------ game review
@@ -1315,6 +1422,9 @@ export class Controller {
   /** Who the bot was and the time control — what a PGN header and the history list need. */
   _addRecordExtras(record, fromState) {
     record.playedAt ??= Date.now();
+    if (fromState && this.onlineRole !== 'spectator' && (this.onlineSide === 'w' || this.onlineSide === 'b')) {
+      record.humanColor = this.onlineSide; // whose mistakes are "mine" in an online game
+    }
     if (!fromState && this.mode === MODES.HUMAN_VS_AI) {
       record.botLevel = this.levelIndex + 1;
       record.humanColor = this.humanSide;
@@ -1333,12 +1443,58 @@ export class Controller {
     // Bot-vs-bot matches are entertainment: kept out so they can never push a
     // player's own games out of the 200-game history.
     if (!this.history || this._importedRecord || this.mode === MODES.ANALYZE || this.mode === MODES.AI_VS_AI) return;
+    if ((record.moves?.length ?? 0) < 2) return; // an abandoned start is not a game worth keeping
     const source = fromState ? 'online' : 'bot';
     const slot = this._historySlot;
     slot.saving = Promise.resolve(slot.saving)
       .then(() => this.history.save({ id: slot.id, record, source }))
       .then((id) => { slot.id = id; return id; })
       .catch(() => slot.id);
+  }
+
+  /** File the player's own mistakes from a finished review into the mistake bank. */
+  _collectMistakes(record, analysis, { quiet = false } = {}) {
+    if (!this.mistakes || !record?.humanColor) return; // imports and arena games: whose mistakes?
+    let added = 0;
+    try {
+      added = this.mistakes.addFromAnalysis(analysis, record.humanColor, this._historySlot.id);
+    } catch { return; }
+    if (added > 0 && !quiet) {
+      this.ui.showFloatingToast?.({
+        title: `เพิ่ม ${added} ตาพลาดเข้าคลังทบทวน`,
+        detail: 'จะถามซ้ำตามตารางเวลา — เริ่มทบทวนได้จากโปรไฟล์ของคุณ',
+        autoCloseMs: 4000,
+      });
+    }
+  }
+
+  /**
+   * A practice session over the mistakes that are due (or, when none are, the
+   * weakest ones). Each answer moves the mistake up or down the schedule.
+   * @returns {Promise<{ok: boolean, error?: string, count?: number}>}
+   */
+  async startMistakePractice({ ahead = false } = {}) {
+    const items = ahead ? this.mistakes.ahead() : this.mistakes.due();
+    if (!items.length) return { ok: false, error: ahead ? 'ไม่มีตาพลาดในคลัง' : 'ตอนนี้ยังไม่มีตาพลาดที่ถึงเวลาทบทวน' };
+    const analysis = practiceAnalysis(items);
+    await this.start(MODES.ANALYZE, {});
+    this._practice = { ahead };
+    this._analysis = analysis;
+    this._reviewActive = true;
+    this.reviewUI = this.reviewUI ?? new ReviewUI();
+    this.reviewUI.enterStepperMode(this, analysis, -1);
+    this.reviewUI.startPuzzleRun({
+      autoOrient: true,
+      onResult: (plyIndex, solved) => this.mistakes.record(items[plyIndex].id, solved),
+      practice: {
+        onAnother: () => this.startMistakePractice({ ahead }),
+        onExit: () => this.exitReview(),
+        remaining: () => this.mistakes.due().length,
+      },
+    });
+    this.reviewUI.hideEvalBar();
+    this.ui.setStatus('ทบทวนตาพลาด — ตาที่เคยพลาดจะถูกถามซ้ำตามตารางเวลา', '');
+    return { ok: true, count: items.length };
   }
 
   /** Remember the finished review with the saved game so it opens instantly next time. */
@@ -1437,6 +1593,7 @@ export class Controller {
     // Same finished game as last time: show the stored result straight away.
     if (this._lastAnalysis && this._lastAnalysisRecord === record) {
       this._analysis = this._lastAnalysis;
+      this._collectMistakes(record, this._lastAnalysis, { quiet: true });
       this._showReviewSummary(this._lastAnalysis);
       return;
     }
@@ -1468,6 +1625,7 @@ export class Controller {
         this._lastAnalysis = analysis;
         this._lastAnalysisRecord = record;
         this._persistAnalysis(record, analysis);
+        this._collectMistakes(record, analysis);
         this.reviewUI.closeProgressModal();
         this._showReviewSummary(analysis);
       })
@@ -1519,6 +1677,15 @@ export class Controller {
 
   exitReview() {
     if (!this._reviewActive) return;
+    if (this._practice) {
+      // A mistake-bank session has no game behind it: leaving goes home.
+      this.reviewUI?.exitStepperMode();
+      this.reviewUI?.hideEvalBar();
+      this._finishReviewSession();
+      this._practice = null;
+      this.goHome();
+      return;
+    }
     this.reviewUI?.exitStepperMode();
     this.reviewUI?.hideEvalBar();
     this._finishReviewSession();

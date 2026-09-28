@@ -1,4 +1,4 @@
-// Profile / statistics card (roadmap A5 / C2). Built from the local stats store
+// Profile / statistics card (roadmap A5 / C1 / C2). Built from the local stores
 // only — there are no accounts — so it is a plain DOM builder that takes its data
 // and callbacks as arguments and is easy to test.
 
@@ -21,12 +21,17 @@ function make(document, tag, className, text) {
  * @param {Document} opts.document
  * @param {ReturnType<import('./stats.js').createStatsStore>} opts.stats
  * @param {Array<{level: number, elo: number}>} opts.levels
+ * @param {ReturnType<import('./mistakes.js').createMistakeBank>} [opts.mistakes]  the mistake bank
+ * @param {ReturnType<import('./history.js').createHistoryStore>} [opts.history]  for the accuracy trend
  * @param {(level: number) => void} [opts.onPlayLevel]  start a bot game at a level
+ * @param {(options: {ahead: boolean}) => void} [opts.onPractice]  start a mistake-bank session
  * @param {() => void} [opts.onReset]  called after the player confirms a reset
  * @param {(message: string) => boolean} [opts.confirm]
  * @returns {HTMLElement}
  */
-export function createProfileView({ document, stats, levels, onPlayLevel, onReset, confirm = () => true }) {
+export function createProfileView({
+  document, stats, levels, mistakes = null, history = null, onPlayLevel, onPractice, onReset, confirm = () => true,
+}) {
   const root = make(document, 'div', 'profile-card');
 
   const results = stats.results;
@@ -89,6 +94,68 @@ export function createProfileView({ document, stats, levels, onPlayLevel, onRese
     root.append(recent);
   }
 
+  // -- accuracy trend of analysed games (arrives when the history has been read)
+  if (history) {
+    const trend = make(document, 'div', 'profile-trend');
+    trend.hidden = true;
+    root.append(trend);
+    Promise.resolve(history.list()).then((games) => {
+      const scores = games
+        .filter((g) => g.accuracy && (g.humanColor === 'w' || g.humanColor === 'b') && Number.isFinite(g.accuracy[g.humanColor]))
+        .slice(0, 20)
+        .reverse()
+        .map((g) => g.accuracy[g.humanColor]);
+      if (scores.length < 2) return;
+      const average = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+      trend.append(
+        make(document, 'h3', 'profile-heading', `ความแม่นยำในเกมที่รีวิว (${scores.length} เกมล่าสุด · เฉลี่ย ${average}%)`),
+        ratingSparkline(document, scores, `ความแม่นยำจาก ${scores[0]}% เป็น ${scores[scores.length - 1]}%`),
+      );
+      trend.hidden = false;
+    }, () => {});
+  }
+
+  // -- mistake bank
+  if (mistakes) {
+    const box = make(document, 'div', 'profile-mistakes');
+    box.append(make(document, 'h3', 'profile-heading', 'คลังตาพลาด · ทบทวนตามตารางเวลา'));
+    const info = mistakes.stats();
+    if (!info.total) {
+      box.append(make(document, 'p', 'dlg-hint', 'ยังไม่มีตาพลาดในคลัง — รีวิวเกมที่เล่นกับบอทหรือออนไลน์ ตาที่พลาดจะมาอยู่ที่นี่แล้วถามซ้ำจนจำได้'));
+    } else {
+      const grid = make(document, 'div', 'profile-totals');
+      for (const [label, value] of [['ในคลัง', info.total], ['ถึงเวลาทบทวน', info.due], ['จำได้แล้ว', info.mastered]]) {
+        const cell = make(document, 'div', 'profile-total');
+        cell.append(make(document, 'b', null, String(value)), make(document, 'span', null, label));
+        grid.append(cell);
+      }
+      grid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+      box.append(grid);
+      const row = make(document, 'div', 'dlg-actions');
+      if (info.due > 0) {
+        const go = make(document, 'button', 'btn primary', `ทบทวนตาพลาด (${Math.min(info.due, 10)} ข้อ)`);
+        go.type = 'button';
+        go.onclick = () => onPractice?.({ ahead: false });
+        row.append(go);
+      } else if (info.total > info.mastered) {
+        const ahead = make(document, 'button', 'btn', 'ยังไม่ถึงเวลา — ฝึกล่วงหน้า');
+        ahead.type = 'button';
+        ahead.onclick = () => onPractice?.({ ahead: true });
+        row.append(ahead);
+      }
+      const wipe = make(document, 'button', 'btn', 'ล้างคลัง');
+      wipe.type = 'button';
+      wipe.onclick = () => {
+        if (!confirm('ลบตาพลาดทั้งหมดในคลัง? ย้อนกลับไม่ได้')) return;
+        mistakes.clear();
+        onReset?.();
+      };
+      row.append(wipe);
+      box.append(row);
+    }
+    root.append(box);
+  }
+
   // -- next step
   const suggested = levels.find((l) => l.level === stats.suggestedLevel());
   const actions = make(document, 'div', 'dlg-actions');
@@ -113,8 +180,8 @@ export function createProfileView({ document, stats, levels, onPlayLevel, onRese
   return root;
 }
 
-/** Tiny inline SVG of the rating after each rated game. */
-function ratingSparkline(document, values) {
+/** Tiny inline SVG line through a series of numbers (rating, accuracy). */
+function ratingSparkline(document, values, label = null) {
   const svgNs = 'http://www.w3.org/2000/svg';
   const width = 260;
   const height = 48;
@@ -130,7 +197,7 @@ function ratingSparkline(document, values) {
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('class', 'profile-spark');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', `เรตติ้งจาก ${values[0]} เป็น ${values[values.length - 1]}`);
+  svg.setAttribute('aria-label', label ?? `เรตติ้งจาก ${values[0]} เป็น ${values[values.length - 1]}`);
   const line = document.createElementNS(svgNs, 'polyline');
   line.setAttribute('points', points.join(' '));
   line.setAttribute('fill', 'none');

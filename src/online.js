@@ -523,6 +523,20 @@ export class OnlineRoomClient {
     this.send({ type: 'resign', expectedRevision });
   }
 
+  abort(expectedRevision = this.state?.revision) {
+    this.send({ type: 'abort', expectedRevision });
+  }
+
+  /** Draw offers and takeback requests: offer / accept / decline / withdraw. */
+  drawOffer(expectedRevision = this.state?.revision) { this.send({ type: 'draw-offer', expectedRevision }); }
+  drawAccept(expectedRevision = this.state?.revision) { this.send({ type: 'draw-accept', expectedRevision }); }
+  drawDecline(expectedRevision = this.state?.revision) { this.send({ type: 'draw-decline', expectedRevision }); }
+  drawCancel(expectedRevision = this.state?.revision) { this.send({ type: 'draw-cancel', expectedRevision }); }
+  takebackRequest(expectedRevision = this.state?.revision) { this.send({ type: 'takeback-request', expectedRevision }); }
+  takebackAccept(expectedRevision = this.state?.revision) { this.send({ type: 'takeback-accept', expectedRevision }); }
+  takebackDecline(expectedRevision = this.state?.revision) { this.send({ type: 'takeback-decline', expectedRevision }); }
+  takebackCancel(expectedRevision = this.state?.revision) { this.send({ type: 'takeback-cancel', expectedRevision }); }
+
   requestRematch(expectedRevision = this.state?.revision) {
     this.send({ type: 'rematch-request', expectedRevision });
   }

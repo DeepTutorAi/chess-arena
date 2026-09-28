@@ -34,6 +34,41 @@ function gameOutcome(game) {
   return { result: '1/2-1/2', reason: 'draw' };
 }
 
+/** Draw offers and takeback requests belong to one position: whatever ends or
+ *  changes it clears them. (Old stored rooms lack the fields — read as none.) */
+function clearOffers(next) {
+  next.drawOffer = null;
+  next.takebackOffer = null;
+}
+
+function endGame(next, now) {
+  next.status = 'finished';
+  next.revision += 1;
+  next.updatedAt = now;
+  clearOffers(next);
+  if (next.clock) next.clock.activeSince = null;
+  if (next.afk) {
+    next.afk.openingDeadlineAt = null;
+    next.afk.episode = null;
+  }
+  return next;
+}
+
+/** Undo the last ply: board, turn and last-move markers rebuilt from the history. */
+function undoLastMove(next, now) {
+  next.moves.pop();
+  const game = gameFromState(next);
+  const history = game.history({ verbose: true });
+  const last = history.at(-1);
+  next.fen = game.fen();
+  next.turn = game.turn();
+  next.lastMove = last ? last.from + last.to + (last.promotion ?? '') : null;
+  next.lastMoveSan = last ? last.san : null;
+  next.revision += 1;
+  next.updatedAt = now;
+  return next;
+}
+
 function finishByTimeout(state, loser, now) {
   const next = copy(state);
   next.status = 'finished';
@@ -45,6 +80,7 @@ function finishByTimeout(state, loser, now) {
   next.updatedAt = now;
   next.clock[loser === 'w' ? 'whiteMs' : 'blackMs'] = 0;
   next.clock.activeSince = null;
+  clearOffers(next);
   if (next.afk) {
     next.afk.openingDeadlineAt = null;
     next.afk.episode = null;
@@ -99,6 +135,10 @@ export function createGameState(input, now = Date.now()) {
     clock,
     afk: null,
     rematch: null,
+    drawOffer: null,     // { by: 'w'|'b' } while a draw offer is open
+    drawBlock: null,     // color that may not offer again until it has moved (after a decline)
+    takebackOffer: null, // { by } while a takeback request is open
+    takebackBlock: null,
     createdAt: now,
     updatedAt: now,
     expiresAt: input.expiresAt,
@@ -163,6 +203,10 @@ export function resetForRematch(state, now = Date.now()) {
   }
   next.afk = createAfkState(next.timeControlId, now);
   next.rematch = null;
+  next.drawOffer = null;
+  next.drawBlock = null;
+  next.takebackOffer = null;
+  next.takebackBlock = null;
   return next;
 }
 
@@ -220,17 +264,121 @@ export function applyGameCommand(state, actor, command, now = Date.now()) {
 
   if (command.type === 'resign') {
     const next = copy(state);
-    next.status = 'finished';
     next.result = actor.color === 'w' ? '0-1' : '1-0';
     next.reason = 'resignation';
-    next.revision += 1;
-    next.updatedAt = now;
-    if (next.clock) next.clock.activeSince = null;
-    if (next.afk) {
-      next.afk.openingDeadlineAt = null;
-      next.afk.episode = null;
+    return { ok: true, state: endGame(next, now) };
+  }
+
+  // Abort: either player may cancel a game that has barely begun — nobody wins.
+  if (command.type === 'abort') {
+    if (state.moves.length >= 2) return error('too_late_to_abort', 'เดินไปแล้วยกเลิกเกมไม่ได้ — ใช้ยอมแพ้หรือขอเสมอแทน');
+    const next = copy(state);
+    next.result = '*';
+    next.reason = 'aborted';
+    return { ok: true, state: endGame(next, now) };
+  }
+
+  const other = actor.color === 'w' ? 'b' : 'w';
+
+  // Draw offers: offer / accept / decline / withdraw. Offering back at an open
+  // offer of the opponent's is an acceptance.
+  if (command.type.startsWith('draw-')) {
+    const offer = state.drawOffer ?? null;
+    if (command.type === 'draw-offer') {
+      if (state.moves.length < 2) return error('too_early', 'ขอเสมอได้หลังเดินกันคนละตา');
+      if (offer && offer.by === other) {
+        const next = copy(state);
+        next.result = '1/2-1/2';
+        next.reason = 'agreement';
+        return { ok: true, state: endGame(next, now) };
+      }
+      if (offer && offer.by === actor.color) return { ok: true, state };
+      if (state.drawBlock === actor.color) {
+        return error('draw_blocked', 'อีกฝ่ายปฏิเสธข้อเสนอเสมอแล้ว — เดินหมากก่อนจึงจะขอใหม่ได้');
+      }
+      const next = copy(state);
+      next.drawOffer = { by: actor.color };
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
     }
-    return { ok: true, state: next };
+    if (!offer) return error('no_draw_offer', 'ไม่มีข้อเสนอเสมอ');
+    if (command.type === 'draw-cancel') {
+      if (offer.by !== actor.color) return error('not_your_offer', 'ข้อเสนอนี้ไม่ใช่ของคุณ');
+      const next = copy(state);
+      next.drawOffer = null;
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    if (offer.by === actor.color) return error('own_offer', 'รอคำตอบของฝ่ายตรงข้ามอยู่');
+    const next = copy(state);
+    if (command.type === 'draw-accept') {
+      next.result = '1/2-1/2';
+      next.reason = 'agreement';
+      return { ok: true, state: endGame(next, now) };
+    }
+    if (command.type === 'draw-decline') {
+      next.drawOffer = null;
+      next.drawBlock = offer.by;
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    return error('unknown_command', 'ไม่รู้จักคำสั่งนี้');
+  }
+
+  // Takeback: the player who just moved may ask to undo that one move, until the
+  // opponent has replied. If accepted the requester is to move again.
+  if (command.type.startsWith('takeback-')) {
+    const offer = state.takebackOffer ?? null;
+    if (command.type === 'takeback-request') {
+      if (state.moves.length < 1 || state.turn === actor.color) {
+        return error('nothing_to_take_back', 'ย้อนตาได้เฉพาะตาที่เพิ่งเดินและฝ่ายตรงข้ามยังไม่ได้ตอบ');
+      }
+      if (offer && offer.by === actor.color) return { ok: true, state };
+      if (state.takebackBlock === actor.color) {
+        return error('takeback_blocked', 'อีกฝ่ายปฏิเสธการย้อนตาแล้ว — เดินหมากก่อนจึงจะขอใหม่ได้');
+      }
+      const next = copy(state);
+      next.takebackOffer = { by: actor.color };
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    if (!offer) return error('no_takeback_request', 'ไม่มีคำขอย้อนตา');
+    if (command.type === 'takeback-cancel') {
+      if (offer.by !== actor.color) return error('not_your_offer', 'คำขอนี้ไม่ใช่ของคุณ');
+      const next = copy(state);
+      next.takebackOffer = null;
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    if (offer.by === actor.color) return error('own_offer', 'รอคำตอบของฝ่ายตรงข้ามอยู่');
+    const next = copy(state);
+    if (command.type === 'takeback-decline') {
+      next.takebackOffer = null;
+      next.takebackBlock = offer.by;
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    if (command.type === 'takeback-accept') {
+      undoLastMove(next, now);
+      clearOffers(next);
+      if (next.clock) {
+        // The requester keeps the time spent thinking but gives back the
+        // increment that move earned; the opponent's deliberation over the
+        // request is not charged to them (their clock only drains at their move).
+        const key = offer.by === 'w' ? 'whiteMs' : 'blackMs';
+        next.clock[key] = Math.max(0, next.clock[key] - next.clock.incrementMs);
+        next.clock.activeSince = now;
+      }
+      Object.assign(next, advanceAfkAfterMove(next, now));
+      return { ok: true, state: next };
+    }
+    return error('unknown_command', 'ไม่รู้จักคำสั่งนี้');
   }
 
   if (command.type !== 'move') return error('unknown_command', 'ไม่รู้จักคำสั่งนี้');
@@ -250,6 +398,9 @@ export function applyGameCommand(state, actor, command, now = Date.now()) {
   if (!move) return error('illegal_move', 'ตาเดินนี้ไม่ถูกต้องตามกติกา');
 
   const next = copy(state);
+  clearOffers(next); // any move ends the position an offer was about
+  if (next.drawBlock === actor.color) next.drawBlock = null;
+  if (next.takebackBlock === actor.color) next.takebackBlock = null;
   const uci = move.from + move.to + (move.promotion ?? '');
   next.fen = game.fen();
   next.turn = game.turn();
@@ -313,6 +464,8 @@ export function toPublicState(state, connections = {}) {
     result: state.result,
     reason: state.reason,
     rematch: state.rematch ? { requestedBy: state.rematch.requestedBy } : null,
+    drawOffer: state.drawOffer ? { by: state.drawOffer.by } : null,
+    takebackOffer: state.takebackOffer ? { by: state.takebackOffer.by } : null,
     players: publicPlayers,
     clock: state.clock ? copy(state.clock) : null,
     afk: toPublicAfk(state),
