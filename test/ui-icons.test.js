@@ -59,6 +59,14 @@ test('player avatars: built-in players get SVG icons, online glyphs become real 
   assert.equal(ui.refs.avatarTop.querySelector('svg'), null);
 });
 
+test('a bar given neither icon nor avatar falls back to the user icon, never a stale piece', (t) => {
+  const ui = makeUi(t);
+  ui.setPlayers({ name: 'Guest', avatar: '♜' }, { name: 'Host', avatar: '♞' });
+  ui.setPlayers({ name: 'Someone' }, { name: 'Else' });
+  assert.equal(ui.refs.avatarTop.querySelector('piece'), null);
+  assert.ok(ui.refs.avatarTop.querySelector('svg'));
+});
+
 test('an online avatar never leaks into the next bot game', (t) => {
   const ui = makeUi(t);
   ui.setPlayers({ name: 'Guest', avatar: '♜' }, { name: 'Host', avatar: '♞' });

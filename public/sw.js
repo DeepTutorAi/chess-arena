@@ -51,9 +51,12 @@ self.addEventListener('message', (event) => {
   if (event.data === 'skip-waiting') self.skipWaiting();
 });
 
-// Vite writes hashed bundles as assets/<name>-<8+ char hash>.<ext> (top level
-// only); public/ files live in sub-folders or have no hash in the name.
-const HASHED_ASSET = new RegExp(`^${SCOPE_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}assets/[^/]+-[\\w-]{8,}\\.[a-z0-9]+$`);
+// Vite writes hashed bundles as assets/<name>-<8 char hash>.<ext> (top level
+// only). The hash must contain a digit or capital, so a hand-named public file
+// like "openings-database.json" or "park-background.webp" is never mistaken for
+// one — wrongly treating a file as immutable would freeze it for returning
+// users, while wrongly treating a hashed file as mutable only costs a refetch.
+const HASHED_ASSET = new RegExp(`^${SCOPE_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}assets/[^/]+-(?=[\\w-]*[A-Z0-9])[\\w-]{8}\\.(?:js|css|webp|png|jpe?g|svg|woff2?)$`);
 
 function isImmutableAsset(pathname) {
   return pathname.startsWith(`${SCOPE_PATH}engine/`) || HASHED_ASSET.test(pathname);

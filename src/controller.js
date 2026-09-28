@@ -693,6 +693,8 @@ export class Controller {
       this._reviewActive = false;
     }
     this._analysis = null;
+    this._lastAnalysis = null;
+    this._lastAnalysisRecord = null;
   }
 
   // ------------------------------------------------------------------ modes

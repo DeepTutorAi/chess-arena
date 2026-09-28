@@ -185,10 +185,10 @@ export class ReviewUI {
 
         <div class="review-summary-actions">
           <button class="btn primary review-step-btn" type="button" data-step>
-            ${glyph(iconSearch, 16)} ดูตาเดินบนกระดาน
+            ${glyph(iconSearch, 16)} ดูตาเดิน
           </button>
           ${runCount ? `<button class="btn primary review-puzzle-btn" type="button" data-puzzle-run>${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด (${runCount} ตา)</button>` : ''}
-          <button class="btn" type="button" data-again>${glyph(iconRefresh, 16)} เล่นกันใหม่</button>
+          <button class="btn" type="button" data-again>${glyph(iconRefresh, 16)} เล่นใหม่</button>
         </div>
       </div>
     `;
@@ -721,7 +721,7 @@ export class ReviewUI {
           <span class="coach-forecast-label">คาดการณ์อนาคต (เส้นทางที่เอนจินคำนวณ)</span>
           ${escapeHtml(forecast.join(' → '))}
         </div>` : ''}
-      ${canRetry ? '<button class="btn primary coach-retry-btn" type="button">${glyph(iconHint, 16)} ลองเดินแก้ตัว</button>' : ''}
+      ${canRetry ? `<button class="btn primary coach-retry-btn" type="button">${glyph(iconHint, 16)} ลองเดินแก้ตัว</button>` : ''}
     `;
     card.querySelector('.coach-retry-btn')?.addEventListener('click', () => {
       this.startRetryMistake(move.ply);
@@ -999,7 +999,7 @@ export class ReviewUI {
     const actions = `
       <div class="retry-actions">
         ${extraButtons}
-        ${phase !== 'puzzle' ? '<button class="btn" type="button" data-restart>${glyph(iconRefresh)} เริ่มใหม่</button>' : ''}
+        ${phase !== 'puzzle' ? `<button class="btn" type="button" data-restart>${glyph(iconRefresh)} เริ่มใหม่</button>` : ''}
         ${phase !== 'puzzle' ? '<button class="btn" type="button" data-solution>ดูเฉลย</button>' : ''}
         <button class="btn" type="button" data-cancel>กลับไปรีวิว</button>
       </div>`;

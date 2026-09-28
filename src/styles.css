@@ -2079,13 +2079,13 @@ input[type='range'] {
   font-size: 10px;
   letter-spacing: 2px;
   color: var(--muted);
-  margin: 16px 0 8px;
+  margin: 12px 0 6px;
 }
 
 /* Accuracy gauges */
 .review-gauges { display: flex; justify-content: center; gap: 34px; }
 .accuracy-gauge { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.accuracy-gauge-svg { width: 128px; height: 128px; }
+.accuracy-gauge-svg { width: 112px; height: 112px; }
 .gauge-track { fill: none; stroke: rgba(255, 255, 255, 0.08); stroke-width: 8; }
 .gauge-fill {
   fill: none;
@@ -2186,7 +2186,7 @@ input[type='range'] {
   padding: 14px var(--pad) var(--pad);
   background: linear-gradient(180deg, rgba(18, 20, 24, 0), rgba(18, 20, 24, 0.97) 30%);
 }
-.review-summary-actions .btn { flex: 1 1 150px; white-space: nowrap; }
+.review-summary-actions .btn { flex: 1 1 auto; white-space: nowrap; }
 
 /* Progress modal */
 .review-progress-modal { width: min(400px, 100%); text-align: center; }

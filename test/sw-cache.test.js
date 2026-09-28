@@ -104,6 +104,21 @@ test('top-level unhashed public files (openings.json, logo) are not treated as i
   }
 });
 
+test('hand-named public files that merely look hashed are not frozen (openings-database.json, park-background.webp)', async () => {
+  const sw = loadWorker();
+  for (const path of ['/app/assets/openings-database.json', '/app/assets/park-background.webp', '/app/assets/some-long-name.css']) {
+    sw.fetchLog.length = 0;
+    await sw.dispatch(path);
+    await sw.dispatch(path);
+    assert.equal(sw.fetchLog.length, 2, `${path} must revalidate`);
+  }
+  // ...while a real Vite hashed asset (hash has a digit/capital) stays cache-first.
+  sw.fetchLog.length = 0;
+  await sw.dispatch('/app/assets/park-bg-ByNPwS66.webp');
+  await sw.dispatch('/app/assets/park-bg-ByNPwS66.webp');
+  assert.equal(sw.fetchLog.length, 1);
+});
+
 test('range requests (audio) bypass the worker and partial responses are never cached', async () => {
   const sw = loadWorker();
   const ranged = await sw.dispatch('/app/assets/sounds/move.mp3', { headers: { range: 'bytes=0-' } });

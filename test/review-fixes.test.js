@@ -24,7 +24,7 @@ async function until(check, { timeout = 3000, label = 'condition' } = {}) {
 
 class FakeWorker {
   static instances = [];
-  static mode = 'answer'; // 'answer' | 'silent' | 'error'
+  static mode = 'answer'; // 'answer' | 'silent' (says hello, never searches) | 'mute' (never says anything) | 'error'
   constructor() {
     this.messages = [];
     this.terminated = false;
@@ -36,8 +36,8 @@ class FakeWorker {
   postMessage(cmd) {
     const line = String(cmd);
     this.messages.push(line);
-    if (line === 'uci') this.onmessage?.({ data: 'uciok' });
-    if (line === 'isready') this.onmessage?.({ data: 'readyok' });
+    if (FakeWorker.mode !== 'mute' && line === 'uci') this.onmessage?.({ data: 'uciok' });
+    if (FakeWorker.mode !== 'mute' && line === 'isready') this.onmessage?.({ data: 'readyok' });
     if (line.startsWith('position fen ')) this.fen = line.slice('position fen '.length);
     if (line.startsWith('go ')) {
       if (FakeWorker.mode === 'error') queueMicrotask(() => this.onerror?.(new Error('boom')));
@@ -101,6 +101,23 @@ test('analyzer: a silent engine is cut off by the idle watchdog', async (t) => {
   assert.equal(FakeWorker.instances[0].terminated, true);
 });
 
+test('analyzer: a worker that is still loading gets the long leash, a wedged one the short leash', async (t) => {
+  installGlobals(t);
+  // Nothing heard yet (wasm still downloading): must NOT be cut off at the idle timeout.
+  FakeWorker.mode = 'mute';
+  const loading = new GameReviewAnalyzer({ firstIdleTimeoutMs: 150, idleTimeoutMs: 20 });
+  const started = Date.now();
+  await assert.rejects(loading.analyzeGame(RECORD), (err) => err.message === 'engine_timeout');
+  assert.ok(Date.now() - started >= 120, 'a cold worker was allowed the long first-line timeout');
+
+  // The engine spoke (uciok) and then went quiet: the short idle timeout applies.
+  FakeWorker.mode = 'silent';
+  const wedged = new GameReviewAnalyzer({ firstIdleTimeoutMs: 5_000, idleTimeoutMs: 30 });
+  const t0 = Date.now();
+  await assert.rejects(wedged.analyzeGame(RECORD), (err) => err.message === 'engine_timeout');
+  assert.ok(Date.now() - t0 < 1_000, 'a wedged engine is cut off quickly, not after the 5s first-line leash');
+});
+
 test('analyzer: abort() before the run starts sticks and never spawns an engine', async (t) => {
   installGlobals(t);
   const analyzer = new GameReviewAnalyzer();
@@ -109,14 +126,14 @@ test('analyzer: abort() before the run starts sticks and never spawns an engine'
   assert.equal(FakeWorker.instances.length, 0);
 });
 
-test('analyzer: healthy run completes, caps movetime and leaves no timers behind', async (t) => {
+test('analyzer: healthy run completes, depth alone ends a search, no timers left behind', async (t) => {
   installGlobals(t);
   const analyzer = new GameReviewAnalyzer({ firstIdleTimeoutMs: 50, idleTimeoutMs: 50 });
   const result = await analyzer.analyzeGame(RECORD);
   assert.equal(result.plies.length, 2);
   const goLines = FakeWorker.instances[0].messages.filter((m) => m.startsWith('go '));
   assert.ok(goLines.length > 0);
-  assert.ok(goLines.every((m) => /^go depth 12 movetime \d+$/u.test(m)), goLines.join('|'));
+  assert.ok(goLines.every((m) => m === 'go depth 12'), `no movetime cap (results must not depend on device speed): ${goLines.join('|')}`);
   assert.equal(analyzer._watchdog, null, 'watchdog cleared');
   await sleep(80); // a leaked timer would fire here and flip analyzer state
   assert.equal(analyzer._fatal, null);
@@ -278,4 +295,58 @@ test('graph: end tick labels are anchored inward and use full-move numbers', (t)
   assert.equal(ticks.at(-1).textContent, 'ตา 2', 'position after 4 plies = move 2');
   assert.doesNotMatch(readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8'), /\.adv-tick\s*\{[^}]*text-anchor/u,
     'a CSS text-anchor would override the per-tick attribute');
+});
+
+// ---- template literal regression (single-quoted ${} rendered as raw text) -----
+
+test('coach card retry button renders its icon instead of a raw ${...} placeholder', (t) => {
+  installGlobals(t);
+  const ui = new ReviewUI();
+  const panel = document.createElement('div');
+  panel.innerHTML = '<div data-coach></div>';
+  document.body.appendChild(panel);
+  ui._panel = panel;
+  ui._analysis = { positions: [], plies: [] };
+  ui._renderCoach({
+    ply: 2, color: 'w', san: 'Qh5', tier: 'blunder', deltaW: 24, cpLoss: 300,
+    bestSan: 'Nf3', bestMove: { from: 'g1', to: 'f3' },
+  });
+  const button = panel.querySelector('.coach-retry-btn');
+  assert.ok(button, 'retry button rendered');
+  assert.ok(button.querySelector('svg'), 'lightbulb icon rendered');
+  assert.match(button.textContent, /ลองเดินแก้ตัว/u);
+  assert.equal(panel.innerHTML.includes('${'), false, 'no uninterpolated placeholder');
+});
+
+test('retry card restart button renders its icon instead of a raw ${...} placeholder', (t) => {
+  installGlobals(t);
+  const ui = new ReviewUI();
+  const panel = document.createElement('div');
+  panel.innerHTML = '<div data-coach></div>';
+  document.body.appendChild(panel);
+  ui._panel = panel;
+  ui._retry = { userColor: 'white', game: new Chess(), ply: { tier: 'mistake', bestSan: 'e4' }, phase: 'thinking' };
+  ui._renderRetryCard('thinking');
+  const restart = panel.querySelector('[data-restart]');
+  assert.ok(restart?.querySelector('svg'));
+  assert.equal(panel.innerHTML.includes('${'), false);
+});
+
+test('no plain string literal in the UI modules contains a ${...} placeholder', async () => {
+  // Uses a real parser (rollup ships with Vite): a line-based regex can't tell a
+  // '${x}' string from a template literal that spans lines.
+  const { parseAst } = await import('rollup/parseAst');
+  const offenders = [];
+  const walk = (node, file) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach((child) => walk(child, file)); return; }
+    if (node.type === 'Literal' && typeof node.value === 'string' && node.value.includes('${')) {
+      offenders.push(`${file}@${node.start}: ${node.raw.slice(0, 60)}`);
+    }
+    for (const value of Object.values(node)) if (value && typeof value === 'object') walk(value, file);
+  };
+  for (const file of ['ui.js', 'review-ui.js', 'main.js']) {
+    walk(parseAst(readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8')), file);
+  }
+  assert.deepEqual(offenders, [], 'these strings need backticks to interpolate');
 });

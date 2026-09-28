@@ -613,9 +613,11 @@ export class UI {
   /** Draw one avatar: { icon: 'robot' | 'user' } for the built-in players, or
    *  { avatar: '♞' } (an AVATAR_GLYPHS value) for online profiles. */
   _fillAvatar(el, entry = {}) {
-    if (entry.icon) {
+    if (entry.icon || !entry.avatar) {
+      // Default to the neutral user icon so a bar never keeps the previous
+      // mode's robot / piece next to a new name.
       el.innerHTML = entry.icon === 'robot' ? iconRobot({ size: 22 }) : iconUser({ size: 22 });
-    } else if (entry.avatar) {
+    } else {
       const role = GLYPH_ROLE[entry.avatar];
       if (role) el.innerHTML = pieceMarkup(role, 'white', 'avatar-piece');
       else el.textContent = entry.avatar;
