@@ -48,7 +48,10 @@ export class CoachService {
         : `การเดิน ${ply.san} คือตาที่เอนจินเลือก รักษาความได้เปรียบเอาไว้เต็มที่`;
     } else {
       const betterPart = ply.bestSan ? `ตาที่ดีกว่าคือ ${ply.bestSan} (ตามลูกศรเขียว)` : 'มีตาที่รักษาเปรียบเทียบได้ดีกว่า';
-      explanation = `การเดิน ${ply.san} เสียความได้เปรียบ ${ply.deltaW}% (~${Math.round(ply.cpLoss / 100) / 10} ตัว) — ${betterPart}`;
+      // cpLoss is centipawns; a missed/allowed mate is clamped to ±10000, which
+      // is not a meaningful number of pawns.
+      const pawns = ply.cpLoss > 0 && ply.cpLoss < 5000 ? ` (~${(Math.round(ply.cpLoss / 10) / 10).toFixed(1)} ตัว)` : '';
+      explanation = `การเดิน ${ply.san} เสียความได้เปรียบ ${ply.deltaW}%${pawns} — ${betterPart}`;
       if (ply.replySan) explanation += ` ระวังการตอบโต้ ${ply.replySan} ของฝ่ายตรงข้าม`;
     }
     const tacticalTag = (ply.tier === 'miss' && 'Missed Tactics')
@@ -141,8 +144,9 @@ export class ReviewUI {
     this.closeProgressModal();
     const overlay = document.createElement('div');
     overlay.className = 'review-modal-overlay';
-    const whiteAcc = analysis.accuracy.w ?? 0;
-    const blackAcc = analysis.accuracy.b ?? 0;
+    // null = that side never moved (1-ply game): shown as "—", not a fake 0%.
+    const whiteAcc = analysis.accuracy.w ?? null;
+    const blackAcc = analysis.accuracy.b ?? null;
     const runCount = analysis.plies.filter((p) => RETRYABLE_TIERS.has(p.tier) && p.bestMove).length;
     overlay.innerHTML = `
       <div class="review-modal review-summary-modal" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
@@ -243,15 +247,17 @@ export class ReviewUI {
   _gaugeSvg(accuracy, sideLabel, playerName) {
     const radius = 52;
     const circumference = 2 * Math.PI * radius;
-    const offset = circumference * (1 - Math.max(0, Math.min(100, accuracy)) / 100);
+    const hasValue = typeof accuracy === 'number';
+    const offset = circumference * (1 - (hasValue ? Math.max(0, Math.min(100, accuracy)) : 0) / 100);
+    const pctText = hasValue ? `${accuracy}%` : '—';
     return `
       <div class="accuracy-gauge">
-        <svg class="accuracy-gauge-svg" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(sideLabel)} accuracy ${accuracy}%">
+        <svg class="accuracy-gauge-svg" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(sideLabel)} accuracy ${hasValue ? `${accuracy}%` : 'not available'}">
           <circle class="gauge-track" cx="60" cy="60" r="${radius}"></circle>
           <circle class="gauge-fill" cx="60" cy="60" r="${radius}"
             stroke-dasharray="${circumference.toFixed(1)}"
             stroke-dashoffset="${offset.toFixed(1)}"></circle>
-          <text class="gauge-pct" x="60" y="56">${accuracy}%</text>
+          <text class="gauge-pct" x="60" y="56">${pctText}</text>
           <text class="gauge-side" x="60" y="74">${escapeHtml(sideLabel)}</text>
         </svg>
         <span class="gauge-name">${escapeHtml(playerName || (sideLabel === 'White' ? 'ฝ่ายขาว' : 'ฝ่ายดำ'))}</span>
@@ -284,7 +290,7 @@ export class ReviewUI {
         <line class="adv-centerline" x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}"></line>
         <path class="adv-area" d="${area}" fill="url(#adv-fill)"></path>
         <path class="adv-line" d="${line}"></path>
-        <line class="adv-crosshair" data-crosshair x1="0" y1="0" x2="0" y2="${H}" hidden></line>
+        <line class="adv-crosshair" data-crosshair x1="0" y1="0" x2="0" y2="${H}" style="display:none"></line>
         ${ticks}
         ${(analysis.criticalMoments ?? []).map((m) => {
           const cx = x(m.ply + 1).toFixed(1);
@@ -305,7 +311,7 @@ export class ReviewUI {
       const p = analysis.positions[ply];
       crosshair.setAttribute('x1', String(ply * (560 / Math.max(1, total - 1))));
       crosshair.setAttribute('x2', String(ply * (560 / Math.max(1, total - 1))));
-      crosshair.hidden = false;
+      crosshair.style.display = ''; // SVG has no `hidden` property
       const moveLabel = ply > 0 ? `${analysis.plies[ply - 1].san}` : 'เริ่มเกม';
       tooltip.hidden = false;
       tooltip.innerHTML = `<b>${escapeHtml(moveLabel)}</b> · ขาว ${p.whiteWinProb}% (${(p.whiteEvalCp / 100).toFixed(1)})`;
@@ -319,13 +325,15 @@ export class ReviewUI {
       jump(Math.round(ratio * (total - 1)));
     });
     svg.addEventListener('mouseleave', () => {
-      crosshair.hidden = true;
+      crosshair.style.display = 'none';
       tooltip.hidden = true;
     });
     svg.addEventListener('click', (e) => {
       const rect = svg.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      onPickPly(Math.round(ratio * (total - 1)));
+      // Graph positions count plies played (0 = start); the stepper indexes the
+      // move just played (-1 = start), so position p is stepper ply p - 1.
+      onPickPly(Math.round(ratio * (total - 1)) - 1);
     });
     // Critical-moment markers jump straight to the swing ply (roadmap A1).
     svg.querySelectorAll('.adv-cm-dot').forEach((dot) => {
@@ -1005,17 +1013,6 @@ export class ReviewUI {
       body = `
         <div class="coach-head">💡 ลองเดินแก้ตัว</div>
         <div class="retry-status">⚠ ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
-    } else if (phase === 'sim-error') {
-      body = `
-        <div class="coach-head">💡 ลองเดินแก้ตัว</div>
-        <div class="retry-status">⚠ ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
-      // actions stay as-is: เริ่มใหม่ / ดูเฉลย / กลับไปรีวิว ยังใช้ได้ และเพิ่ม
-      // ปุ่มลองคำนวณใหม่ด้านบนสุดของกลุ่มปุ่ม
-      actions = `
-      <div class="retry-actions">
-        <button class="btn primary" type="button" data-research>ลองคำนวณใหม่</button>
-        ${actions}
-      </div>`;
     } else if (phase === 'solved') {
       body = `
         <div class="coach-head">💡 ลองเดินแก้ตัว</div>

@@ -257,15 +257,37 @@ export function findCriticalMoments(positions, plies, { threshold = 15, maxMomen
  * openingBook (src/openings.js) is optional: when set, the "Book" tier follows
  * the matched theory line instead of the early-ply heuristic.
  */
+// Watchdogs: a search that stops producing output for this long means the
+// engine is wedged (or the wasm never loaded). The first search also waits for
+// the ~7MB wasm download/compile, so it gets a much longer leash.
+export const SEARCH_IDLE_TIMEOUT_MS = 20_000;
+export const FIRST_SEARCH_IDLE_TIMEOUT_MS = 60_000;
+// Hard cap per position so one pathological position on a slow device can't
+// stall the whole review (depth is still the normal stopping rule).
+export const SEARCH_MAX_MOVETIME_MS = 8_000;
+
 export class GameReviewAnalyzer {
-  constructor({ workerUrl = ENGINE_WORKER_URL, depth = ANALYSIS_DEPTH, openingBook = null } = {}) {
+  constructor({
+    workerUrl = ENGINE_WORKER_URL,
+    depth = ANALYSIS_DEPTH,
+    openingBook = null,
+    idleTimeoutMs = SEARCH_IDLE_TIMEOUT_MS,
+    firstIdleTimeoutMs = FIRST_SEARCH_IDLE_TIMEOUT_MS,
+    maxMovetimeMs = SEARCH_MAX_MOVETIME_MS,
+  } = {}) {
     this.workerUrl = workerUrl;
     this.depth = depth;
     this.openingBook = openingBook;
+    this.idleTimeoutMs = idleTimeoutMs;
+    this.firstIdleTimeoutMs = firstIdleTimeoutMs;
+    this.maxMovetimeMs = maxMovetimeMs;
     this.worker = null;
     this._pending = null;
     this._info = null;
-    this._aborted = false;
+    this._cancelled = false; // set only by abort(): the user (or dispose) gave up
+    this._fatal = null;      // engine failure that ended the current run
+    this._watchdog = null;
+    this._searches = 0;
   }
 
   async analyzeGame(record, onProgress = () => {}) {
@@ -277,11 +299,15 @@ export class GameReviewAnalyzer {
     const bestPvs = new Array(total).fill(null);
     const opening = this.openingBook?.lookup(replay.moves.map((m) => m.san)) ?? null;
 
-    this._aborted = false;
+    // A cancel that landed before we got here (e.g. while the opening book was
+    // still loading) must stick — never resurrect a cancelled analyzer.
+    if (this._cancelled) throw new Error('review_aborted');
+    this._fatal = null;
     this._spawn();
     try {
       for (let j = 0; j < total; j++) {
-        if (this._aborted) throw new Error('review_aborted');
+        if (this._cancelled) throw new Error('review_aborted');
+        if (this._fatal) throw this._fatal;
         if (replay.terminal[j]) {
           // Side to move is mated (W=0 for them) or the game is drawn.
           evals[j] = replay.terminal[j] === 'checkmate' ? { cp: null, mate: -1 } : { cp: 0, mate: null };
@@ -299,7 +325,7 @@ export class GameReviewAnalyzer {
         });
       }
     } finally {
-      this.abort();
+      this._teardown();
     }
     return buildAnalysisResult(record, replay, evals, secondEvals, bests, bestPvs, opening);
   }
@@ -307,26 +333,57 @@ export class GameReviewAnalyzer {
   /** Terminate the worker immediately — safe to call any time, any number of
    *  times (plan Hole 3). An in-flight search rejects with 'review_aborted'. */
   abort() {
-    this._aborted = true;
+    this._cancelled = true;
+    this._teardown();
+    this._rejectPending(new Error('review_aborted'));
+  }
+
+  /** The engine itself failed (worker error / silent engine). Distinct from
+   *  abort(): the caller must tell the user, not treat it as a cancel. */
+  _fail(code) {
+    const error = new Error(code);
+    this._fatal = error;
+    this._teardown();
+    this._rejectPending(error);
+  }
+
+  _teardown() {
+    this._clearWatchdog();
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
     }
-    if (this._pending) {
-      const { reject } = this._pending;
-      this._pending = null;
-      reject(new Error('review_aborted'));
+  }
+
+  _rejectPending(error) {
+    if (!this._pending) return;
+    const { reject } = this._pending;
+    this._pending = null;
+    reject(error);
+  }
+
+  _clearWatchdog() {
+    if (this._watchdog !== null) {
+      clearTimeout(this._watchdog);
+      this._watchdog = null;
     }
+  }
+
+  /** (Re)arm the idle timer — every engine line proves it is alive. */
+  _armWatchdog() {
+    this._clearWatchdog();
+    if (!this._pending) return;
+    const ms = this._searches <= 1 ? this.firstIdleTimeoutMs : this.idleTimeoutMs;
+    this._watchdog = setTimeout(() => {
+      this._watchdog = null;
+      if (this._pending) this._fail('engine_timeout');
+    }, ms);
   }
 
   _spawn() {
     const worker = new Worker(this.workerUrl);
     worker.onmessage = (e) => this._handleLine(e.data);
-    worker.onerror = () => {
-      const { reject } = this._pending ?? {};
-      this.abort();
-      reject?.(new Error('engine worker error'));
-    };
+    worker.onerror = () => this._fail('engine_error');
     this.worker = worker;
     this._send('uci');
     this._send('isready');
@@ -340,15 +397,20 @@ export class GameReviewAnalyzer {
 
   _search(fen) {
     this._info = { depth: -1, eval1: null, eval2: null };
-    this._send(`position fen ${fen}`);
-    this._send(`go depth ${this.depth}`);
-    return new Promise((resolve, reject) => {
+    this._searches += 1;
+    const promise = new Promise((resolve, reject) => {
       this._pending = { resolve, reject };
     });
+    this._armWatchdog();
+    this._send(`position fen ${fen}`);
+    this._send(`go depth ${this.depth} movetime ${this.maxMovetimeMs}`);
+    return promise;
   }
 
   _handleLine(line) {
     if (typeof line !== 'string') return;
+    if (this._pending) this._armWatchdog();
+    if (!this._info) return; // stray line after a finished/aborted search
     if (line.startsWith('info ')) {
       const parsed = parseInfoEval(line);
       if (!parsed || parsed.depth < this._info.depth) return;
@@ -367,6 +429,7 @@ export class GameReviewAnalyzer {
         pv: this._info.pv1 ?? [],
       };
       this._info = null;
+      this._clearWatchdog();
       const { resolve } = this._pending ?? {};
       this._pending = null;
       resolve?.(payload);

@@ -90,6 +90,13 @@ export class Controller {
     this._reviewActive = false;
     this._analysis = null;
     this._activeAnalyzer = null;
+    // Finished analysis of the last game — re-entering review reuses it instead
+    // of re-running the engine over every ply.
+    this._lastAnalysis = null;
+    this._lastAnalysisRecord = null;
+    // Bumped whenever a review session ends; a stale analyzer's late progress /
+    // result / error checks its token and is ignored.
+    this._reviewRun = 0;
     this.reviewUI = null;
     this._reviewDisconnectNotified = false;
     this._gameOverDelayTimer = null;
@@ -132,6 +139,8 @@ export class Controller {
     this._lastGameOver = null;
     this._gameOverOverlay = null;
     this._analysis = null;
+    this._lastAnalysis = null;
+    this._lastAnalysisRecord = null;
     this._activeAnalyzer = null;
     this._clockSnapshots = [];
 
@@ -1284,10 +1293,23 @@ export class Controller {
 
     this._reviewActive = true;
     this.reviewUI = this.reviewUI ?? new ReviewUI();
+    const run = ++this._reviewRun;
+    const record = this._lastGameRecord;
+
+    // Same finished game as last time: show the stored result straight away.
+    if (this._lastAnalysis && this._lastAnalysisRecord === record) {
+      this._analysis = this._lastAnalysis;
+      this._showReviewSummary(this._lastAnalysis);
+      return;
+    }
+
     const analyzer = new GameReviewAnalyzer();
     this._activeAnalyzer = analyzer;
+    // A cancelled/finished/superseded run must never touch the UI again.
+    const isCurrent = () => run === this._reviewRun && this._reviewActive;
     this.reviewUI.showProgressModal(() => {
       analyzer.abort();
+      this.reviewUI.closeProgressModal();
       this._finishReviewSession();
       this._reshowGameOver();
     });
@@ -1295,31 +1317,56 @@ export class Controller {
     // a failed fetch resolves null and grading falls back to the old heuristic.
     getOpeningBook()
       .then((book) => {
+        if (!isCurrent()) throw new Error('review_aborted'); // cancelled while the book loaded
         analyzer.openingBook = book;
-        return analyzer.analyzeGame(this._lastGameRecord, (p) =>
-          this.reviewUI.updateProgress(p.percentage, p.currentPly, p.totalPlies));
+        return analyzer.analyzeGame(record, (p) => {
+          if (isCurrent()) this.reviewUI.updateProgress(p.percentage, p.currentPly, p.totalPlies);
+        });
       })
       .then((analysis) => {
-        this._activeAnalyzer = null;
-        if (!this._reviewActive) return; // cancelled while the tail ran
+        if (this._activeAnalyzer === analyzer) this._activeAnalyzer = null;
+        if (!isCurrent()) return; // cancelled while the tail ran
         this._analysis = analysis;
+        this._lastAnalysis = analysis;
+        this._lastAnalysisRecord = record;
         this.reviewUI.closeProgressModal();
-        this.reviewUI.showReviewSummaryModal(
-          analysis,
-          (ply) => this.enterBoardStepper(ply),
-          () => { this._finishReviewSession(); this.newGame(); },
-          () => { this._finishReviewSession(); this._reshowGameOver(); },
-          () => { this.enterBoardStepper(0); this.reviewUI.startPuzzleRun(); },
-        );
+        this._showReviewSummary(analysis);
       })
       .catch((err) => {
-        this._activeAnalyzer = null;
+        if (this._activeAnalyzer === analyzer) this._activeAnalyzer = null;
+        if (!isCurrent()) return; // cancel / superseded — already handled
         this.reviewUI?.closeProgressModal();
-        if (err?.message === 'review_aborted') return; // cancel path handled above
+        if (err?.message === 'review_aborted') return;
         this._finishReviewSession();
-        this.ui.log(`รีวิวล้มเหลว: ${err.message}`, 'err');
-        this._reshowGameOver();
+        this._reportReviewFailure(err);
       });
+  }
+
+  _showReviewSummary(analysis) {
+    this.reviewUI.showReviewSummaryModal(
+      analysis,
+      (ply) => this.enterBoardStepper(ply),
+      () => { this._finishReviewSession(); this.newGame(); },
+      () => { this._finishReviewSession(); this._reshowGameOver(); },
+      () => { this.enterBoardStepper(0); this.reviewUI.startPuzzleRun(); },
+    );
+  }
+
+  /** Analysis died (engine failed / went silent): say so and offer a retry —
+   *  never leave the player on a bare board with no way back. */
+  _reportReviewFailure(err) {
+    const known = {
+      engine_error: 'โหลดเอนจินวิเคราะห์ไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่',
+      engine_timeout: 'เอนจินวิเคราะห์ไม่ตอบสนอง — ลองใหม่อีกครั้ง',
+    };
+    const detail = known[err?.message] ?? `เกิดข้อผิดพลาดระหว่างวิเคราะห์: ${err?.message ?? 'ไม่ทราบสาเหตุ'}`;
+    this.ui.log(`รีวิวล้มเหลว: ${detail}`, 'err');
+    this._reshowGameOver();
+    this.ui.showFloatingToast?.({
+      title: 'รีวิวเกมไม่สำเร็จ',
+      detail,
+      actions: [['ลองใหม่', () => this.startReview(), true], ['ปิด']],
+    });
   }
 
   enterBoardStepper(ply = 0) {
@@ -1350,6 +1397,7 @@ export class Controller {
 
   _finishReviewSession() {
     this._reviewActive = false;
+    this._reviewRun += 1; // invalidate any analyzer still running for this session
     this._analysis = null;
     // Resume the spectator live analysis it was paused for (roadmap C1).
     if (this._spectatorAnalysisResume) {
