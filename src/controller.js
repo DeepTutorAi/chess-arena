@@ -10,6 +10,7 @@ import { SpectatorEval as SpectatorAnalysisEngine } from './spectator-eval.js';
 import { AVATAR_GLYPHS, OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
 import { planThinkTime } from './thinktime.js';
+import { createTurnAlert } from './turnalert.js';
 import { sounds } from './sounds.js';
 import {
   ENGINE_NAME,
@@ -38,11 +39,13 @@ export class Controller {
     onPromotion,
     onlineClientFactory = (options) => new OnlineRoomClient(options),
     gameOverDelayMs = 3000,
+    turnAlert = createTurnAlert(),
   }) {
     this.ui = ui;
     this.ground = ground;
     this.onPromotion = onPromotion;
     this._gameOverDelayMs = gameOverDelayMs;
+    this.turnAlert = turnAlert; // blinks the tab title when it is our turn in a hidden tab
 
     this.game = new Chess();
     this.mode = null;
@@ -581,6 +584,7 @@ export class Controller {
       if (this.mode === MODES.HUMAN_VS_AI) this.game.undo(); // take back engine reply too
       if (this.engine) this.engine.setPosition(this.game.fen());
 
+      this.ground.cancelPremove?.();
       // Reset game over locks so checkmate/loss popup re-triggers properly on next end
       this._overPopupShown = false;
       this._isTimeout = false;
@@ -681,6 +685,8 @@ export class Controller {
     this.sandboxSetup = false;
     this.ground.setShapes([]);
     this.ground.setAutoShapes?.([]);
+    this.ground.cancelPremove?.();
+    this.turnAlert?.clear();
     if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
 
     // Review teardown — a running analysis must not outlive its game.
@@ -1039,6 +1045,10 @@ export class Controller {
     if (!last) return;
     sounds.play(last.captured ? 'capture' : 'move');
     if (this.game.inCheck()) sounds.play('check');
+    // A new ply that hands US the move while the tab is hidden: get attention.
+    if (this.onlineRole !== 'spectator' && state.turn === this.onlineSide) {
+      this.turnAlert?.notify('ถึงตาคุณ');
+    }
   }
 
   /** Server-aligned now() — clock/AFK deadlines are server epochs and must
@@ -1160,6 +1170,7 @@ export class Controller {
     const detail = `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
     this.ui.setStatus(`จบเกม · ${title}`, 'done');
     this.ui.log(`จบเกมออนไลน์: ${title} — ${detail}`, 'sys');
+    this.turnAlert?.notify(`จบเกม · ${title}`);
 
     // Cache the full game locally the moment it ends — the review must keep
     // working even if the opponent rage-quits right away (plan.md §5.2B).
@@ -1295,6 +1306,7 @@ export class Controller {
     this.ui.setBusy?.(false);
 
     this._reviewActive = true;
+    this.ground.cancelPremove?.();
     this.reviewUI = this.reviewUI ?? new ReviewUI();
     const run = ++this._reviewRun;
     const record = this._lastGameRecord;
@@ -1560,6 +1572,7 @@ export class Controller {
         fen: this.game.fen(),
         orientation: this.orientation,
         selectable: { enabled: isMoveTool },
+        premovable: { enabled: false },
         movable: {
           free: isMoveTool,
           color: isMoveTool ? 'both' : false,
@@ -1583,6 +1596,10 @@ export class Controller {
     const lastVerbose = this.game.history({ verbose: true });
     const last = lastVerbose[lastVerbose.length - 1];
 
+    // Premove: while it is the opponent's turn our side may still queue a move
+    // (chessground allows it when movable.color is ours and it is not our turn).
+    // The queued move is validated against our real dests once the turn comes.
+    const premoveColor = this._premoveColor();
     this.ground.set({
       fen: this.game.fen(),
       orientation: this.orientation,
@@ -1590,9 +1607,10 @@ export class Controller {
       check: this.game.inCheck(),
       lastMove: last ? [last.from, last.to] : undefined,
       selectable: { enabled: true },
+      premovable: { enabled: Boolean(premoveColor) },
       movable: {
         free: false,
-        color: isHumanTurn ? (this.game.turn() === 'w' ? 'white' : 'black') : false,
+        color: isHumanTurn ? (this.game.turn() === 'w' ? 'white' : 'black') : (premoveColor ?? false),
         dests: isHumanTurn ? this._getDests() : new Map(),
         // Always rebind the game-move handler: chessground merges config, so
         // without this the sandbox setup handler would stick around and
@@ -1609,8 +1627,31 @@ export class Controller {
 
     this._renderTurnIndicators();
 
+    // Play a queued premove now that the turn is ours (chessground re-validates
+    // it against our real dests and drops it if it became illegal); drop any
+    // queued premove when premove is off (game over, spectator, review…).
+    if (!premoveColor) this.ground.cancelPremove?.();
+    else if (isHumanTurn) this.ground.playPremove?.();
+
     // Spectator live eval (roadmap C1) follows every displayed position change.
     this.spectatorEval?.notifyPosition();
+  }
+
+  /** The side that may queue a premove right now ('white' | 'black'), or null.
+   *  Only real players in a live game: vs the bot, or a seated online player. */
+  _premoveColor() {
+    if (this._isOver() || this._reviewActive || this.viewerMode) return null;
+    if (this.mode === MODES.HUMAN_VS_AI) return this.humanSide === 'w' ? 'white' : 'black';
+    if (
+      this.mode === MODES.ONLINE
+      && this.onlineRole !== 'spectator'
+      && this.onlineSide
+      && this.onlineState?.status === 'active'
+      && this.onlineConnectionState === 'connected'
+    ) {
+      return this.onlineSide === 'w' ? 'white' : 'black';
+    }
+    return null;
   }
 
   /** Highlight the player bar whose turn it is (follows the orientation). */
@@ -1729,6 +1770,7 @@ export class Controller {
     } else if (this.mode === MODES.HUMAN_VS_AI) {
       // The engine's "thinking…" status must not outlive its move.
       this.ui.setStatus('ถึงตาของคุณ', '');
+      this.turnAlert?.notify('ถึงตาคุณ');
     } else if (this.mode === MODES.AI_VS_AI) {
       this._maybeStartAiLoop();
     }
@@ -1960,6 +2002,7 @@ export class Controller {
       else detail = 'กฎ 50 ตา';
     }
 
+    this.turnAlert?.notify(`จบเกม · ${title}`);
     this._captureGameRecord({
       result: this.game.isCheckmate() ? (this.game.turn() === 'w' ? '0-1' : '1-0') : '1/2-1/2',
       reason: this.game.isCheckmate()
