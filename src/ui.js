@@ -780,7 +780,11 @@ export class UI {
     const pill = this.el('button', 'gameover-pill');
     pill.type = 'button';
     pill.setAttribute('aria-label', 'เปิดการ์ดผลการแข่งขัน (ลากเพื่อย้าย)');
-    pill.innerHTML = `<span class="pill-title">${title}</span><span class="pill-detail">${detail}</span><span class="pill-expand">▲</span>`;
+    pill.append(
+      this.el('span', 'pill-title', title),
+      this.el('span', 'pill-detail', detail),
+      this.el('span', 'pill-expand', '▲'),
+    );
     pill.title = 'กดเพื่อเปิดการ์ด · ลากเพื่อย้าย';
 
     let dragged = false;

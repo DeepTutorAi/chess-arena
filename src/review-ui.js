@@ -10,6 +10,7 @@ import { ChessClock } from './clock.js';
 import { Stockfish } from './engine.js';
 import { TIERS, TIER_BY_KEY, pvToSan, ANALYSIS_DEPTH, convertCentipawnsToWinProbability } from './analyzer.js';
 import { iconBarChart, iconTrendingUp, iconFlip } from './icons.js';
+import { escapeHtml } from './html.js';
 
 const BAD_TIERS = new Set(['inaccuracy', 'mistake', 'blunder', 'miss']);
 const RETRYABLE_TIERS = new Set(['inaccuracy', 'mistake', 'blunder', 'miss']);
@@ -147,7 +148,7 @@ export class ReviewUI {
       <div class="review-modal review-summary-modal" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
         <button class="review-modal-close" type="button" aria-label="ปิด">✕</button>
         <div class="review-summary-title">Game Review · การรีวิวเกม</div>
-        ${analysis.opening ? `<div class="review-opening">📖 ${analysis.opening.eco} · ${analysis.opening.name}</div>` : ''}
+        ${analysis.opening ? `<div class="review-opening">📖 ${escapeHtml(analysis.opening.eco)} · ${escapeHtml(analysis.opening.name)}</div>` : ''}
 
         <div class="review-section-label">ACCURACY SECTION</div>
         <div class="review-gauges">
@@ -201,7 +202,7 @@ export class ReviewUI {
       btn.type = 'button';
       btn.className = `cm-btn ${m.lost ? 'cm-lost' : 'cm-gain'}`;
       btn.innerHTML = `
-        <span class="cm-move">ตา ${Math.floor(m.ply / 2) + 1} · ${m.san}</span>
+        <span class="cm-move">ตา ${Math.floor(m.ply / 2) + 1} · ${escapeHtml(m.san)}</span>
         <span class="cm-swing">${m.lost ? 'เสีย' : 'ได้'} ${m.swingPct}%</span>
       `;
       btn.onclick = () => {
@@ -245,15 +246,15 @@ export class ReviewUI {
     const offset = circumference * (1 - Math.max(0, Math.min(100, accuracy)) / 100);
     return `
       <div class="accuracy-gauge">
-        <svg class="accuracy-gauge-svg" viewBox="0 0 120 120" role="img" aria-label="${sideLabel} accuracy ${accuracy}%">
+        <svg class="accuracy-gauge-svg" viewBox="0 0 120 120" role="img" aria-label="${escapeHtml(sideLabel)} accuracy ${accuracy}%">
           <circle class="gauge-track" cx="60" cy="60" r="${radius}"></circle>
           <circle class="gauge-fill" cx="60" cy="60" r="${radius}"
             stroke-dasharray="${circumference.toFixed(1)}"
             stroke-dashoffset="${offset.toFixed(1)}"></circle>
           <text class="gauge-pct" x="60" y="56">${accuracy}%</text>
-          <text class="gauge-side" x="60" y="74">${sideLabel}</text>
+          <text class="gauge-side" x="60" y="74">${escapeHtml(sideLabel)}</text>
         </svg>
-        <span class="gauge-name">${playerName || (sideLabel === 'White' ? 'ฝ่ายขาว' : 'ฝ่ายดำ')}</span>
+        <span class="gauge-name">${escapeHtml(playerName || (sideLabel === 'White' ? 'ฝ่ายขาว' : 'ฝ่ายดำ'))}</span>
       </div>
     `;
   }
@@ -307,7 +308,7 @@ export class ReviewUI {
       crosshair.hidden = false;
       const moveLabel = ply > 0 ? `${analysis.plies[ply - 1].san}` : 'เริ่มเกม';
       tooltip.hidden = false;
-      tooltip.innerHTML = `<b>${moveLabel}</b> · ขาว ${p.whiteWinProb}% (${(p.whiteEvalCp / 100).toFixed(1)})`;
+      tooltip.innerHTML = `<b>${escapeHtml(moveLabel)}</b> · ขาว ${p.whiteWinProb}% (${(p.whiteEvalCp / 100).toFixed(1)})`;
       const wrapRect = wrap.getBoundingClientRect();
       const ratio = total > 1 ? ply / (total - 1) : 0;
       tooltip.style.left = `clamp(0px, calc(${(ratio * 100).toFixed(2)}% - 40px), ${Math.max(0, wrapRect.width - 90)}px)`;
@@ -613,10 +614,10 @@ export class ReviewUI {
     const acc = (v) => (v === null || v === undefined ? '—' : `${v}%`);
     slot.innerHTML = `
       <div class="review-acc-row">
-        <span>ขาว ${a.players.white?.name || ''} <b>${acc(a.accuracy.w)}</b></span>
-        <span>ดำ ${a.players.black?.name || ''} <b>${acc(a.accuracy.b)}</b></span>
+        <span>ขาว ${escapeHtml(a.players.white?.name || '')} <b>${acc(a.accuracy.w)}</b></span>
+        <span>ดำ ${escapeHtml(a.players.black?.name || '')} <b>${acc(a.accuracy.b)}</b></span>
       </div>
-      ${a.opening ? `<div class="review-opening">📖 ${a.opening.eco} · ${a.opening.name}</div>` : ''}
+      ${a.opening ? `<div class="review-opening">📖 ${escapeHtml(a.opening.eco)} · ${escapeHtml(a.opening.name)}</div>` : ''}
     `;
   }
 
@@ -640,7 +641,7 @@ export class ReviewUI {
         cell.type = 'button';
         cell.className = `review-move-cell tier-${p.tier}`;
         cell.dataset.ply = String(j);
-        cell.innerHTML = `<span class="san">${p.san}</span><span class="sym" style="color:${tier.color}">${tier.symbol}</span>`;
+        cell.innerHTML = `<span class="san">${escapeHtml(p.san)}</span><span class="sym" style="color:${tier.color}">${tier.symbol}</span>`;
         cell.onclick = () => this.stepTo(j, true);
         row.appendChild(cell);
       }
@@ -678,14 +679,14 @@ export class ReviewUI {
       <div class="coach-head" style="color:${tier.color}">${tier.symbol} ${insight.headline}</div>
       <div class="coach-tag">${insight.tacticalTag} · เสียโอกาส ${move.deltaW}%</div>
       <div class="coach-compare">
-        <span class="coach-played">คุณเดิน: <b>${move.san}</b></span>
-        ${move.bestSan && move.bestSan !== move.san ? `<span class="coach-better">ตาที่ดีกว่า: <b>${move.bestSan}!</b></span>` : ''}
+        <span class="coach-played">คุณเดิน: <b>${escapeHtml(move.san)}</b></span>
+        ${move.bestSan && move.bestSan !== move.san ? `<span class="coach-better">ตาที่ดีกว่า: <b>${escapeHtml(move.bestSan)}!</b></span>` : ''}
       </div>
-      <p class="coach-explanation">${insight.explanation}</p>
+      <p class="coach-explanation">${escapeHtml(insight.explanation)}</p>
       ${forecast.length ? `
         <div class="coach-forecast">
           <span class="coach-forecast-label">คาดการณ์อนาคต (เส้นทางที่เอนจินคำนวณ)</span>
-          ${forecast.join(' → ')}
+          ${escapeHtml(forecast.join(' → '))}
         </div>` : ''}
       ${canRetry ? '<button class="btn primary coach-retry-btn" type="button">💡 ลองเดินแก้ตัว (Retry Mistake)</button>' : ''}
     `;
