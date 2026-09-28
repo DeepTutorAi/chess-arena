@@ -9,24 +9,47 @@ const infoRe =
 const multipvRe = /\bmultipv (\d+)/;
 
 /**
- * The lines to report for a finished search. A search cut off mid-iteration leaves the
- * later MultiPV slots holding lines from the iteration before: a move that has since
- * climbed to the top then appears twice (the fresher, lower-numbered copy wins), and
- * the move it displaced from the top slot is otherwise lost — so displaced moves fill
- * any slots left short, after the fresh lines.
- * @param {Map<number, object>} slots  latest line per MultiPV index
- * @param {object[]} [displaced]  older lines pushed out of a slot by another move
+ * Collects the MultiPV lines of one search and reports the final set.
+ *
+ * A search cut off mid-iteration leaves the later slots holding lines from the
+ * iteration before: a move that has since climbed to the top then appears twice (the
+ * fresher, lower-numbered copy wins), and the move it displaced from the top slot
+ * would otherwise be lost — so displaced moves from the previous iteration fill any
+ * slots left short, after the fresh lines. Older ones are never used: a score from
+ * far shallower search is no basis to choose by.
  */
-export function finalLines(slots, displaced = []) {
-  const lines = uniqueLines([...slots.values()].sort((a, b) => a.multipv - b.multipv));
-  const have = new Set(lines.map((l) => l.pv[0]));
-  for (const old of displaced.slice().reverse()) {
-    if (lines.length >= slots.size) break;
-    if (!old.pv[0] || have.has(old.pv[0])) continue;
-    have.add(old.pv[0]);
-    lines.push(old);
+export class LineCollector {
+  constructor() { this.reset(); }
+
+  reset() {
+    this.slots = new Map(); // multipv index -> latest line
+    this.displaced = []; // older lines another move has since pushed out of their slot
   }
-  return lines;
+
+  /** @param {{multipv: number, depth: number, cp: number|null, mate: number|null, pv: string[]}} line */
+  add(line) {
+    const previous = this.slots.get(line.multipv);
+    if (previous && line.depth < previous.depth) return;
+    if (previous && previous.pv[0] !== line.pv[0]) {
+      this.displaced.push(previous);
+      if (this.displaced.length > 16) this.displaced.shift();
+    }
+    this.slots.set(line.multipv, line);
+  }
+
+  /** Every line of the search, best first. */
+  result() {
+    const lines = uniqueLines([...this.slots.values()].sort((a, b) => a.multipv - b.multipv));
+    const deepest = Math.max(0, ...lines.map((l) => l.depth));
+    const have = new Set(lines.map((l) => l.pv[0]));
+    for (const old of this.displaced.slice().reverse()) {
+      if (lines.length >= this.slots.size) break;
+      if (!old.pv[0] || have.has(old.pv[0]) || old.depth < deepest - 1) continue;
+      have.add(old.pv[0]);
+      lines.push(old);
+    }
+    return lines;
+  }
 }
 
 /** Drop later copies of a move, keeping lines without a move as they are. */
@@ -61,8 +84,7 @@ export class Stockfish {
     this.onError = onError ?? (() => {});
     this.ready = false;
     this._searchInfo = null;
-    this._lines = new Map(); // multipv index -> latest line of the current search
-    this._displaced = []; // lines a later iteration pushed out of their slot with another move
+    this._lines = new LineCollector(); // the MultiPV lines of the current search
     this._fen = null; // the last position sent
     this._searches = []; // one entry per `go` not yet answered; the engine answers in order
     this._bestmove = null;
@@ -91,21 +113,13 @@ export class Stockfish {
       const multipv = Number(line.match(multipvRe)?.[1] ?? 1);
       // Bound lines (aspiration-window fail highs / lows) are not real scores.
       if (m && !/\b(?:lowerbound|upperbound)\b/.test(line)) {
-        const previous = this._lines.get(multipv);
-        if (!previous || Number(m[1]) >= previous.depth) {
-          const line = {
-            multipv,
-            depth: Number(m[1]),
-            cp: m[2] === 'cp' ? Number(m[3]) : null,
-            mate: m[2] === 'mate' ? Number(m[3]) : null,
-            pv: m[6] ? m[6].split(' ') : [],
-          };
-          if (previous && previous.pv[0] !== line.pv[0]) {
-            this._displaced.push(previous);
-            if (this._displaced.length > 64) this._displaced.shift();
-          }
-          this._lines.set(multipv, line);
-        }
+        this._lines.add({
+          multipv,
+          depth: Number(m[1]),
+          cp: m[2] === 'cp' ? Number(m[3]) : null,
+          mate: m[2] === 'mate' ? Number(m[3]) : null,
+          pv: m[6] ? m[6].split(' ') : [],
+        });
       }
       // The headline info stays that of the BEST line even when several are searched.
       if (m && multipv === 1) {
@@ -127,11 +141,10 @@ export class Stockfish {
         this._bestmove = uci;
       }
       const info = this._searchInfo;
-      const lines = finalLines(this._lines, this._displaced);
+      const lines = this._lines.result();
       const fen = this._searches.shift() ?? null;
       this._searchInfo = null;
-      this._lines = new Map();
-      this._displaced = [];
+      this._lines.reset();
       this.onBestMove(this._bestmove, info, lines, fen);
     }
   }
@@ -155,8 +168,7 @@ export class Stockfish {
     if (opts.movetime) parts.push('movetime', String(opts.movetime));
     if (opts.infinite) parts.push('infinite');
     this._searchInfo = null;
-    this._lines = new Map();
-    this._displaced = [];
+    this._lines.reset();
     this._searches.push(this._fen);
     this._send(parts.join(' '));
   }

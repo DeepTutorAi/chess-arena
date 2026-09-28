@@ -165,7 +165,7 @@ async function main() {
   let results = args.fit ? readResults(args.fit) : args.seed ? readResults(args.seed) : [];
   if (!args.fit) {
     // Fail before playing anything, not after hours of games that cannot be fitted together.
-    const clash = results.find((r) => !r.cross && !args.cross && (r.style ?? 'standard') !== args.style);
+    const clash = results.find((r) => Boolean(r.cross) === Boolean(args.cross) && (r.style ?? 'standard') !== args.style);
     if (clash) throw new Error(`the seeded games are ${clash.style ?? 'standard'} bots but this run is ${args.style}`);
     const engineDir = prepareEngineDir();
 
@@ -207,6 +207,10 @@ async function main() {
   }
 
   const ladderGames = results.filter((r) => !r.cross);
+  const crossCount = results.length - ladderGames.length;
+  if (crossCount && ladderGames.length && !args.cross) {
+    console.log(`(${crossCount} cross-play games in the file are not part of the ladder fit; report them with --cross)`);
+  }
   if (args.cross || (args.fit && !ladderGames.length && results.length)) {
     // Elo of a human-style level relative to the standard bot of the same level.
     const styleNames = [...new Set(results.filter((r) => r.cross).map((r) => r.style ?? args.style))].join('/');

@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
 
-import { Stockfish, uniqueLines } from '../src/engine.js';
+import { LineCollector, Stockfish, uniqueLines } from '../src/engine.js';
+import { finalLines } from '../scripts/uci-node.mjs';
 import { Controller, MODES } from '../src/controller.js';
 import { createStatsStore } from '../src/stats.js';
 import { LEVELS, levelRating } from '../src/config.js';
@@ -232,4 +233,40 @@ test('a bestmove reports the position its own search started on, even after a ne
 test('uniqueLines keeps the first copy of each move and passes empty lines through', () => {
   const lines = [{ multipv: 1, pv: ['a2a3'] }, { multipv: 2, pv: ['a2a3'] }, { multipv: 3, pv: [] }, { multipv: 4, pv: ['b2b3'] }];
   assert.deepEqual(uniqueLines(lines).map((l) => l.multipv), [1, 3, 4]);
+});
+
+test('a displaced move only fills a slot when it comes from the iteration just before', () => {
+  const line = (multipv, depth, cp, move) => ({ multipv, depth, cp, mate: null, pv: [move] });
+  const collector = new LineCollector();
+  // depth 5: a strong-looking capture; depth 9: it is gone from the list; depth 10 got as far as slot 1
+  collector.add(line(1, 5, 300, 'a1a2'));
+  collector.add(line(2, 5, 0, 'b1b2'));
+  for (const [slot, cp, move] of [[1, 30, 'e2e4'], [2, 20, 'd2d4'], [3, 10, 'g1f3']]) collector.add(line(slot, 9, cp, move));
+  collector.add(line(1, 10, 25, 'd2d4'));
+  const moves = collector.result().map((l) => l.pv[0]);
+  assert.deepEqual(moves, ['d2d4', 'g1f3', 'e2e4'], 'the old best is back, the depth-5 capture is not');
+});
+
+test('a clean search reports exactly its final slots', () => {
+  const collector = new LineCollector();
+  for (const depth of [8, 9, 10]) {
+    collector.add({ multipv: 1, depth, cp: depth, mate: null, pv: [depth % 2 ? 'e2e4' : 'd2d4'] });
+    collector.add({ multipv: 2, depth, cp: depth - 5, mate: null, pv: [depth % 2 ? 'd2d4' : 'e2e4'] });
+  }
+  assert.deepEqual(collector.result().map((l) => [l.multipv, l.depth, l.pv[0]]), [[1, 10, 'd2d4'], [2, 10, 'e2e4']]);
+  collector.reset();
+  assert.deepEqual(collector.result(), []);
+});
+
+test('the calibration script collects lines the way the app does', () => {
+  const raw = [
+    'info depth 9 seldepth 9 multipv 1 score cp 30 nodes 1 nps 1 time 1 pv e2e4 e7e5',
+    'info depth 9 seldepth 9 multipv 2 score cp 20 nodes 1 nps 1 time 1 pv d2d4 d7d5',
+    'info depth 9 seldepth 9 multipv 3 score mate 4 nodes 1 nps 1 time 1 pv g1f3 g8f6',
+    'info depth 10 seldepth 9 multipv 1 score cp 25 lowerbound nodes 1 nps 1 time 1 pv c2c4',
+    'info depth 10 seldepth 9 multipv 1 score cp 25 nodes 1 nps 1 time 1 pv d2d4 g8f6',
+    'bestmove d2d4',
+  ];
+  const lines = finalLines(raw);
+  assert.deepEqual(lines.map((l) => [l.depth, l.cp, l.mate, l.pv[0]]), [[10, 25, null, 'd2d4'], [9, null, 4, 'g1f3'], [9, 30, null, 'e2e4']]);
 });

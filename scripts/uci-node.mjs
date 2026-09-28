@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { uniqueLines } from '../src/engine.js';
+import { LineCollector } from '../src/engine.js';
 
 export const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
@@ -23,26 +23,23 @@ export function prepareEngineDir() {
   return engineDir;
 }
 
-/** The final MultiPV lines of a search, best first: [{ multipv, depth, cp, mate, pv }]. */
+/** The final MultiPV lines of a search, best first: [{ multipv, depth, cp, mate, pv }].
+ *  Collected exactly as the app does it (src/engine.js), so bots are measured on the same lines. */
 export function finalLines(rawLines) {
-  const byIndex = new Map();
+  const collector = new LineCollector();
   for (const line of rawLines) {
     if (/\b(?:lowerbound|upperbound)\b/.test(line)) continue;
     const m = /\bdepth (\d+).*?\bmultipv (\d+) score (cp|mate) (-?\d+).*? pv (.+)$/.exec(line);
     if (!m) continue;
-    const depth = Number(m[1]);
-    const index = Number(m[2]);
-    const previous = byIndex.get(index);
-    if (previous && previous.depth > depth) continue;
-    byIndex.set(index, {
-      multipv: index, depth,
+    collector.add({
+      multipv: Number(m[2]),
+      depth: Number(m[1]),
       cp: m[3] === 'cp' ? Number(m[4]) : null,
       mate: m[3] === 'mate' ? Number(m[4]) : null,
       pv: m[5].trim().split(/\s+/),
     });
   }
-  // A search cut off mid-iteration leaves later slots stale: keep the fresher copy of a move.
-  return uniqueLines([...byIndex.values()].sort((a, b) => a.multipv - b.multipv));
+  return collector.result();
 }
 
 /** Mates clamp to ±1000 cp so they stay comparable on one scale. */
