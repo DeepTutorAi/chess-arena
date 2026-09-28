@@ -532,11 +532,13 @@ export class Controller {
   /** User dragged a piece in game mode. */
 
   async handleUserMove(orig, dest) {
-    if (this.engineBusy || this.viewerMode || this._isOver()) return;
-    if (this.mode === MODES.ONLINE && !this._onlineHumanTurn()) return;
+    // A refused move (also a premove played by chessground) must not leave the
+    // dragged piece sitting on the board: re-sync to the canonical position.
+    if (this.engineBusy || this.viewerMode || this._isOver()) { this._syncBoard(); return; }
+    if (this.mode === MODES.ONLINE && !this._onlineHumanTurn()) { this._syncBoard(); return; }
 
     const legal = this.game.moves({ square: orig, verbose: true }).some((m) => m.to === dest);
-    if (!legal) return;
+    if (!legal) { this._syncBoard(); return; }
 
     let promotion = null;
     const piece = this.game.get(orig);
@@ -1630,11 +1632,21 @@ export class Controller {
     // Play a queued premove now that the turn is ours (chessground re-validates
     // it against our real dests and drops it if it became illegal); drop any
     // queued premove when premove is off (game over, spectator, review…).
+    // Deferred to a microtask: playing it here would re-enter _afterMove (which
+    // is what called us) — double clock switches, and a mating premove would
+    // announce the game over twice.
     if (!premoveColor) this.ground.cancelPremove?.();
-    else if (isHumanTurn) this.ground.playPremove?.();
+    else if (isHumanTurn) queueMicrotask(() => this._playQueuedPremove());
 
     // Spectator live eval (roadmap C1) follows every displayed position change.
     this.spectatorEval?.notifyPosition();
+  }
+
+  _playQueuedPremove() {
+    // The world may have moved on between the sync and this microtask.
+    const color = this._premoveColor();
+    if (!color || this.game.turn() !== (color === 'white' ? 'w' : 'b')) return;
+    this.ground.playPremove?.();
   }
 
   /** The side that may queue a premove right now ('white' | 'black'), or null.
@@ -1782,7 +1794,7 @@ export class Controller {
    * so the bot never flags itself. Returns { delay, search }: delay = thinking
    * pause, search = UCI movetime for the timed modes.
    */
-  _thinkTime() {
+  _thinkTime(searchCeilingMs = null) {
     const tc = TIME_CONTROLS.find((t) => t.id === this.timeControlId);
     const side = this.game.turn();
     const timed = this.clock && !this.clock.unlimited;
@@ -1805,8 +1817,9 @@ export class Controller {
       pieceCount,
       inCheck: this.game.inCheck(),
       lastWasCaptureOrCheck,
-      remainingMs: timed ? this.clock.times[side] : null,
+      remainingMs: timed ? this.clock.remaining(side) : null,
       incrementMs: timed ? this.clock.incrementMs : 0,
+      searchCeilingMs,
     });
     return { delay: plan.delay, search: plan.search };
   }
@@ -1825,16 +1838,15 @@ export class Controller {
     this.ui.setBusy?.(true);
     this.ui.setStatus('เอนจินกำลังคิด…', 'busy');
     const cfg = LEVELS[this.levelIndex];
-    const { delay, search } = this._thinkTime();
+    // The level's own movetime is the search ceiling: kept in full whenever the
+    // clock affords it (so strength doesn't change with the time control) and
+    // shortened only as far as the bot's clock requires.
+    const { delay, search } = this._thinkTime(cfg.movetime);
     const fen = this.game.fen();
     this._aiTimer = setTimeout(() => {
       if (this._isOver() || !this.engine || !this.engineReady) return;
       this.engine.setPosition(fen);
-      // Timed games search for the clock-governed time (never more than the
-      // level's own movetime); untimed games use the level's full movetime.
-      const timed = this.clock && !this.clock.unlimited;
-      const movetime = timed ? Math.min(cfg.movetime, search ?? 500) : cfg.movetime;
-      this.engine.go({ movetime, depth: cfg.depth });
+      this.engine.go({ movetime: search, depth: cfg.depth });
     }, delay);
   }
 

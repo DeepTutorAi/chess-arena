@@ -57,11 +57,11 @@ function analyse(record, evals, bests) {
 
 test('the engine\'s own top move is never graded below Best because of search noise', () => {
   const record = { initialFen: null, moves: [{ from: 'e2', to: 'e4' }], result: '*' };
-  // white to move: +100cp at the start; after e4 the (independent) search says
-  // black is at -20cp (= +20 for white) — a ~6% "loss" that is pure noise
+  // white to move: +60cp at the start; after e4 the (independent) search says
+  // black is at -20cp (= +20 for white) — a ~3.6% "loss" that is pure noise
   const result = analyse(
     record,
-    (replay) => replay.fens.map((_, j) => ({ cp: j === 0 ? 100 : -20, mate: null })),
+    (replay) => replay.fens.map((_, j) => ({ cp: j === 0 ? 60 : -20, mate: null })),
     (replay) => replay.fens.map((_, j) => (j === 0 ? { from: 'e2', to: 'e4' } : null)),
   );
   assert.equal(result.plies[0].deltaW, 0);
@@ -72,7 +72,7 @@ test('the engine\'s own top move is never graded below Best because of search no
   // ...but a DIFFERENT move with the same evals is really graded by the loss
   const other = analyse(
     record,
-    (replay) => replay.fens.map((_, j) => ({ cp: j === 0 ? 100 : -20, mate: null })),
+    (replay) => replay.fens.map((_, j) => ({ cp: j === 0 ? 60 : -20, mate: null })),
     (replay) => replay.fens.map((_, j) => (j === 0 ? { from: 'd2', to: 'd4' } : null)),
   );
   assert.ok(other.plies[0].deltaW > 3);
@@ -137,4 +137,17 @@ test('coach text does not claim a lost advantage for a negligible loss on a good
   assert.doesNotMatch(excellent.explanation, /เสียความได้เปรียบ/u);
   const good = coach.generateInsight({ ply: 4, color: 'w', san: 'Nf3', tier: 'good', deltaW: 3.5, cpLoss: 40, bestSan: 'd4' });
   assert.match(good.explanation, /เสียความได้เปรียบ 3\.5%/u);
+});
+
+test('...but a large drop after the engine\'s own choice is real (a tactic the first search missed)', () => {
+  const record = { initialFen: null, moves: [{ from: 'e2', to: 'e4' }], result: '*' };
+  const result = analyse(
+    record,
+    // before: +100 for white; after: black now stands at +300 => white is at -300
+    (replay) => replay.fens.map((_, j) => ({ cp: j === 0 ? 100 : 300, mate: null })),
+    (replay) => replay.fens.map((_, j) => (j === 0 ? { from: 'e2', to: 'e4' } : null)),
+  );
+  assert.ok(result.plies[0].deltaW > 20, `deltaW ${result.plies[0].deltaW}`);
+  assert.ok(['blunder', 'miss', 'mistake'].includes(result.plies[0].tier), result.plies[0].tier);
+  assert.ok(result.plies[0].cpLoss > 300);
 });

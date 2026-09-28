@@ -80,6 +80,14 @@ export class ChessClock {
     }
   }
 
+  /** Time left for `color` RIGHT NOW — includes the time elapsed since the last
+   *  100 ms tick, so callers that budget against it are never ~100 ms stale. */
+  remaining(color) {
+    const base = this.times[color];
+    if (!this.active || this.turn !== color || !this._lastTickTime) return base;
+    return Math.max(0, base - (performance.now() - this._lastTickTime));
+  }
+
   static formatTime(ms) {
     if (ms <= 0) return '0:00';
     if (ms < 10_000) {

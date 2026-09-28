@@ -26,7 +26,7 @@ function makeGround() {
 const lastSet = (calls) => calls.sets.at(-1);
 const ui = () => new Proxy({}, { get: () => () => {} });
 
-test('vs bot: on the bot\'s turn the human side may premove; on the human turn a queued premove is played', () => {
+test('vs bot: on the bot\'s turn the human side may premove; on the human turn a queued premove is played', async () => {
   globalThis.requestAnimationFrame = (cb) => { cb(); return 1; };
   const { ground, calls } = makeGround();
   const controller = new Controller({ ui: ui(), ground, onPromotion: async () => 'q' });
@@ -49,7 +49,9 @@ test('vs bot: on the bot\'s turn the human side may premove; on the human turn a
   set = lastSet(calls);
   assert.equal(set.movable.color, 'white');
   assert.ok(set.movable.dests.size > 0, 'real dests are back');
-  assert.equal(calls.playPremove, 1, 'the queued premove is played when the turn arrives');
+  assert.equal(calls.playPremove, 0, 'never played synchronously inside the sync (it would re-enter _afterMove)');
+  await Promise.resolve();
+  assert.equal(calls.playPremove, 1, 'the queued premove is played right after, when the turn is ours');
 });
 
 test('vs bot: black human premoves on white\'s turn too', () => {
@@ -139,6 +141,7 @@ test('online player: premove while the opponent is to move, played when their mo
   assert.equal(set.premovable.enabled, true);
   const played = calls.playPremove;
   controller._onOnlineState(onlineState(['e2e4', 'e7e5'])); // our turn again
+  await Promise.resolve();
   assert.equal(calls.playPremove, played + 1);
   set = lastSet(calls);
   assert.ok(set.movable.dests.size > 0);
@@ -156,4 +159,47 @@ test('online spectators and finished games never premove', async () => {
   player.controller._onOnlineState(onlineState(['e2e4'], { status: 'finished', result: '1-0', reason: 'resignation', revision: 9 }));
   assert.equal(lastSet(player.calls).premovable.enabled, false);
   player.controller.dispose();
+});
+
+// ---- re-entrancy ----------------------------------------------------------------
+
+test('a premove is played AFTER _afterMove finishes: one clock switch per move, one game-over', async () => {
+  globalThis.requestAnimationFrame = (cb) => { cb(); return 1; };
+  const { ground } = makeGround();
+  const switches = [];
+  const controller = new Controller({ ui: ui(), ground, onPromotion: async () => 'q' });
+  controller.mode = MODES.HUMAN_VS_AI;
+  controller.humanSide = 'w';
+  controller.game = new Chess('6k1/p4ppp/8/8/8/8/5PPP/3R2K1 b - - 0 1'); // Rd8# is available to white
+  controller.clock = {
+    unlimited: false, times: { w: 60000, b: 60000 }, incrementMs: 0,
+    switchTurn: (turn) => switches.push(turn), stop() {}, remaining: () => 60000,
+  };
+  let gameOvers = 0;
+  const announce = controller._announceGameOver.bind(controller);
+  controller._announceGameOver = () => { gameOvers += 1; announce(); };
+  // chessground plays the queued premove by calling movable.events.after -> handleUserMove
+  ground.playPremove = () => controller.handleUserMove('d1', 'd8');
+
+  const botMove = controller.game.move('a6'); // the bot moves; white's premove Rd8# is queued
+  controller._afterMove(botMove);
+  assert.deepEqual(switches, ['w'], 'outer move finished its own clock switch first');
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(controller.game.isCheckmate(), true, 'the premove was played');
+  assert.equal(gameOvers, 1, 'the mating premove is announced exactly once');
+  assert.deepEqual(switches, ['w'], 'no second/misordered clock switch (the game ended)');
+});
+
+test('a refused move (premove that is no longer legal) re-syncs the board', async () => {
+  globalThis.requestAnimationFrame = (cb) => { cb(); return 1; };
+  const { ground, calls } = makeGround();
+  const controller = new Controller({ ui: ui(), ground, onPromotion: async () => 'q' });
+  controller.mode = MODES.HUMAN_VS_AI;
+  controller.humanSide = 'w';
+  controller.game = new Chess();
+  const before = calls.sets.length;
+  await controller.handleUserMove('e2', 'e5'); // illegal
+  assert.ok(calls.sets.length > before, 'the board was pushed back to the canonical position');
 });

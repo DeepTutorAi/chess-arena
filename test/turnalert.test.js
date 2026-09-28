@@ -127,3 +127,69 @@ test('dispose clears any running alert', () => {
   controller.dispose();
   assert.ok(alerts.includes('clear'));
 });
+
+test('a newer alert replaces the blinking text instead of flipping back to the stale one', () => {
+  const doc = fakeDoc();
+  const timers = fakeTimers();
+  const alert = createTurnAlert({ doc, nav: {}, ...timers });
+  alert.notify('ถึงตาคุณ');
+  alert.notify('จบเกม · คุณชนะ');
+  assert.equal(doc.title, '● จบเกม · คุณชนะ — Chess Arena');
+  timers.tick();
+  assert.equal(doc.title, 'Chess Arena');
+  timers.tick();
+  assert.equal(doc.title, '● จบเกม · คุณชนะ — Chess Arena', 'the blink uses the latest message');
+});
+
+test('destroy() removes the visibility listener and restores the title', () => {
+  const listeners = [];
+  const doc = {
+    hidden: true, title: 'Chess Arena',
+    addEventListener: (type, fn) => listeners.push([type, fn]),
+    removeEventListener: (type, fn) => { const i = listeners.findIndex(([t, f]) => t === type && f === fn); if (i >= 0) listeners.splice(i, 1); },
+  };
+  const alert = createTurnAlert({ doc, nav: {}, ...fakeTimers() });
+  assert.equal(listeners.length, 1);
+  alert.notify();
+  alert.destroy();
+  assert.equal(listeners.length, 0);
+  assert.equal(doc.title, 'Chess Arena');
+});
+
+test('online: a game-ending ply never says "your turn" (the result alert covers it)', async () => {
+  globalThis.requestAnimationFrame = (cb) => { cb(); return 1; };
+  const alerts = [];
+  const ui = new Proxy({}, { get: () => () => {} });
+  const ground = { state: { dom: { bounds: { clear() {} } } }, set() {}, setShapes() {} };
+  const game = new Chess();
+  const stateOf = (moves, extra = {}) => {
+    const g = new Chess();
+    for (const u of moves) g.move({ from: u.slice(0, 2), to: u.slice(2, 4) });
+    return {
+      protocol: 'chess-arena-online', version: 1, type: 'state', roomId: 'abcdefgh23456722', title: 'R', revision: 1 + moves.length,
+      status: 'active', initialFen: game.fen(), fen: g.fen(), turn: g.turn(), lastMove: null, lastMoveSan: null, moves, result: null, reason: null,
+      players: { w: { name: 'H', avatar: 'knight', connected: true }, b: { name: 'G', avatar: 'rook', connected: true } },
+      visibility: 'public', allowSpectators: true, spectators: [], spectatorCount: 0, clock: null, afk: null, hostColor: 'w', expiresAt: Date.now() + 60000, ...extra,
+    };
+  };
+  let cb;
+  const client = {
+    session: null, state: null,
+    async create() { this.session = { sessionToken: 'A'.repeat(43), role: 'host', color: 'w' }; this.state = stateOf([]); return { roomId: 'abcdefgh23456722', inviteToken: 'I'.repeat(43), ...this.session, state: this.state }; },
+    connect() { cb.onConnectionState('connected'); }, stop() {},
+  };
+  const controller = new Controller({
+    ui, ground, onPromotion: async () => 'q', gameOverDelayMs: 0,
+    turnAlert: { notify: (m) => alerts.push(m), clear() {} },
+    onlineClientFactory(o) { cb = o; return client; },
+  });
+  await controller.start(MODES.ONLINE, { action: 'create', playerName: 'H', title: 'T', color: 'w', timeControlId: 'unlimited' });
+  controller._onOnlineState(stateOf(['e2e4', 'e7e5']));
+  assert.deepEqual(alerts, ['ถึงตาคุณ']);
+  alerts.length = 0;
+  // black mates white: it would be white's turn, but the game is over
+  controller._onOnlineState(stateOf(['f2f3', 'e7e5', 'g2g4', 'd8h4'], { status: 'finished', result: '0-1', reason: 'checkmate', revision: 20 }));
+  assert.ok(!alerts.includes('ถึงตาคุณ'), JSON.stringify(alerts));
+  assert.ok(alerts.some((m) => m.startsWith('จบเกม')));
+  controller.dispose();
+});

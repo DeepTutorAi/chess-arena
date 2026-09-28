@@ -24,6 +24,10 @@ function baseTimes(tcId, initialMs) {
  * game instead of spending like a sprint), keeps a safety reserve, and adds most
  * of the increment back.
  */
+// Engine start-up, worker messaging and timer granularity all cost real time
+// that the search itself never sees — keep this much of every move's budget back.
+export const LATENCY_ALLOWANCE_MS = 60;
+
 export function clockBudgetMs({ remainingMs, incrementMs = 0, historyLength = 0 }) {
   const moveNo = Math.floor(historyLength / 2) + 1;
   const movesLeft = Math.max(22, 45 - moveNo);
@@ -32,7 +36,7 @@ export function clockBudgetMs({ remainingMs, incrementMs = 0, historyLength = 0 
   let perMove = spendable / movesLeft + incrementMs * 0.75;
   if (remainingMs < 8000) perMove = Math.min(perMove, remainingMs * 0.06); // time trouble
   if (remainingMs < 2000) perMove = Math.min(perMove, 120);                // last seconds: premove-fast
-  return Math.max(30, perMove);
+  return Math.max(30, perMove - LATENCY_ALLOWANCE_MS);
 }
 
 /**
@@ -47,6 +51,10 @@ export function clockBudgetMs({ remainingMs, incrementMs = 0, historyLength = 0 
  * @param {boolean} [ctx.lastWasCaptureOrCheck]
  * @param {number|null} [ctx.remainingMs]   the bot side's clock now; null = no clock
  * @param {number} [ctx.incrementMs]
+ * @param {number|null} [ctx.searchCeilingMs] the level's own search time (UCI movetime).
+ *        Kept in full whenever the clock can afford it, so a level's strength does not
+ *        change with the time control; the fast-paced controls (5+0, 10+0) still use the
+ *        shorter human-like search. null = use the model's search time.
  * @param {() => number} [ctx.rng]
  * @returns {{ delay: number, search: number, total: number }}
  */
@@ -61,9 +69,14 @@ export function planThinkTime({
   lastWasCaptureOrCheck = false,
   remainingMs = null,
   incrementMs = 0,
+  searchCeilingMs = null,
   rng = Math.random,
 } = {}) {
-  const { base: rawBase, search } = baseTimes(tcId, initialMs);
+  const { base: rawBase, search: modelSearch } = baseTimes(tcId, initialMs);
+  const fastPaced = tcId === 'blitz_5_0' || tcId === 'rapid_10_0';
+  const search = searchCeilingMs === null
+    ? modelSearch
+    : (fastPaced ? Math.min(searchCeilingMs, modelSearch) : searchCeilingMs);
   // Pace by the moving engine's strength: level 1 ×1.3 … level 11 ×0.3.
   const base = rawBase * (1.3 - 0.1 * (level - 1));
 
@@ -92,7 +105,10 @@ export function planThinkTime({
   // Clock governor: never spend more than the clock can afford.
   const budget = clockBudgetMs({ remainingMs, incrementMs, historyLength });
   const wanted = delay + search;
-  const total = Math.max(30, Math.min(wanted, budget));
-  const cappedSearch = Math.max(20, Math.min(search, Math.round(total * 0.4)));
+  if (wanted <= budget) return { delay, search, total: wanted }; // ample time: full pace, full strength
+  // Short of time: shrink the move to the budget. The search may use up to half
+  // of it; the rest is the pause.
+  const total = Math.max(30, budget);
+  const cappedSearch = Math.max(20, Math.min(search, Math.round(total * 0.5)));
   return { delay: Math.max(0, Math.round(total - cappedSearch)), search: cappedSearch, total: Math.round(total) };
 }

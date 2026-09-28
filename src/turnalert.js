@@ -11,6 +11,7 @@ export function createTurnAlert({
 } = {}) {
   let timer = null;
   let originalTitle = null;
+  let currentAlert = null; // the blink reads this, so a newer message replaces an older one
 
   function restore() {
     if (timer !== null) {
@@ -21,22 +22,23 @@ export function createTurnAlert({
     originalTitle = null;
   }
 
-  doc?.addEventListener?.('visibilitychange', () => {
+  const onVisibility = () => {
     if (!doc.hidden) restore();
-  });
+  };
+  doc?.addEventListener?.('visibilitychange', onVisibility);
 
   return {
     /** Alert only when the tab is hidden. Returns true when an alert started. */
     notify(message = 'ถึงตาคุณ') {
       if (!doc || !doc.hidden) return false;
       if (originalTitle === null) originalTitle = doc.title;
-      const alertTitle = `● ${message} — ${originalTitle}`;
-      doc.title = alertTitle;
+      currentAlert = `● ${message} — ${originalTitle}`;
+      doc.title = currentAlert;
       if (timer === null) {
         let flash = false;
         timer = setIntervalImpl(() => {
           flash = !flash;
-          doc.title = flash ? originalTitle : alertTitle;
+          doc.title = flash ? originalTitle : currentAlert;
         }, blinkMs);
       }
       try {
@@ -48,6 +50,11 @@ export function createTurnAlert({
     },
     /** Stop blinking and restore the normal title. */
     clear: restore,
+    /** Detach the visibility listener (for owners that are thrown away). */
+    destroy() {
+      restore();
+      doc?.removeEventListener?.('visibilitychange', onVisibility);
+    },
     get active() {
       return timer !== null;
     },

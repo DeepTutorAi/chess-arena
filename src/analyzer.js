@@ -13,6 +13,9 @@ export const ANALYSIS_DEPTH = 12;
 // so "Book" is granted to negligible-loss plies inside the first 10.
 const BOOK_PLIES = 10;
 const BOOK_MAX_LOSS = 2;
+// Two independent depth-limited searches routinely disagree by a few percent.
+// A move that IS the engine's first choice is treated as loss-free below this.
+const SEARCH_NOISE_PCT = 5;
 
 // plan.md §3.3 — canonical tiers, badges and colors (UI renders from this).
 export const TIERS = [
@@ -200,8 +203,6 @@ export function detectSacrifice(fen, move) {
   return false;
 }
 
-/** Rebuild the full game from a GameHistoryRecord — throws on an illegal move
- *  so callers can surface the real problem instead of analyzing garbage. */
 /** True when the position (placement, side to move, castling, en passant) is
  *  the standard chess start — theory/"Book" only makes sense from there. */
 export function isStandardStart(fen) {
@@ -209,6 +210,8 @@ export function isStandardStart(fen) {
   return key(fen) === key(START_FEN);
 }
 
+/** Rebuild the full game from a GameHistoryRecord — throws on an illegal move
+ *  so callers can surface the real problem instead of analyzing garbage. */
 export function buildReplay(record) {
   const startFen = record.initialFen || START_FEN;
   const game = new Chess(startFen);
@@ -526,7 +529,10 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
       engineChoice && engineChoice.from === move.from && engineChoice.to === move.to
       && (engineChoice.promotion || undefined) === (move.promotion || undefined),
     );
-    const deltaW = playedIsBest ? 0 : Math.max(0, bestW - actualW);
+    // ...but only up to the noise level: if the deeper "after" search shows a
+    // large drop the tactic is real and the move is graded by it.
+    const rawDelta = Math.max(0, bestW - actualW);
+    const deltaW = playedIsBest && rawDelta <= SEARCH_NOISE_PCT ? 0 : rawDelta;
     const secondW = secondEvals[i] ? winProbFromEval(secondEvals[i]) : null;
     const secondDelta = secondW === null ? null : Math.max(0, bestW - secondW);
 
@@ -592,7 +598,7 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
       replySan,
       tier,
       deltaW: round2(deltaW),
-      cpLoss: playedIsBest ? 0 : Math.max(0, Math.round(evalToCentipawns(bestEval) - evalToCentipawns(afterEval))),
+      cpLoss: deltaW === 0 && playedIsBest ? 0 : Math.max(0, Math.round(evalToCentipawns(bestEval) - evalToCentipawns(afterEval))),
       bestEvalCp: Math.round(evalToCentipawns(bestEval)),
     });
   }

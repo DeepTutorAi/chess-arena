@@ -102,7 +102,7 @@ function botController({ timeControlId, remaining, incrementMs = 0 }) {
   controller.mode = MODES.HUMAN_VS_AI;
   controller.timeControlId = timeControlId;
   controller.levelIndex = 3;
-  controller.clock = { unlimited: false, times: { w: remaining, b: remaining }, incrementMs };
+  controller.clock = { unlimited: false, times: { w: remaining, b: remaining }, incrementMs, remaining: () => remaining };
   const game = new Chess();
   for (const san of ['e4', 'e5', 'Nf3', 'Nc6', 'Bb5', 'a6', 'Ba4', 'Nf6']) game.move(san);
   controller.game = game;
@@ -122,4 +122,66 @@ test('controller: an untimed game keeps the level\'s pace', () => {
   const plan = controller._thinkTime();
   assert.equal(plan.search, 1500);
   assert.ok(plan.delay >= 800);
+});
+
+// ---- strength is preserved when the clock allows it -----------------------------
+
+test('a level keeps its full search time whenever the clock can afford it', () => {
+  // 15+0, level 11 (2800 ms): the old fix capped every timed game at the human-like 1500 ms
+  const ample = planThinkTime({
+    tcId: 'rapid_15_0', initialMs: 900000, level: 11, historyLength: 30, remainingMs: 800000,
+    searchCeilingMs: 2800, rng: seeded(5),
+  });
+  assert.equal(ample.search, 2800);
+  // untimed HVA: the level's own movetime
+  const untimed = planThinkTime({ tcId: 'unlimited', initialMs: 0, level: 11, historyLength: 30, searchCeilingMs: 2800, rng: seeded(5) });
+  assert.equal(untimed.search, 2800);
+  // the fast-paced controls keep their shorter human-like search
+  const blitz = planThinkTime({
+    tcId: 'blitz_5_0', initialMs: 300000, level: 11, historyLength: 30, remainingMs: 250000, searchCeilingMs: 2800, rng: seeded(5),
+  });
+  assert.equal(blitz.search, 400);
+  // ...and it only shrinks as far as the clock requires
+  const bullet = planThinkTime({
+    tcId: 'bullet_1_0', initialMs: 60000, level: 11, historyLength: 30, remainingMs: 30000, searchCeilingMs: 2800, rng: seeded(5),
+  });
+  assert.ok(bullet.search < 800 && bullet.search <= bullet.total * 0.5 + 1, `bullet search ${bullet.search} of ${bullet.total}`);
+});
+
+test('the governor never flags the bot even when the level asks for a long search (100 moves, 1+0)', () => {
+  let remaining = 60000;
+  const rng = seeded(21);
+  for (let move = 0; move < 100; move++) {
+    const plan = planThinkTime({
+      tcId: 'bullet_1_0', initialMs: 60000, level: 11, historyLength: move * 2 + 1, legalMoves: 30,
+      remainingMs: remaining, incrementMs: 0, searchCeilingMs: 2800, rng,
+    });
+    remaining -= plan.delay + plan.search;
+    assert.ok(remaining > 0, `flagged on move ${move + 1}`);
+  }
+});
+
+test('the governor keeps a latency allowance out of every move budget', () => {
+  assert.equal(clockBudgetMs({ remainingMs: 60000, incrementMs: 0, historyLength: 20 }) <= 60000 / 22, true);
+  const tiny = clockBudgetMs({ remainingMs: 500, incrementMs: 0, historyLength: 20 });
+  assert.ok(tiny >= 30 && tiny <= 60, `${tiny}`);
+});
+
+// ---- the clock reports fresh remaining time --------------------------------------
+
+import { ChessClock } from '../src/clock.js';
+
+test('ChessClock.remaining includes the time since the last tick', (t) => {
+  let now = 1000;
+  t.mock.method(performance, 'now', () => now);
+  const clock = new ChessClock({ initialMs: 60000 });
+  clock.times = { w: 60000, b: 60000 };
+  clock.active = true;
+  clock.turn = 'w';
+  clock._lastTickTime = 1000;
+  now = 1090; // 90 ms since the last 100 ms tick
+  assert.equal(clock.remaining('w'), 59910);
+  assert.equal(clock.remaining('b'), 60000, 'the side not to move is not running');
+  clock.active = false;
+  assert.equal(clock.remaining('w'), 60000, 'a stopped clock reports its stored time');
 });
