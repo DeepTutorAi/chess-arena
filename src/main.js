@@ -540,6 +540,19 @@ function openModeDialog(targetMode = null, { level = null } = {}) {
           `แนะนำระดับ ${startLevel} ตามเรตติ้งของคุณ (${controller.stats.rating}) — เลื่อนเปลี่ยนได้`));
       }
 
+      const styleField = ui.el('label', 'field');
+      styleField.append(ui.el('span', 'field-label', 'สไตล์บอท'));
+      const styleSelect = ui.el('select');
+      styleSelect.innerHTML = `
+        <option value="standard">มาตรฐาน — Stockfish ปรับระดับ (นับเรตติ้ง)</option>
+        <option value="balanced">เหมือนมนุษย์ · สมดุล (ทดลอง · ไม่นับเรตติ้ง)</option>
+        <option value="aggressive">เหมือนมนุษย์ · สายบุก (ทดลอง · ไม่นับเรตติ้ง)</option>
+        <option value="solid">เหมือนมนุษย์ · สายรับ (ทดลอง · ไม่นับเรตติ้ง)</option>
+      `;
+      styleField.appendChild(styleSelect);
+      body.appendChild(styleField);
+      body.append(ui.el('p', 'dlg-hint', 'บอทเหมือนมนุษย์เล่นตาดีที่สุดเป็นส่วนใหญ่ แต่บางครั้งเลือกตารองลงมา — ระดับต่ำพลาดบ่อย ระดับสูงแทบไม่พลาด'));
+
       const openingField = ui.el('label', 'field');
       openingField.append(ui.el('span', 'field-label', 'ตาแรกของบอท (เมื่อบอทเล่นฝ่ายขาว)'));
       const openingSelect = ui.el('select');
@@ -567,6 +580,7 @@ function openModeDialog(targetMode = null, { level = null } = {}) {
               level: Number(slider.value),
               timeControlId: tcId,
               openingMove: openingSelect.value,
+              botStyle: styleSelect.value,
             });
             modal.close();
           },

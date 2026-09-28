@@ -6,13 +6,15 @@ import { ENGINE_WORKER_URL } from './config.js';
 
 const infoRe =
   /^info .*?depth (\d+).*?score (cp|mate) (-?\d+).*?(?:nps (\d+))?.*?time (\d+).*?(?:pv (.+))?$/;
+const multipvRe = /\bmultipv (\d+)/;
 
 export class Stockfish {
   /**
    * @param {object} opts
    * @param {Function} [opts.onReady]
    * @param {Function} [opts.onInfo] (info) => void — periodic search info
-   * @param {Function} opts.onBestMove (uci, info) => void
+   * @param {Function} opts.onBestMove (uci, info, lines) => void — `lines` is the final
+   *        result of every MultiPV line, best first: [{ multipv, depth, cp, mate, pv }]
    * @param {Function} [opts.onError] (msg) => void
    * @param {string} [opts.workerUrl]
    */
@@ -24,6 +26,7 @@ export class Stockfish {
     this.onError = onError ?? (() => {});
     this.ready = false;
     this._searchInfo = null;
+    this._lines = new Map(); // multipv index -> latest line of the current search
     this._bestmove = null;
     this._pendingReady = null;
 
@@ -47,7 +50,22 @@ export class Stockfish {
       }
     } else if (line.startsWith('info ')) {
       const m = line.match(infoRe);
-      if (m) {
+      const multipv = Number(line.match(multipvRe)?.[1] ?? 1);
+      // Bound lines (aspiration-window fail highs / lows) are not real scores.
+      if (m && !/\b(?:lowerbound|upperbound)\b/.test(line)) {
+        const previous = this._lines.get(multipv);
+        if (!previous || Number(m[1]) >= previous.depth) {
+          this._lines.set(multipv, {
+            multipv,
+            depth: Number(m[1]),
+            cp: m[2] === 'cp' ? Number(m[3]) : null,
+            mate: m[2] === 'mate' ? Number(m[3]) : null,
+            pv: m[6] ? m[6].split(' ') : [],
+          });
+        }
+      }
+      // The headline info stays that of the BEST line even when several are searched.
+      if (m && multipv === 1) {
         this._searchInfo = {
           depth: Number(m[1]),
           score: m[2] === 'mate' ? (Number(m[3]) > 0 ? 'M' + m[3] : '-M' + Math.abs(Number(m[3]))) : Number(m[3]) / 100,
@@ -66,8 +84,10 @@ export class Stockfish {
         this._bestmove = uci;
       }
       const info = this._searchInfo;
+      const lines = [...this._lines.values()].sort((a, b) => a.multipv - b.multipv);
       this._searchInfo = null;
-      this.onBestMove(this._bestmove, info);
+      this._lines = new Map();
+      this.onBestMove(this._bestmove, info, lines);
     }
   }
 
@@ -89,6 +109,7 @@ export class Stockfish {
     if (opts.movetime) parts.push('movetime', String(opts.movetime));
     if (opts.infinite) parts.push('infinite');
     this._searchInfo = null;
+    this._lines = new Map();
     this._send(parts.join(' '));
   }
 

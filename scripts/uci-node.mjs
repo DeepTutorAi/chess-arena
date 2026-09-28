@@ -21,6 +21,27 @@ export function prepareEngineDir() {
   return engineDir;
 }
 
+/** The final MultiPV lines of a search, best first: [{ multipv, depth, cp, mate, pv }]. */
+export function finalLines(rawLines) {
+  const byIndex = new Map();
+  for (const line of rawLines) {
+    if (/\b(?:lowerbound|upperbound)\b/.test(line)) continue;
+    const m = /\bdepth (\d+).*?\bmultipv (\d+) score (cp|mate) (-?\d+).*? pv (.+)$/.exec(line);
+    if (!m) continue;
+    const depth = Number(m[1]);
+    const index = Number(m[2]);
+    const previous = byIndex.get(index);
+    if (previous && previous.depth > depth) continue;
+    byIndex.set(index, {
+      multipv: index, depth,
+      cp: m[3] === 'cp' ? Number(m[4]) : null,
+      mate: m[3] === 'mate' ? Number(m[4]) : null,
+      pv: m[5].trim().split(/\s+/),
+    });
+  }
+  return [...byIndex.values()].sort((a, b) => a.multipv - b.multipv);
+}
+
 /** Mates clamp to ±1000 cp so they stay comparable on one scale. */
 export function scoreFromInfo(info) {
   const cp = /score cp (-?\d+)/.exec(info ?? '');
@@ -74,8 +95,14 @@ export class UciEngine {
     this.send(`position fen ${fen}`);
     this.send(`go ${go}`);
     const best = await this.waitFor((l) => l.startsWith('bestmove'));
+    const lines = finalLines(this.lines);
+    // The score is the BEST line's (with MultiPV the last info line belongs to the worst).
+    const top = lines[0];
     const info = [...this.lines].reverse().find((l) => / score /.test(l) && / pv /.test(l));
-    return { move: best.split(' ')[1], score: scoreFromInfo(info) };
+    const score = top
+      ? (top.mate !== null ? Math.sign(top.mate) * 1000 : top.cp)
+      : scoreFromInfo(info);
+    return { move: best.split(' ')[1], score, lines };
   }
 
   quit() { this.send('quit'); this.proc.kill(); }

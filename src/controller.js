@@ -11,6 +11,7 @@ import { AVATAR_GLYPHS, OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
 import { planThinkTime } from './thinktime.js';
 import { bookPlies, getBotBook } from './botbook.js';
+import { HUMAN_LINES, HUMAN_STYLES, annotateLines, pickHumanMove } from './humanbot.js';
 import { createTurnAlert } from './turnalert.js';
 import { MIN_RATED_PLIES, createStatsStore } from './stats.js';
 import { createHistoryStore } from './history.js';
@@ -81,6 +82,7 @@ export class Controller {
     this._loadBotBook = loadBotBook;
     this.botBook = null; // sound opening theory the bot may repeat (src/botbook.js)
     this.botOpeningMove = 'random';
+    this.botStyle = 'standard'; // 'standard' (Skill Level, rated) or a human style (src/humanbot.js, unrated)
 
     this.game = new Chess();
     this.mode = null;
@@ -775,9 +777,10 @@ export class Controller {
 
   // ------------------------------------------------------------------ modes
 
-  _startHumanVsAi({ color = 'random', level = 4, initialFen, openingMove = 'random' } = {}) {
+  _startHumanVsAi({ color = 'random', level = 4, initialFen, openingMove = 'random', botStyle = 'standard' } = {}) {
     this.setLevel(level);
     this.botOpeningMove = openingMove; // SAN of the bot's first move as White, or 'random'
+    this.botStyle = HUMAN_STYLES.includes(botStyle) ? botStyle : 'standard';
     this.humanSide = color === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : color;
     this.orientation = this.humanSide === 'w' ? 'white' : 'black';
     const engineSide = this.humanSide === 'w' ? 'b' : 'w';
@@ -796,7 +799,7 @@ export class Controller {
     this.botBook = null;
     Promise.resolve(this._loadBotBook()).then((book) => { this.botBook = book ?? null; }, () => {});
 
-    const engineEntry = { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'robot' };
+    const engineEntry = { name: `${this._botLabel()} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'robot' };
     const humanEntry = { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'user' };
     this._setPlayersByColor(
       this.humanSide === 'w' ? humanEntry : engineEntry,
@@ -812,17 +815,24 @@ export class Controller {
       onReady: () => {
         this.engineReady = true;
         if (this.engine) {
-          this.engine.setOption('Skill Level', cfg.skill);
+          if (this.botStyle === 'standard') {
+            this.engine.setOption('Skill Level', cfg.skill);
+          } else {
+            // Human style: the engine searches at full skill and shows several lines;
+            // the mistakes come from choosing among them (src/humanbot.js).
+            this.engine.setOption('Skill Level', 20);
+            this.engine.setOption('MultiPV', HUMAN_LINES);
+          }
           this.engine.setOption('Hash', 16);
           this.engine.setPosition(this.game.fen());
         }
         this.ui.log(`เอนจินพร้อม (${ENGINE_NAME})`, 'sys');
-        this.ui.setStatus(`Stockfish Elo ${cfg.elo} · เริ่มเกม`, '');
+        this.ui.setStatus(`${this._botLabel()} · เริ่มเกม`, '');
         if (this.mode === MODES.HUMAN_VS_AI && this.game.turn() !== this.humanSide) {
           this._engineTurn();
         }
       },
-      onBestMove: (uci) => this._onEngineBestMove(uci),
+      onBestMove: (uci, info, lines) => this._onEngineBestMove(uci, lines),
       onError: (msg) => {
         this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err');
         if (!this.engineReady) {
@@ -1467,6 +1477,7 @@ export class Controller {
     }
     if (!fromState && this.mode === MODES.HUMAN_VS_AI) {
       record.botLevel = this.levelIndex + 1;
+      record.botStyle = this.botStyle;
       record.humanColor = this.humanSide;
     }
     const tc = TIME_CONTROLS.find((t) => t.id === this.timeControlId);
@@ -1555,12 +1566,16 @@ export class Controller {
     let outcome;
     try {
       outcome = this.stats.recordBotGame({
-        level: this.levelIndex + 1, score, color: this.humanSide, plies, reason, assisted: this._assisted,
+        level: this.levelIndex + 1, score, color: this.humanSide, plies, reason,
+        // A human-style bot has no calibrated Elo, so it cannot move the rating.
+        assisted: this._assisted || this.botStyle !== 'standard',
       });
     } catch { return; } // stats must never break the game-over flow
     this.ui.setPlayerRating?.(outcome.rating, outcome.provisional);
     if (!outcome.rated) {
-      this._statsNote = this._assisted ? 'เกมนี้ไม่นับเรตติ้ง (ใช้ย้อนตาหรือคำใบ้)' : 'เกมสั้นเกินไป ไม่นับเรตติ้ง';
+      this._statsNote = this._assisted ? 'เกมนี้ไม่นับเรตติ้ง (ใช้ย้อนตาหรือคำใบ้)'
+        : this.botStyle !== 'standard' ? 'เกมกับบอทเหมือนมนุษย์ยังไม่นับเรตติ้ง'
+          : 'เกมสั้นเกินไป ไม่นับเรตติ้ง';
       return;
     }
     const sign = outcome.delta > 0 ? '+' : outcome.delta < 0 ? '−' : '±';
@@ -1582,7 +1597,7 @@ export class Controller {
     }
     if (this.mode === MODES.HUMAN_VS_AI) {
       const cfg = LEVELS[this.levelIndex];
-      const engineName = `${ENGINE_NAME} Elo ${cfg?.elo ?? '?'}`;
+      const engineName = this._botLabel();
       return this.humanSide === 'w'
         ? { white: { name: HUMAN_NAME }, black: { name: engineName } }
         : { white: { name: engineName }, black: { name: HUMAN_NAME } };
@@ -2196,6 +2211,22 @@ export class Controller {
     }, delay);
   }
 
+  /** How the bot is named on screen and in records. A human-style bot makes no Elo claim. */
+  _botLabel() {
+    if (this.botStyle !== 'standard') {
+      const style = { balanced: 'สมดุล', aggressive: 'สายบุก', solid: 'สายรับ' }[this.botStyle];
+      return `บอทเหมือนมนุษย์ · ${style} · ระดับ ${this.levelIndex + 1}`;
+    }
+    return `${ENGINE_NAME} Elo ${LEVELS[this.levelIndex]?.elo ?? '?'}`;
+  }
+
+  /** A human-style bot chooses among the engine's lines; anything else plays its best move. */
+  _humanChoice(uci, lines) {
+    if (this.botStyle === 'standard' || !Array.isArray(lines) || lines.length < 2) return uci;
+    const candidates = annotateLines((fen) => new Chess(fen), this.game.fen(), lines);
+    return pickHumanMove(candidates, { level: this.levelIndex + 1, style: this.botStyle }) ?? uci;
+  }
+
   /** A sound opening move for the bot to play from theory, or null when out of book. */
   _bookMove() {
     const plies = this.game.history().length;
@@ -2209,10 +2240,11 @@ export class Controller {
     return this.botBook.pick(this.game.fen(), { isLegal: (uci) => legal.has(uci) });
   }
 
-  _onEngineBestMove(uci) {
+  _onEngineBestMove(uci, lines = null) {
     this.engineBusy = false;
     this.ui.setBusy?.(false);
     if (!uci || this._isOver()) return;
+    uci = this._humanChoice(uci, lines);
     const orig = uci.slice(0, 2);
     const dest = uci.slice(2, 4);
     const promotion = uci.length > 4 ? uci[4] : undefined;

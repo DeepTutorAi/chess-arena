@@ -5,7 +5,10 @@
 //   node scripts/calibrate-levels.mjs [--games 6] [--parallel 3] [--levels 1-11]
 //                                     [--out src/level-ratings.js] [--results results.json]
 //                                     [--seed earlier.json] [--offset 3]
+//                                     [--style balanced|aggressive|solid]   # human-style bots
 //   node scripts/calibrate-levels.mjs --fit results.json      # refit without playing
+//   node scripts/calibrate-levels.mjs --style balanced --cross 4 --out scratch.js
+//        # how each human-style level fares against the standard bot of the same level
 //
 // --seed adds the games of an earlier run to this one (more games = tighter
 // ratings); --offset starts the opening list further along so the new games
@@ -23,6 +26,7 @@ import { pathToFileURL } from 'node:url';
 import { Chess } from 'chess.js';
 
 import { LEVELS } from '../src/config.js';
+import { HUMAN_LINES, HUMAN_STYLES, annotateLines, pickHumanMove } from '../src/humanbot.js';
 import { enforceIncreasing, fitRatings, pairSchedule } from '../src/rating.js';
 import { ROOT, UciEngine, prepareEngineDir } from './uci-node.mjs';
 
@@ -48,19 +52,34 @@ export function adjudicate(whiteEvals) {
   return null;
 }
 
-/** One bot with the exact settings the app gives a level (see src/config.js). */
-async function createBot(engineDir, level) {
+/**
+ * One bot with the exact settings the app gives a level (see src/config.js).
+ * style 'standard' is the Skill-Level bot; a human style plays the same depth at
+ * full skill with MultiPV and picks among the lines like src/humanbot.js.
+ */
+async function createBot(engineDir, level, style = 'standard') {
   const engine = new UciEngine(engineDir);
-  await engine.init({ 'Skill Level': level.skill, Hash: 16 });
+  const human = style !== 'standard';
+  await engine.init(human
+    ? { 'Skill Level': 20, MultiPV: HUMAN_LINES, Hash: 16 }
+    : { 'Skill Level': level.skill, Hash: 16 });
+  const go = `depth ${level.depth} movetime ${level.movetime}`;
   return {
-    /** Best move + the engine's own eval (side to move, centipawns). */
-    choose: (fen) => engine.search(fen, `depth ${level.depth} movetime ${level.movetime}`),
+    /** Move + the engine's own eval (side to move, centipawns). */
+    async choose(fen) {
+      const result = await engine.search(fen, go);
+      if (!human) return { move: result.move, score: result.score };
+      const candidates = annotateLines((f) => new Chess(f), fen, result.lines);
+      return { move: pickHumanMove(candidates, { level: level.level, style }) ?? result.move, score: result.score };
+    },
     quit: () => engine.quit(),
   };
 }
 
-async function playGame(engineDir, whiteLevel, blackLevel, opening) {
-  const [white, black] = await Promise.all([createBot(engineDir, whiteLevel), createBot(engineDir, blackLevel)]);
+async function playGame(engineDir, whiteLevel, blackLevel, opening, styles = {}) {
+  const [white, black] = await Promise.all([
+    createBot(engineDir, whiteLevel, styles.white), createBot(engineDir, blackLevel, styles.black),
+  ]);
   const game = new Chess();
   for (const san of opening.split(' ')) game.move(san);
   const whiteEvals = [];
@@ -81,7 +100,7 @@ async function playGame(engineDir, whiteLevel, blackLevel, opening) {
 }
 
 export function parseArgs(argv) {
-  const args = { games: 6, parallel: 3, levels: '1-11', out: join(ROOT, 'src/level-ratings.js'), results: null, fit: null, seed: null, offset: 0 };
+  const args = { games: 6, parallel: 3, levels: '1-11', out: join(ROOT, 'src/level-ratings.js'), results: null, fit: null, seed: null, offset: 0, style: 'standard', cross: 0 };
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i].replace(/^--/, '');
     args[key] = argv[i + 1];
@@ -89,6 +108,11 @@ export function parseArgs(argv) {
   args.games = Number(args.games);
   args.parallel = Number(args.parallel);
   args.offset = Number(args.offset);
+  args.cross = Number(args.cross);
+  if (args.style !== 'standard' && !HUMAN_STYLES.includes(args.style)) throw new Error(`--style must be one of ${HUMAN_STYLES.join(', ')} (got ${args.style})`);
+  // The shipped ratings describe the standard bots only: a human-style run must write elsewhere.
+  if (args.style !== 'standard' && !args.fit && args.out === join(ROOT, 'src/level-ratings.js')) throw new Error('a --style run needs its own --out (it must not overwrite src/level-ratings.js)');
+  if (args.cross && (!Number.isInteger(args.cross) || args.cross < 2 || args.cross % 2)) throw new Error(`--cross must be an even number >= 2 (got ${args.cross})`);
   // Games come in colour-swapped pairs; an odd count would favour one colour.
   if (!Number.isInteger(args.games) || args.games < 2 || args.games % 2) throw new Error(`--games must be an even number >= 2 (got ${args.games})`);
   if (!Number.isInteger(args.parallel) || args.parallel < 1) throw new Error(`--parallel must be >= 1 (got ${args.parallel})`);
@@ -129,9 +153,18 @@ async function main() {
     const engineDir = prepareEngineDir();
 
     const jobs = [];
-    for (const [a, b] of pairSchedule(levelNumbers, 2)) {
-      for (let g = 0; g < args.games; g++) {
-        jobs.push({ a, b, opening: OPENINGS[(Math.floor(g / 2) + args.offset) % OPENINGS.length], aIsWhite: g % 2 === 0 });
+    if (args.cross) {
+      // Human-style level k (a) against the standard level k (b): who is stronger, and by how much.
+      for (const level of levelNumbers) {
+        for (let g = 0; g < args.cross; g++) {
+          jobs.push({ a: level, b: level, opening: OPENINGS[(Math.floor(g / 2) + args.offset) % OPENINGS.length], aIsWhite: g % 2 === 0, cross: true });
+        }
+      }
+    } else {
+      for (const [a, b] of pairSchedule(levelNumbers, 2)) {
+        for (let g = 0; g < args.games; g++) {
+          jobs.push({ a, b, opening: OPENINGS[(Math.floor(g / 2) + args.offset) % OPENINGS.length], aIsWhite: g % 2 === 0 });
+        }
       }
     }
     console.log(`${jobs.length} games, ${args.parallel} at a time`);
@@ -142,8 +175,11 @@ async function main() {
         const job = jobs[next++];
         const white = LEVELS[(job.aIsWhite ? job.a : job.b) - 1];
         const black = LEVELS[(job.aIsWhite ? job.b : job.a) - 1];
-        const { result, plies } = await playGame(engineDir, white, black, job.opening);
-        results.push({ a: job.a, b: job.b, score: scoreOf(result, job.aIsWhite), plies, result });
+        const styleA = args.style;
+        const styleB = job.cross ? 'standard' : args.style;
+        const styles = { white: job.aIsWhite ? styleA : styleB, black: job.aIsWhite ? styleB : styleA };
+        const { result, plies } = await playGame(engineDir, white, black, job.opening, styles);
+        results.push({ a: job.a, b: job.b, score: scoreOf(result, job.aIsWhite), plies, result, ...(job.cross ? { cross: true } : {}) });
         done += 1;
         console.log(`[${done}/${jobs.length}] L${job.a} vs L${job.b} ${job.aIsWhite ? '(a=white)' : '(a=black)'} ${result} in ${plies} plies`);
         if (args.results) writeFileSync(args.results, JSON.stringify(results));
@@ -151,6 +187,19 @@ async function main() {
     };
     await Promise.all(Array.from({ length: args.parallel }, worker));
     if (args.results) writeFileSync(args.results, JSON.stringify(results));
+  }
+
+  if (results.some((r) => r.cross)) {
+    // Elo of a human-style level relative to the standard bot of the same level.
+    console.log(`\nlevel  ${args.style} vs standard (score, Elo difference)`);
+    for (const n of levelNumbers) {
+      const games = results.filter((r) => r.cross && r.a === n);
+      if (!games.length) continue;
+      const score = games.reduce((sum, r) => sum + r.score, 0) / games.length;
+      const clipped = Math.min(0.95, Math.max(0.05, score));
+      console.log(String(n).padStart(5), score.toFixed(2).padStart(6), `${Math.round(400 * Math.log10(clipped / (1 - clipped)))}`.padStart(8), `(${games.length} games)`);
+    }
+    return;
   }
 
   // Levels are built to get stronger; sampling noise must not reorder them.
