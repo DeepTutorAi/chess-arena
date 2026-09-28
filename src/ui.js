@@ -587,6 +587,9 @@ export class UI {
   setPlayers(top, bottom) {
     this.refs.nameTop.textContent = top.name ?? '—';
     this.refs.nameBottom.textContent = bottom.name ?? '—';
+    // Long names are truncated in the bar — keep the full text on hover.
+    this.refs.nameTop.title = top.name ?? '';
+    this.refs.nameBottom.title = bottom.name ?? '';
     if (top.avatar) this.refs.avatarTop.textContent = top.avatar;
     if (bottom.avatar) this.refs.avatarBottom.textContent = bottom.avatar;
   }

@@ -11,7 +11,27 @@
   --accent-hover: #a3d168;
   --amber: #f59e0b;
   --red: #fa4141;
-  --board-size: min(calc(100vh - 120px), 520px);
+
+  /* Viewport height that excludes mobile browser chrome (dvh) where supported;
+     use calc(N * var(--vh)) instead of Nvh. */
+  --vh: 1vh;
+
+  /* Board sizing inputs — the formula itself lives on .chesscom-layout so that
+     layout-specific overrides (sandbox panels, review eval bar, landscape
+     phones) are re-resolved there. */
+  --board-chrome: 172px; /* 2 player bars + status bar + layout padding */
+  --bars-h: 114px;       /* the two player bars only (sidebar matches them) */
+  --board-cap: 760px;
+  --side-w: 340px;
+  --eval-w: 26px;
+  --eval-gap: 8px;
+  --eval-reserve: 0px;   /* width taken by the review eval bar beside the board */
+}
+
+@supports (height: 1dvh) {
+  :root {
+    --vh: 1dvh;
+  }
 }
 
 * {
@@ -31,11 +51,11 @@ body {
   color: var(--text);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Thai', 'Sarabun', sans-serif;
-  min-height: 100vh;
+  min-height: calc(100 * var(--vh));
 }
 
 #app {
-  min-height: 100vh;
+  min-height: calc(100 * var(--vh));
   display: flex;
   flex-direction: column;
 }
@@ -171,7 +191,7 @@ body {
   max-width: 100%;
   width: 100%;
   margin: 0 auto;
-  min-height: calc(100vh - 52px);
+  min-height: calc(100 * var(--vh) - 52px);
   background: linear-gradient(180deg, rgba(24, 22, 20, 0.75) 0%, rgba(24, 22, 20, 0.95) 100%),
     url('../assets/chess_park_3d_bg.jpg') center/cover no-repeat;
 }
@@ -322,8 +342,8 @@ body {
 /* ---- CHESS.COM IN-GAME LAYOUT & SANDBOX DUAL PANELS ---- */
 
 .game-view {
-  height: 100vh;
-  max-height: 100vh;
+  height: calc(100 * var(--vh));
+  max-height: calc(100 * var(--vh));
   width: 100%;
   overflow: hidden;
   display: flex;
@@ -333,21 +353,35 @@ body {
 }
 
 .chesscom-layout {
+  /* Board = what the viewport height allows, never wider than the room left
+     beside the sidebar, and capped so it stays sensible on huge monitors. */
+  --board-max-w: calc(100vw - var(--side-w) - 80px - var(--eval-reserve));
+  --board-size: max(
+    240px,
+    min(calc(100 * var(--vh) - var(--board-chrome)), var(--board-max-w), var(--board-cap))
+  );
+
   display: grid;
-  grid-template-columns: minmax(0, auto) 340px;
+  grid-template-columns: auto var(--side-w);
+  justify-content: center;
   gap: 16px;
   padding: 10px 16px;
-  max-width: 1050px;
   width: 100%;
-  height: 100vh;
+  height: calc(100 * var(--vh));
   align-items: center;
   box-sizing: border-box;
 }
 
-/* 3-COLUMN LAYOUT FOR SANDBOX MODE */
+/* Review mode docks an eval bar beside the board — take its width out of the
+   board so the row never overflows (and keep the bars aligned to the board). */
+.chesscom-layout:has(.eval-bar-container:not(.hidden)) {
+  --eval-reserve: calc(var(--eval-w) + var(--eval-gap));
+}
+
+/* 3-COLUMN LAYOUT FOR SANDBOX MODE: 280px + board + 300px + 2 gaps + padding */
 .chesscom-layout.sandbox-layout {
-  grid-template-columns: 280px minmax(0, auto) 300px;
-  max-width: 1180px;
+  --board-max-w: calc(100vw - 280px - 300px - 32px - 32px - 16px - var(--eval-reserve));
+  grid-template-columns: 280px auto 300px;
 }
 
 /* BOARD CONTAINER & PLAYER BARS */
@@ -372,6 +406,11 @@ body {
 }
 
 /* PLAYER BARS (TOP & BOTTOM) */
+
+.player-bar,
+.status-bar {
+  margin-left: var(--eval-reserve);
+}
 
 .player-bar {
   width: var(--board-size);
@@ -408,6 +447,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0; /* lets a long name truncate instead of growing the bar */
 }
 
 .avatar {
@@ -426,12 +467,16 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  min-width: 0;
 }
 
 .pname {
   font-size: 14px;
   font-weight: 700;
   color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pinfo {
@@ -560,7 +605,7 @@ square.hint-dest {
   border-radius: 10px;
   display: flex;
   flex-direction: column;
-  height: calc(var(--board-size) + 90px);
+  height: calc(var(--board-size) + var(--bars-h));
   overflow: hidden;
 }
 
@@ -761,7 +806,7 @@ square.hint-dest {
   background: #211f1c;
   border-radius: 10px;
   border: 1px solid var(--line);
-  height: calc(var(--board-size) + 90px);
+  height: calc(var(--board-size) + var(--bars-h));
   overflow-y: auto;
 }
 
@@ -853,7 +898,7 @@ square.hint-dest {
   background: #211f1c;
   border-radius: 10px;
   border: 1px solid var(--line);
-  height: calc(var(--board-size) + 90px);
+  height: calc(var(--board-size) + var(--bars-h));
 }
 
 .sandbox-tool-title {
@@ -1212,7 +1257,7 @@ square.hint-dest {
   border: 1px solid var(--line);
   border-radius: 14px;
   width: min(480px, 100%);
-  max-height: 88vh;
+  max-height: calc(88 * var(--vh));
   overflow-y: auto;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
 }
@@ -1742,13 +1787,14 @@ input[type='range'] {
 /* RESPONSIVE */
 
 @media (max-width: 1000px) {
-  :root {
-    --board-size: min(88vw, 420px);
-  }
-
   .chesscom-layout,
   .chesscom-layout.sandbox-layout {
-    grid-template-columns: 1fr;
+    /* Single column: the board may use the full width (minus a 12px gutter and
+       the review eval bar) and grows up to tablet size. */
+    --board-max-w: calc(100vw - 24px - var(--eval-reserve));
+    --board-cap: 640px;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
     height: auto;
     overflow-y: auto;
   }
@@ -1766,6 +1812,74 @@ input[type='range'] {
   .sandbox-editor-panel {
     height: auto;
     min-height: 260px;
+    width: 100%;
+    max-width: 640px;
+  }
+
+  /* Without a bound the move list pushes the action strip (undo / resign /
+     home) further and further below the board. */
+  .sidebar-content {
+    max-height: max(160px, calc(28 * var(--vh)));
+  }
+}
+
+/* Landscape phones: the viewport is short but wide. Put the sidebar beside the
+   board and squeeze the player bars so the whole board is visible at once. */
+@media (max-width: 1000px) and (orientation: landscape) and (max-height: 560px) {
+  .chesscom-layout:not(.sandbox-layout) {
+    --board-chrome: 124px;
+    --bars-h: 84px;
+    --board-max-w: calc(100vw - 250px - 48px - var(--eval-reserve));
+    grid-template-columns: auto minmax(200px, 1fr);
+    justify-items: stretch;
+    justify-content: center;
+    height: calc(100 * var(--vh));
+    overflow-y: visible;
+    gap: 12px;
+    padding: 6px 10px;
+  }
+
+  .game-view {
+    align-items: center;
+  }
+
+  .chesscom-layout:not(.sandbox-layout) .sidebar {
+    max-width: none;
+    min-height: 0;
+    height: calc(var(--board-size) + var(--bars-h));
+  }
+
+  .chesscom-layout:not(.sandbox-layout) .sidebar-content {
+    max-height: none;
+  }
+}
+
+/* Any short viewport (landscape phones, small windows): tighter player bars. */
+@media (max-height: 560px) {
+  .player-bar {
+    padding: 3px 10px;
+  }
+
+  .avatar {
+    width: 26px;
+    height: 26px;
+    font-size: 16px;
+  }
+
+  .captured-row {
+    min-height: 14px;
+    margin-top: 0;
+  }
+
+  .captured-mini {
+    width: 14px;
+    height: 14px;
+  }
+
+  .status-bar {
+    margin-top: 3px;
+    padding: 2px 8px;
+    font-size: 11px;
   }
 }
 /* LIVE TOURNAMENT LOBBY --------------------------------------------------- */
@@ -1871,7 +1985,7 @@ input[type='range'] {
 
 @media (max-width:980px) { .live-room-grid{grid-template-columns:repeat(2,minmax(0,1fr))} .live-lobby-controls{grid-template-columns:1fr 1fr} .lobby-tabs{overflow-x:auto} }
 @media (max-width:640px) {
-  .live-lobby-overlay{padding:14px 12px 44px}.live-lobby-topbar{grid-template-columns:auto 1fr auto;gap:8px}.live-lobby-identity{text-align:left}.live-lobby-identity h1{font-size:17px}.live-lobby-kicker{display:none}.live-lobby-overlay .lobby-back-btn,.live-lobby-overlay .lobby-create-btn{min-height:38px;padding-inline:11px;font-size:11px}.live-lobby-hero{min-height:0;align-items:stretch;flex-direction:column;padding:24px 18px}.live-lobby-hero h2{font-size:29px}.lobby-profile-pill{width:auto}.live-lobby-controls{position:sticky;z-index:8;top:0;grid-template-columns:1fr 1fr}.lobby-tabs{grid-column:1/-1}.lobby-refresh-btn{grid-column:1/-1}.live-room-grid{grid-template-columns:1fr}.lobby-meta-row{gap:10px}.spectator-panel{position:fixed;inset:auto 10px 10px;width:auto;max-height:70vh;border-radius:18px}.recent-room-item{align-items:stretch;flex-direction:column}
+  .live-lobby-overlay{padding:14px 12px 44px}.live-lobby-topbar{grid-template-columns:auto 1fr auto;gap:8px}.live-lobby-identity{text-align:left}.live-lobby-identity h1{font-size:17px}.live-lobby-kicker{display:none}.live-lobby-overlay .lobby-back-btn,.live-lobby-overlay .lobby-create-btn{min-height:38px;padding-inline:11px;font-size:11px}.live-lobby-hero{min-height:0;align-items:stretch;flex-direction:column;padding:24px 18px}.live-lobby-hero h2{font-size:29px}.lobby-profile-pill{width:auto}.live-lobby-controls{position:sticky;z-index:8;top:0;grid-template-columns:1fr 1fr}.lobby-tabs{grid-column:1/-1}.lobby-refresh-btn{grid-column:1/-1}.live-room-grid{grid-template-columns:1fr}.lobby-meta-row{gap:10px}.spectator-panel{position:fixed;inset:auto 10px 10px;width:auto;max-height:calc(70 * var(--vh));border-radius:18px}.recent-room-item{align-items:stretch;flex-direction:column}
 }
 @media (prefers-reduced-motion:reduce) { square.hint-from,square.hint-dest{animation:none} .clock-badge.low-time{animation:none} .live-room-card.skeleton{animation:none;opacity:.65} .lobby-back-btn,.lobby-refresh-btn,.room-action{transition:none} }
 
@@ -1892,7 +2006,7 @@ input[type='range'] {
 .review-modal {
   position: relative;
   width: min(560px, 100%);
-  max-height: 92vh;
+  max-height: calc(92 * var(--vh));
   overflow-y: auto;
   background: rgba(18, 20, 24, 0.92);
   backdrop-filter: blur(14px);
@@ -2082,10 +2196,10 @@ svg.cg-shapes g.red path { stroke: #ef4444; }
 svg.cg-shapes g.yellow path { stroke: #eab308; }
 
 /* Vertical evaluation bar beside the board */
-.board-with-eval { display: flex; align-items: stretch; gap: 8px; }
+.board-with-eval { display: flex; align-items: stretch; gap: var(--eval-gap); }
 .board-with-eval .board-wrap { flex: 0 0 auto; }
 .eval-bar-container {
-  width: 26px;
+  width: var(--eval-w);
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -2244,11 +2358,10 @@ svg.cg-shapes g.yellow path { stroke: #eab308; }
 @media (max-width: 768px) {
   .review-gauges { gap: 18px; }
   .accuracy-gauge-svg { width: 104px; height: 104px; }
-  .review-modal { padding: 16px; max-height: 94vh; }
-  .eval-bar-container { width: 18px; }
-  .board-with-eval { gap: 5px; }
+  .review-modal { padding: 16px; max-height: calc(94 * var(--vh)); }
+  :root { --eval-w: 18px; --eval-gap: 5px; }
   /* Vertical stack: board on top, review panel below (plan Hole 10). */
-  .chesscom-layout .review-panel { max-height: 46vh; }
+  .chesscom-layout .review-panel { max-height: calc(46 * var(--vh)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

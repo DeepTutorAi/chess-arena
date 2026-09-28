@@ -195,6 +195,7 @@ export class Controller {
     this.paused = false;
     this.ui.resetSandboxPanel?.();
     this.ui.setActionStrip?.({ undo: false, resign: false, flip: false, pause: false });
+    this.ui.showClocks?.(false); // the editor has no clocks — don't show "--:--" or the last game's times
 
     const fen = initialFen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     try {
