@@ -49,7 +49,8 @@ export class CoachService {
 
   generateInsight(ply) {
     const tier = TIER_BY_KEY[ply.tier];
-    const lost = ply.deltaW > 0;
+    // A negligible loss on a good move is not "lost advantage" — the tier decides.
+    const lost = BAD_TIERS.has(ply.tier) || ply.deltaW > 2;
     let explanation;
     if (ply.tier === 'book') {
       explanation = `การเดิน ${ply.san} เป็นตามาตรฐานของการเปิดเกม ยังไม่มีความเสียเปรียบเกิดขึ้น`;

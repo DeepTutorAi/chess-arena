@@ -70,35 +70,46 @@ export function calculateDeltaWinProbability(bestEval, actualEval) {
 }
 
 // plan.md §3.3 — canonical tier classification.
-// moveContext: { ply, secondDelta, isSacrifice, winProbAfter, missedMate,
-//                opponentPrevTier, endsGame } — everything beyond deltaW is
-// optional and degrades gracefully when missing.
+// moveContext: { ply, secondDelta, isSacrifice, winProbAfter, winProbBefore,
+//                missedMate, opponentPrevTier, endsGame, inBookLine } —
+// everything beyond deltaW is optional and degrades gracefully when missing.
+// inBookLine: true/false when a real opening line was matched (or ruled out);
+// null falls back to the early-ply heuristic.
 export function classifyMove(deltaW, moveContext = {}) {
   const {
     ply = Infinity,
     secondDelta = null,
     isSacrifice = false,
     winProbAfter = 50,
+    winProbBefore = 50,
     missedMate = false,
     opponentPrevTier = null,
     endsGame = false,
+    inBookLine = null,
   } = moveContext;
 
-  if (ply < BOOK_PLIES && deltaW <= BOOK_MAX_LOSS && !endsGame) return 'book';
+  const inBook = inBookLine === null ? ply < BOOK_PLIES : inBookLine;
+  if (inBook && deltaW <= BOOK_MAX_LOSS && !endsGame) return 'book';
   if (deltaW <= 0.1) {
-    if (isSacrifice && winProbAfter >= 60) return 'brilliant';
+    // Brilliant = a real sacrifice that works, in a position that was NOT
+    // already crushing, and that clearly beats the alternatives.
+    if (
+      isSacrifice && winProbAfter >= 60 && winProbBefore < 90
+      && (secondDelta === null || secondDelta >= 5)
+    ) return 'brilliant';
     if (secondDelta !== null && secondDelta >= 15) return 'great';
     return 'best';
   }
-  // Missed a forced mate the engine had, or failed to punish the opponent's
-  // fresh mistake/ blunder.
+  // Missed a forced mate the engine had.
   if (missedMate && deltaW > 10) return 'miss';
+  // A move that throws away >20% is a blunder whatever came before it; "Miss"
+  // (failing to punish the opponent's fresh mistake) is for the smaller lapses.
+  if (deltaW > 20) return 'blunder';
   if (
     (opponentPrevTier === 'mistake' || opponentPrevTier === 'blunder') && deltaW > 5
   ) {
     return 'miss';
   }
-  if (deltaW > 20) return 'blunder';
   if (deltaW > 10) return 'mistake';
   if (deltaW > 5) return 'inaccuracy';
   if (deltaW > 2) return 'good';
@@ -121,6 +132,44 @@ export function calculatePlayerAccuracy(deltaWList) {
     sum += 1 / Math.max(1, moveAccuracy(deltaW));
   }
   return deltaWList.length / sum;
+}
+
+/**
+ * Lichess-style volatility weights: a move made while the evaluation is swinging
+ * matters more than one made in a static position. Weight of move i = standard
+ * deviation of the white win% over a short window starting at that move,
+ * clamped to [0.5, 12]. `winPcts` has one entry per position (plies + 1).
+ */
+export function volatilityWeights(winPcts) {
+  const plies = Math.max(0, winPcts.length - 1);
+  const window = Math.min(8, Math.max(2, Math.floor(plies / 10)));
+  const weights = [];
+  for (let i = 0; i < plies; i++) {
+    const slice = winPcts.slice(i, Math.min(winPcts.length, i + window + 1));
+    const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
+    const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / slice.length;
+    weights.push(Math.min(12, Math.max(0.5, Math.sqrt(variance))));
+  }
+  return weights;
+}
+
+/**
+ * Player accuracy = average of the harmonic mean (punishes every bad move) and
+ * the volatility-weighted mean (punishes bad moves in critical moments). The
+ * harmonic mean alone turns one catastrophic move in a 40-move game into ~29%.
+ */
+export function calculateBlendedAccuracy(deltaWList, weights = null) {
+  const harmonic = calculatePlayerAccuracy(deltaWList);
+  if (harmonic === null) return null;
+  if (!weights || weights.length !== deltaWList.length) return harmonic;
+  let num = 0;
+  let den = 0;
+  deltaWList.forEach((deltaW, i) => {
+    num += moveAccuracy(deltaW) * weights[i];
+    den += weights[i];
+  });
+  const weighted = den > 0 ? num / den : harmonic;
+  return (harmonic + weighted) / 2;
 }
 
 const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
@@ -153,6 +202,13 @@ export function detectSacrifice(fen, move) {
 
 /** Rebuild the full game from a GameHistoryRecord — throws on an illegal move
  *  so callers can surface the real problem instead of analyzing garbage. */
+/** True when the position (placement, side to move, castling, en passant) is
+ *  the standard chess start — theory/"Book" only makes sense from there. */
+export function isStandardStart(fen) {
+  const key = (f) => String(f).split(' ').slice(0, 4).join(' ');
+  return key(fen) === key(START_FEN);
+}
+
 export function buildReplay(record) {
   const startFen = record.initialFen || START_FEN;
   const game = new Chess(startFen);
@@ -297,7 +353,9 @@ export class GameReviewAnalyzer {
     const secondEvals = new Array(total).fill(null);
     const bests = new Array(total).fill(null);
     const bestPvs = new Array(total).fill(null);
-    const opening = this.openingBook?.lookup(replay.moves.map((m) => m.san)) ?? null;
+    const opening = isStandardStart(replay.startFen)
+      ? (this.openingBook?.lookup(replay.moves.map((m) => m.san)) ?? null)
+      : null;
 
     // A cancel that landed before we got here (e.g. while the opening book was
     // still loading) must stick — never resurrect a cancelled analyzer.
@@ -460,7 +518,15 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
     const afterEval = negateEval(evals[i + 1]);
     const bestW = winProbFromEval(bestEval);
     const actualW = winProbFromEval(afterEval);
-    const deltaW = Math.max(0, bestW - actualW);
+    // deltaW compares two INDEPENDENT searches (before / after), so the engine's
+    // own top move can come out a couple of % "worse" from search noise alone.
+    // Playing the engine's choice is by definition a zero-loss move.
+    const engineChoice = bests[i];
+    const playedIsBest = Boolean(
+      engineChoice && engineChoice.from === move.from && engineChoice.to === move.to
+      && (engineChoice.promotion || undefined) === (move.promotion || undefined),
+    );
+    const deltaW = playedIsBest ? 0 : Math.max(0, bestW - actualW);
     const secondW = secondEvals[i] ? winProbFromEval(secondEvals[i]) : null;
     const secondDelta = secondW === null ? null : Math.max(0, bestW - secondW);
 
@@ -492,12 +558,19 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
 
     // Real theory (roadmap A2): a matched opening line grades "book" only while
     // the game stays inside it; no match keeps the early-ply heuristic fallback.
-    const bookEligible = opening ? i < opening.plies : true;
+    // Book: a matched line grades "book" for its full length (theory runs up to
+    // 14 plies); no match keeps the early-ply heuristic — but never from a custom
+    // start position, where "theory" means nothing.
+    let inBookLine = null;
+    if (opening) inBookLine = i < opening.plies;
+    else if (!isStandardStart(replay.startFen)) inBookLine = false;
     const tier = classifyMove(deltaW, {
-      ply: bookEligible ? i : Infinity,
+      ply: i,
+      inBookLine,
       secondDelta,
       isSacrifice: detectSacrifice(replay.fens[i], move),
       winProbAfter: actualW,
+      winProbBefore: bestW,
       missedMate: (bestEval?.mate ?? 0) > 0 && deltaW > 10,
       opponentPrevTier: i > 0 ? tiers[i - 1] : null,
       endsGame: replay.terminal[i + 1] !== null,
@@ -519,7 +592,7 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
       replySan,
       tier,
       deltaW: round2(deltaW),
-      cpLoss: Math.max(0, Math.round(evalToCentipawns(bestEval) - evalToCentipawns(afterEval))),
+      cpLoss: playedIsBest ? 0 : Math.max(0, Math.round(evalToCentipawns(bestEval) - evalToCentipawns(afterEval))),
       bestEvalCp: Math.round(evalToCentipawns(bestEval)),
     });
   }
@@ -554,9 +627,10 @@ export function buildAnalysisResult(record, replay, evals, secondEvals, bests, b
 
   const accuracy = { w: null, b: null };
   const counts = { w: emptyCounts(), b: emptyCounts() };
+  const weights = volatilityWeights(positions.map((p) => p.whiteWinProb));
   for (const color of ['w', 'b']) {
-    const deltas = plies.filter((p) => p.color === color).map((p) => p.deltaW);
-    accuracy[color] = calculatePlayerAccuracy(deltas);
+    const mine = plies.filter((p) => p.color === color);
+    accuracy[color] = calculateBlendedAccuracy(mine.map((p) => p.deltaW), mine.map((p) => weights[p.ply]));
     accuracy[color] = accuracy[color] === null ? null : round1(accuracy[color]);
     for (const p of plies) {
       if (p.color === color) counts[color][p.tier] += 1;
