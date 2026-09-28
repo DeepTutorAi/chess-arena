@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
 
 import {
-  HUMAN_LINES, STYLE_BONUS_CP, annotateLines, lineScore, pickHumanMove, styleBonus, temperatureFor,
+  HUMAN_LINES, STYLE_TILT, annotateLines, lineScore, pickHumanMove, styleFit, temperatureFor,
 } from '../src/humanbot.js';
 
 /** A small seeded generator so distribution tests are stable. */
@@ -92,6 +92,8 @@ test('when mate is unavoidable the longest resistance scores best', () => {
   assert.ok(lineScore({ mate: -9 }) > lineScore({ mate: -2 }));
   assert.ok(lineScore({ mate: 1 }) > lineScore({ mate: 6 }));
   assert.ok(lineScore({ cp: 900 }) < lineScore({ mate: 30 }));
+  assert.ok(lineScore({ cp: 1500 }) < lineScore({ mate: 30 }), 'a huge score never outranks a mate');
+  assert.ok(lineScore({ cp: -1500 }) > lineScore({ mate: -3 }), 'nor is being mated better than being crushed');
   assert.equal(pickHumanMove([{ uci: 'soon', mate: -2 }, { uci: 'later', mate: -9 }], { level: 11, rng: () => 0.5 }), 'later');
 });
 
@@ -118,19 +120,21 @@ test('lineScore turns mates into a huge score with the right sign', () => {
 
 // ---- style ------------------------------------------------------------------------------
 
-test('style tilts the choice by a bounded amount', () => {
-  assert.equal(styleBonus('balanced', { capture: true }), 0);
-  assert.equal(styleBonus('aggressive', { capture: true }), STYLE_BONUS_CP);
-  assert.equal(styleBonus('aggressive', { check: true }), STYLE_BONUS_CP);
-  assert.equal(styleBonus('aggressive', {}), 0);
-  assert.equal(styleBonus('solid', { capture: true }), 0);
-  assert.equal(styleBonus('solid', { castle: true }), STYLE_BONUS_CP);
-  assert.ok(styleBonus('solid', {}) > 0 && styleBonus('solid', {}) < STYLE_BONUS_CP);
+test('style fit is a fraction between none and full', () => {
+  assert.equal(styleFit('balanced', { capture: true }), 0);
+  assert.equal(styleFit('aggressive', { capture: true }), 1);
+  assert.equal(styleFit('aggressive', { check: true }), 1);
+  assert.equal(styleFit('aggressive', {}), 0);
+  assert.equal(styleFit('solid', { capture: true }), 0);
+  assert.equal(styleFit('solid', { castle: true }), 1);
+  assert.ok(styleFit('solid', {}) > 0 && styleFit('solid', {}) < 1);
   for (const style of ['balanced', 'aggressive', 'solid']) {
     for (const f of [{}, { capture: true }, { castle: true }, { check: true, promotion: true }]) {
-      assert.ok(Math.abs(styleBonus(style, f)) <= STYLE_BONUS_CP);
+      const fit = styleFit(style, f);
+      assert.ok(fit >= 0 && fit <= 1);
     }
   }
+  assert.ok(STYLE_TILT > 0 && STYLE_TILT < 1, 'a lean, not an override');
 });
 
 test('an aggressive bot reaches for captures and checks more than a solid one', () => {

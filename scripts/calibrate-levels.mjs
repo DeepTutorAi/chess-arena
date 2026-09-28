@@ -111,7 +111,8 @@ export function parseArgs(argv) {
   args.cross = Number(args.cross);
   if (args.style !== 'standard' && !HUMAN_STYLES.includes(args.style)) throw new Error(`--style must be one of ${HUMAN_STYLES.join(', ')} (got ${args.style})`);
   // The shipped ratings describe the standard bots only: a human-style run must write elsewhere.
-  if (args.style !== 'standard' && !args.fit && resolve(args.out) === resolve(ROOT, 'src/level-ratings.js')) throw new Error('a --style run needs its own --out (it must not overwrite src/level-ratings.js)');
+  if (args.style !== 'standard' && resolve(args.out) === resolve(ROOT, 'src/level-ratings.js')) throw new Error('a --style run needs its own --out (it must not overwrite src/level-ratings.js)');
+  if (args.cross && args.fit) throw new Error('--cross plays new games; --fit only refits saved ones');
   if (args.cross && args.style === 'standard') throw new Error('--cross compares a human style with the standard bot: add --style balanced|aggressive|solid');
   if (args.cross && (!Number.isInteger(args.cross) || args.cross < 2 || args.cross % 2)) throw new Error(`--cross must be an even number >= 2 (got ${args.cross})`);
   // Games come in colour-swapped pairs; an odd count would favour one colour.
@@ -142,20 +143,30 @@ export function scoreOf(result, aIsWhite) {
   return (result === '1-0') === aIsWhite ? 1 : 0;
 }
 
+/** Refuse to fit ratings from games that cannot describe the standard ladder. */
+export function assertFittable(ladderGames, out) {
+  if (!ladderGames.length) throw new Error('no ladder games to fit ratings from');
+  // The shipped file describes the standard bots: a saved human-style ladder (or a mix) must not replace it.
+  const styles = new Set(ladderGames.map((r) => r.style ?? 'standard'));
+  if (styles.size > 1) throw new Error(`the results mix bot styles (${[...styles].join(', ')}); fit them one style at a time`);
+  if (!styles.has('standard') && resolve(out) === resolve(ROOT, 'src/level-ratings.js')) {
+    throw new Error('these are human-style results: give a separate --out (src/level-ratings.js is for the standard bots)');
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const levelNumbers = parseLevels(args.levels);
   const anchorMean = levelNumbers.reduce((s, n) => s + LEVELS[n - 1].nominal, 0) / levelNumbers.length;
 
-  // Cross-play games (human style vs standard) are a separate measurement: they never
-  // feed the ladder fit, and a ladder run never mixes them into its own results.
-  const ladderOnly = (list) => list.filter((r) => !r.cross);
-  let results = args.seed ? JSON.parse(readFileSync(args.seed, 'utf8')) : [];
-  results = args.cross ? results.filter((r) => r.cross) : ladderOnly(results);
-  if (args.fit) {
-    results = JSON.parse(readFileSync(args.fit, 'utf8'));
-    if (!args.cross) results = ladderOnly(results);
-  } else {
+  // A results file can hold both kinds of game and always keeps both; a report or a
+  // fit only ever looks at its own kind (cross-play games never feed the ladder fit).
+  const readResults = (path) => JSON.parse(readFileSync(path, 'utf8'));
+  let results = args.fit ? readResults(args.fit) : args.seed ? readResults(args.seed) : [];
+  if (!args.fit) {
+    // Fail before playing anything, not after hours of games that cannot be fitted together.
+    const clash = results.find((r) => !r.cross && !args.cross && (r.style ?? 'standard') !== args.style);
+    if (clash) throw new Error(`the seeded games are ${clash.style ?? 'standard'} bots but this run is ${args.style}`);
     const engineDir = prepareEngineDir();
 
     const jobs = [];
@@ -185,7 +196,7 @@ async function main() {
         const styleB = job.cross ? 'standard' : args.style;
         const styles = { white: job.aIsWhite ? styleA : styleB, black: job.aIsWhite ? styleB : styleA };
         const { result, plies } = await playGame(engineDir, white, black, job.opening, styles);
-        results.push({ a: job.a, b: job.b, score: scoreOf(result, job.aIsWhite), plies, result, ...(job.cross ? { cross: true } : {}) });
+        results.push({ a: job.a, b: job.b, score: scoreOf(result, job.aIsWhite), plies, result, ...(job.cross ? { cross: true } : {}), ...(args.style !== 'standard' ? { style: args.style } : {}) });
         done += 1;
         console.log(`[${done}/${jobs.length}] L${job.a} vs L${job.b} ${job.aIsWhite ? '(a=white)' : '(a=black)'} ${result} in ${plies} plies`);
         if (args.results) writeFileSync(args.results, JSON.stringify(results));
@@ -195,9 +206,11 @@ async function main() {
     if (args.results) writeFileSync(args.results, JSON.stringify(results));
   }
 
-  if (results.some((r) => r.cross)) {
+  const ladderGames = results.filter((r) => !r.cross);
+  if (args.cross || (args.fit && !ladderGames.length && results.length)) {
     // Elo of a human-style level relative to the standard bot of the same level.
-    console.log(`\nlevel  ${args.style} vs standard (score, Elo difference)`);
+    const styleNames = [...new Set(results.filter((r) => r.cross).map((r) => r.style ?? args.style))].join('/');
+    console.log(`\nlevel  ${styleNames || args.style} vs standard (score, Elo difference)`);
     for (const n of levelNumbers) {
       const games = results.filter((r) => r.cross && r.a === n);
       if (!games.length) continue;
@@ -208,14 +221,15 @@ async function main() {
     return;
   }
 
+  assertFittable(ladderGames, args.out);
   // Levels are built to get stronger; sampling noise must not reorder them.
-  const fitted = fitRatings(results, { levels: levelNumbers, anchorMean });
+  const fitted = fitRatings(ladderGames, { levels: levelNumbers, anchorMean });
   const ordered = enforceIncreasing(levelNumbers.map((n) => fitted[n]));
   const ratings = Object.fromEntries(levelNumbers.map((n, i) => [n, Math.round(ordered[i] / 10) * 10]));
   console.log('\nlevel  nominal  calibrated');
   for (const n of levelNumbers) console.log(String(n).padStart(5), String(LEVELS[n - 1].nominal).padStart(8), String(ratings[n]).padStart(11));
   const pairCount = pairSchedule(levelNumbers, 2).length;
-  writeRatingsModule(args.out, { ratings, games: results.length, gamesPerPair: Math.round(results.length / pairCount) });
+  writeRatingsModule(args.out, { ratings, games: ladderGames.length, gamesPerPair: Math.round(ladderGames.length / pairCount) });
   console.log(`\nwrote ${args.out}`);
 }
 

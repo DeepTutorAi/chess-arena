@@ -83,7 +83,6 @@ export class Controller {
     this.botBook = null; // sound opening theory the bot may repeat (src/botbook.js)
     this.botOpeningMove = 'random';
     this.botStyle = 'standard'; // 'standard' (Skill Level, rated) or a human style (src/humanbot.js, unrated)
-    this._searchFen = null; // position of the search in flight (its lines are chosen among on the way back)
 
     this.game = new Chess();
     this.mode = null;
@@ -834,7 +833,7 @@ export class Controller {
           this._engineTurn();
         }
       },
-      onBestMove: (uci, info, lines) => this._onEngineBestMove(uci, lines),
+      onBestMove: (uci, info, lines, searchedFen) => this._onEngineBestMove(uci, lines, searchedFen),
       onError: (msg) => {
         this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err');
         if (!this.engineReady) {
@@ -2208,7 +2207,6 @@ export class Controller {
         this._onEngineBestMove(bookMove);
         return;
       }
-      this._searchFen = fen; // the position the lines of this search describe
       this.engine.setPosition(fen);
       this.engine.go({ movetime: search, depth: cfg.depth });
     }, delay);
@@ -2224,12 +2222,10 @@ export class Controller {
   }
 
   /** A human-style bot chooses among the engine's lines; anything else plays its best move. */
-  _humanChoice(uci, lines) {
+  _humanChoice(uci, lines, fen) {
     if (this.botStyle === 'standard' || !Array.isArray(lines) || lines.length < 2) return uci;
     // The lines belong to the position that was searched; if the board has moved on
     // since (a stale answer), leave the engine's move alone rather than guess.
-    const fen = this._searchFen;
-    this._searchFen = null;
     if (!fen || fen !== this.game.fen()) return uci;
     const candidates = annotateLines((f) => new Chess(f), fen, lines);
     return pickHumanMove(candidates, { level: this.levelIndex + 1, style: this.botStyle }) ?? uci;
@@ -2248,11 +2244,11 @@ export class Controller {
     return this.botBook.pick(this.game.fen(), { isLegal: (uci) => legal.has(uci) });
   }
 
-  _onEngineBestMove(uci, lines = null) {
+  _onEngineBestMove(uci, lines = null, searchedFen = null) {
     this.engineBusy = false;
     this.ui.setBusy?.(false);
     if (!uci || this._isOver()) return;
-    uci = this._humanChoice(uci, lines);
+    uci = this._humanChoice(uci, lines, searchedFen);
     const orig = uci.slice(0, 2);
     const dest = uci.slice(2, 4);
     const promotion = uci.length > 4 ? uci[4] : undefined;

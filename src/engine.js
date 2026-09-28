@@ -9,10 +9,27 @@ const infoRe =
 const multipvRe = /\bmultipv (\d+)/;
 
 /**
- * A search cut off mid-iteration leaves the later MultiPV slots holding lines from the
- * iteration before, so a move that has since climbed to the top can appear twice. The
- * fresher (lower-numbered) line wins and the stale copy is dropped.
+ * The lines to report for a finished search. A search cut off mid-iteration leaves the
+ * later MultiPV slots holding lines from the iteration before: a move that has since
+ * climbed to the top then appears twice (the fresher, lower-numbered copy wins), and
+ * the move it displaced from the top slot is otherwise lost — so displaced moves fill
+ * any slots left short, after the fresh lines.
+ * @param {Map<number, object>} slots  latest line per MultiPV index
+ * @param {object[]} [displaced]  older lines pushed out of a slot by another move
  */
+export function finalLines(slots, displaced = []) {
+  const lines = uniqueLines([...slots.values()].sort((a, b) => a.multipv - b.multipv));
+  const have = new Set(lines.map((l) => l.pv[0]));
+  for (const old of displaced.slice().reverse()) {
+    if (lines.length >= slots.size) break;
+    if (!old.pv[0] || have.has(old.pv[0])) continue;
+    have.add(old.pv[0]);
+    lines.push(old);
+  }
+  return lines;
+}
+
+/** Drop later copies of a move, keeping lines without a move as they are. */
 export function uniqueLines(lines) {
   const seen = new Set();
   return lines.filter((line) => {
@@ -29,8 +46,10 @@ export class Stockfish {
    * @param {object} opts
    * @param {Function} [opts.onReady]
    * @param {Function} [opts.onInfo] (info) => void — periodic search info
-   * @param {Function} opts.onBestMove (uci, info, lines) => void — `lines` is the final
-   *        result of every MultiPV line, best first: [{ multipv, depth, cp, mate, pv }]
+   * @param {Function} opts.onBestMove (uci, info, lines, fen) => void — `lines` is the final
+   *        result of every MultiPV line, best first: [{ multipv, depth, cp, mate, pv }];
+   *        `fen` is the position the search was started on (null if none was set), which
+   *        stays right even when a stopped search answers after a new one has begun
    * @param {Function} [opts.onError] (msg) => void
    * @param {string} [opts.workerUrl]
    */
@@ -43,6 +62,9 @@ export class Stockfish {
     this.ready = false;
     this._searchInfo = null;
     this._lines = new Map(); // multipv index -> latest line of the current search
+    this._displaced = []; // lines a later iteration pushed out of their slot with another move
+    this._fen = null; // the last position sent
+    this._searches = []; // one entry per `go` not yet answered; the engine answers in order
     this._bestmove = null;
     this._pendingReady = null;
 
@@ -71,13 +93,18 @@ export class Stockfish {
       if (m && !/\b(?:lowerbound|upperbound)\b/.test(line)) {
         const previous = this._lines.get(multipv);
         if (!previous || Number(m[1]) >= previous.depth) {
-          this._lines.set(multipv, {
+          const line = {
             multipv,
             depth: Number(m[1]),
             cp: m[2] === 'cp' ? Number(m[3]) : null,
             mate: m[2] === 'mate' ? Number(m[3]) : null,
             pv: m[6] ? m[6].split(' ') : [],
-          });
+          };
+          if (previous && previous.pv[0] !== line.pv[0]) {
+            this._displaced.push(previous);
+            if (this._displaced.length > 64) this._displaced.shift();
+          }
+          this._lines.set(multipv, line);
         }
       }
       // The headline info stays that of the BEST line even when several are searched.
@@ -100,10 +127,12 @@ export class Stockfish {
         this._bestmove = uci;
       }
       const info = this._searchInfo;
-      const lines = uniqueLines([...this._lines.values()].sort((a, b) => a.multipv - b.multipv));
+      const lines = finalLines(this._lines, this._displaced);
+      const fen = this._searches.shift() ?? null;
       this._searchInfo = null;
       this._lines = new Map();
-      this.onBestMove(this._bestmove, info, lines);
+      this._displaced = [];
+      this.onBestMove(this._bestmove, info, lines, fen);
     }
   }
 
@@ -112,6 +141,7 @@ export class Stockfish {
   }
 
   setPosition(fen) {
+    this._fen = fen;
     this._send(`position fen ${fen}`);
   }
 
@@ -126,6 +156,8 @@ export class Stockfish {
     if (opts.infinite) parts.push('infinite');
     this._searchInfo = null;
     this._lines = new Map();
+    this._displaced = [];
+    this._searches.push(this._fen);
     this._send(parts.join(' '));
   }
 

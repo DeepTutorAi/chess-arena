@@ -9,6 +9,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { uniqueLines } from '../src/engine.js';
+
 export const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 /** Copy the engine next to a CommonJS package.json; returns the folder. */
@@ -40,12 +42,7 @@ export function finalLines(rawLines) {
     });
   }
   // A search cut off mid-iteration leaves later slots stale: keep the fresher copy of a move.
-  const seen = new Set();
-  return [...byIndex.values()].sort((a, b) => a.multipv - b.multipv).filter((line) => {
-    if (seen.has(line.pv[0])) return false;
-    seen.add(line.pv[0]);
-    return true;
-  });
+  return uniqueLines([...byIndex.values()].sort((a, b) => a.multipv - b.multipv));
 }
 
 /** Mates clamp to ±1000 cp so they stay comparable on one scale. */

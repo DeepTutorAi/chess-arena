@@ -11,11 +11,11 @@
 export const HUMAN_STYLES = Object.freeze(['balanced', 'aggressive', 'solid']);
 /** How many engine lines (MultiPV) the picker chooses among. */
 export const HUMAN_LINES = 4;
-/** The scale of a style's preference: a move that fully fits gets this many points (see STYLE_TILT). */
-export const STYLE_BONUS_CP = 30;
-/** A style's full preference, in temperatures (a weight factor of e^0.4 ≈ 1.5). */
-const STYLE_TILT = 0.4;
+/** How far a full style fit leans a choice, in temperatures (a weight factor of e^0.4 ≈ 1.5). */
+export const STYLE_TILT = 0.4;
 const MATE_CP = 1000;
+/** Ordinary scores stop here, so every mate sorts beyond every centipawn score. */
+const MAX_CP = MATE_CP - 100;
 
 /**
  * Softmax temperature in centipawns for a level (1..11): 240 for a beginner down
@@ -36,19 +36,19 @@ export function lineScore(line) {
   if (line.mate !== null && line.mate !== undefined && line.mate !== 0) {
     return Math.sign(line.mate) * (MATE_CP - Math.min(Math.abs(line.mate), 99));
   }
-  return line.cp ?? 0;
+  return Math.max(-MAX_CP, Math.min(MAX_CP, line.cp ?? 0));
 }
 
 /**
- * How well a move fits a style, on a scale where STYLE_BONUS_CP is a full fit.
- * pickHumanMove scales it with the level's temperature, so style stays a lean and
- * never turns a good bot into a bad one.
+ * How well a move fits a style: 0 (not at all) to 1 (fully). pickHumanMove turns it
+ * into a lean of STYLE_TILT temperatures at most, so style stays a lean and never
+ * turns a good bot into a bad one.
  * @param {{capture?: boolean, check?: boolean, castle?: boolean, promotion?: boolean}} features
  */
-export function styleBonus(style, features = {}) {
+export function styleFit(style, features = {}) {
   const forcing = Boolean(features.capture || features.check || features.promotion);
-  if (style === 'aggressive') return forcing ? STYLE_BONUS_CP : 0;
-  if (style === 'solid') return forcing ? 0 : (features.castle ? STYLE_BONUS_CP : STYLE_BONUS_CP * 0.6);
+  if (style === 'aggressive') return forcing ? 1 : 0;
+  if (style === 'solid') return forcing ? 0 : (features.castle ? 1 : 0.6);
   return 0;
 }
 
@@ -78,15 +78,15 @@ export function pickHumanMove(candidates, { level, style = 'balanced', rng = Mat
   // No level plays a line further behind than it plausibly would: about a piece for
   // a beginner, well under a pawn and a half for a strong player.
   const floor = best - Math.min(450, Math.max(150, temperature * 1.6));
-  // The style makes a matching move about 1.5x as likely at every level (a tilt of
-  // 0.4 temperatures): a wide lean for a beginner, and for a master a few centipawns —
-  // far too little to prefer a worse move.
-  const tilt = (temperature * STYLE_TILT) / STYLE_BONUS_CP;
+  // The style makes a matching move about 1.5x as likely at every level: a wide lean
+  // in centipawns for a beginner, and for a master a few — far too little to prefer
+  // a worse move.
+  const lean = temperature * STYLE_TILT;
 
   const weights = lines.map((line, i) => {
     if (scores[i] < floor) return 0;
     const loss = best - scores[i];
-    return Math.exp(-(loss - styleBonus(style, line) * tilt) / temperature);
+    return Math.exp(-(loss - styleFit(style, line) * lean) / temperature);
   });
   const total = weights.reduce((a, b) => a + b, 0);
   if (total <= 0) return lines[0].uci;

@@ -103,9 +103,8 @@ test('a human-style bot chooses among the lines; a standard bot always plays its
   const start = () => { const g = new Chess(); g.move('e4'); return g; };
   const human = makeBot(t, 'balanced', 1);
   human.controller.game = start();
-  human.controller._searchFen = human.controller.game.fen();
   t.mock.method(Math, 'random', () => 0.9999);
-  human.controller._onEngineBestMove('e7e5', LINES);
+  human.controller._onEngineBestMove('e7e5', LINES, human.controller.game.fen());
   assert.deepEqual(human.controller.game.history(), ['e4', 'e6'], 'the roll landed on the third line');
 
   const standard = makeBot(t, 'standard', 1);
@@ -119,15 +118,13 @@ test('a human-style bot falls back to the engine move when it has no lines to ch
   const g = new Chess();
   g.move('e4');
   controller.game = g;
-  controller._searchFen = g.fen();
-  controller._onEngineBestMove('c7c5', []);
+  controller._onEngineBestMove('c7c5', [], g.fen());
   assert.deepEqual(controller.game.history(), ['e4', 'c5']);
   const g2 = new Chess();
   g2.move('e4');
   controller.game = g2;
-  controller._searchFen = g2.fen();
   controller.engineBusy = true;
-  controller._onEngineBestMove('e7e5', [{ multipv: 1, depth: 3, cp: 0, mate: null, pv: ['e7e5'] }]);
+  controller._onEngineBestMove('e7e5', [{ multipv: 1, depth: 3, cp: 0, mate: null, pv: ['e7e5'] }], g2.fen());
   assert.deepEqual(controller.game.history(), ['e4', 'e5'], 'one line is no choice');
 });
 
@@ -190,11 +187,15 @@ test('an answer for a position the board has left is played as the engine gave i
   const g = new Chess();
   g.move('e4');
   controller.game = g;
-  controller._searchFen = 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1'; // searched another position
   t.mock.method(Math, 'random', () => 0.9999);
-  controller._onEngineBestMove('e7e5', LINES);
+  const other = 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1'; // searched another position
+  controller._onEngineBestMove('e7e5', LINES, other);
   assert.deepEqual(controller.game.history(), ['e4', 'e5'], 'lines of another position are not trusted');
-  assert.equal(controller._searchFen, null, 'the record of the search is consumed');
+  const again = new Chess();
+  again.move('e4');
+  controller.game = again;
+  controller._onEngineBestMove('e7e5', LINES, null);
+  assert.deepEqual(controller.game.history(), ['e4', 'e5'], 'nor are lines that come without a position');
 });
 
 test('a search cut off mid-iteration reports no move twice', withWorker(() => {
@@ -208,7 +209,24 @@ test('a search cut off mid-iteration reports no move twice', withWorker(() => {
   w.say('info depth 9 multipv 3 score cp 10 nodes 1 nps 1 time 1 pv g1f3 g8f6');
   w.say('info depth 10 multipv 1 score cp 25 nodes 1 nps 1 time 1 pv d2d4 g8f6');
   w.say('bestmove d2d4');
-  assert.deepEqual(results[0].map((l) => [l.multipv, l.depth, l.pv[0]]), [[1, 10, 'd2d4'], [3, 9, 'g1f3']]);
+  // The move pushed out of the top slot is not lost: it fills the slot the duplicate freed.
+  assert.deepEqual(results[0].map((l) => [l.depth, l.pv[0]]), [[10, 'd2d4'], [9, 'g1f3'], [9, 'e2e4']]);
+}));
+
+test('a bestmove reports the position its own search started on, even after a newer position was set', withWorker(() => {
+  const answers = [];
+  const engine = new Stockfish({ onBestMove: (uci, info, lines, fen) => answers.push([uci, fen]) });
+  engine.setPosition('fen-A');
+  engine.go({ movetime: 50 });
+  engine.stop();
+  engine.setPosition('fen-B'); // the stopped search has not answered yet
+  engine.go({ movetime: 50 });
+  const w = FakeWorker.latest;
+  w.say('bestmove e2e4');
+  w.say('bestmove d2d4');
+  assert.deepEqual(answers, [['e2e4', 'fen-A'], ['d2d4', 'fen-B']]);
+  w.say('bestmove a2a3'); // an unexpected extra answer has no position rather than a wrong one
+  assert.deepEqual(answers[2], ['a2a3', null]);
 }));
 
 test('uniqueLines keeps the first copy of each move and passes empty lines through', () => {

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import { LEVELS, levelRating } from '../src/config.js';
 import { LEVEL_RATINGS } from '../src/level-ratings.js';
-import { OPENINGS, adjudicate, parseArgs, scoreOf } from '../scripts/calibrate-levels.mjs';
+import { OPENINGS, adjudicate, assertFittable, parseArgs, scoreOf } from '../scripts/calibrate-levels.mjs';
 import { Chess } from 'chess.js';
 
 test('11 levels, each stronger than the last in both settings and rating', () => {
@@ -85,7 +85,7 @@ test('scoreOf is from the first player\'s point of view', () => {
 test('calibration arguments are validated (odd or non-numeric game counts would skew the colours)', () => {
   assert.equal(parseArgs(['--games', '10', '--parallel', '2', '--offset', '3']).games, 10);
   assert.equal(parseArgs([]).games, 6, 'defaults are valid');
-  for (const bad of [['--style', 'reckless'], ['--style', 'balanced', '--cross', '3'], ['--cross', '4']]) {
+  for (const bad of [['--style', 'reckless'], ['--style', 'balanced', '--cross', '3'], ['--cross', '4'], ['--style', 'balanced', '--cross', '4', '--fit', 'x.json']]) {
     assert.throws(() => parseArgs(bad), /--style|--cross/u, bad.join(' '));
   }
   assert.equal(parseArgs(['--style', 'balanced', '--cross', '4', '--out', '/tmp/x.js']).cross, 4);
@@ -95,4 +95,13 @@ test('calibration arguments are validated (odd or non-numeric game counts would 
   for (const bad of [['--games', '7'], ['--games', 'abc'], ['--games', '0'], ['--parallel', '0'], ['--offset', '-1'], ['--offset', 'x']]) {
     assert.throws(() => parseArgs(bad), /must be/u, bad.join(' '));
   }
+});
+
+test('ratings are only fitted from standard-ladder games and never over the shipped file by mistake', () => {
+  const game = (extra = {}) => ({ a: 1, b: 2, score: 1, ...extra });
+  assert.throws(() => assertFittable([], '/tmp/x.js'), /no ladder games/u);
+  assert.doesNotThrow(() => assertFittable([game(), game()], 'src/level-ratings.js'));
+  assert.throws(() => assertFittable([game(), game({ style: 'solid' })], '/tmp/x.js'), /mix bot styles/u);
+  assert.throws(() => assertFittable([game({ style: 'balanced' })], 'src/level-ratings.js'), /human-style/u);
+  assert.doesNotThrow(() => assertFittable([game({ style: 'balanced' })], '/tmp/human-ratings.js'));
 });
