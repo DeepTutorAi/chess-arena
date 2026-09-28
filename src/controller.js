@@ -10,12 +10,15 @@ import { SpectatorEval as SpectatorAnalysisEngine } from './spectator-eval.js';
 import { AVATAR_GLYPHS, OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
 import { planThinkTime } from './thinktime.js';
+import { bookPlies, getBotBook } from './botbook.js';
 import { createTurnAlert } from './turnalert.js';
+import { createStatsStore } from './stats.js';
 import { sounds } from './sounds.js';
 import {
   ENGINE_NAME,
   HUMAN_NAME,
   LEVELS,
+  levelRating,
   TIME_CONTROLS,
   DEFAULT_TIME_CONTROL,
   ENGINE_HINT_URL,
@@ -40,12 +43,20 @@ export class Controller {
     onlineClientFactory = (options) => new OnlineRoomClient(options),
     gameOverDelayMs = 3000,
     turnAlert = createTurnAlert(),
+    loadBotBook = getBotBook,
+    stats = createStatsStore({ levelRating, levelCount: LEVELS.length }),
   }) {
     this.ui = ui;
     this.ground = ground;
     this.onPromotion = onPromotion;
     this._gameOverDelayMs = gameOverDelayMs;
     this.turnAlert = turnAlert; // blinks the tab title when it is our turn in a hidden tab
+    this.stats = stats; // local rating + results against the bots (src/stats.js)
+    this._assisted = false; // undo / hint used in this bot game: it is not rated
+    this._statsRecorded = false;
+    this._statsNote = '';
+    this._loadBotBook = loadBotBook;
+    this.botBook = null; // sound opening theory the bot may repeat (src/botbook.js)
 
     this.game = new Chess();
     this.mode = null;
@@ -131,6 +142,9 @@ export class Controller {
     this._isTimeout = false;
     this._lowTimePlayed = false; // low-time warning fires once per game
     this._timeoutLoser = null;
+    this._assisted = false;
+    this._statsRecorded = false;
+    this._statsNote = ''; // rating line appended to the game-over card
 
     const initialFen = opts.initialFen ?? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
     try {
@@ -583,7 +597,10 @@ export class Controller {
         return;
       }
       this.game.undo();
-      if (this.mode === MODES.HUMAN_VS_AI) this.game.undo(); // take back engine reply too
+      if (this.mode === MODES.HUMAN_VS_AI) {
+        this.game.undo(); // take back engine reply too
+        this._assisted = true;
+      }
       if (this.engine) this.engine.setPosition(this.game.fen());
 
       this.ground.cancelPremove?.();
@@ -722,6 +739,11 @@ export class Controller {
         this.game = new Chess();
       }
     }
+
+    // The book is tiny next to the engine download, so it is normally ready
+    // before the bot's first move; if not, that move simply comes from the engine.
+    this.botBook = null;
+    Promise.resolve(this._loadBotBook()).then((book) => { this.botBook = book ?? null; }, () => {});
 
     const engineEntry = { name: `${ENGINE_NAME} Elo ${cfg.elo} (ฝ่าย${engineSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'robot' };
     const humanEntry = { name: `${HUMAN_NAME} (ฝ่าย${this.humanSide === 'w' ? 'ขาว' : 'ดำ'})`, icon: 'user' };
@@ -1238,6 +1260,7 @@ export class Controller {
         times: this._clockSnapshots.map((s) => ({ ply: s.ply, w: s.w, b: s.b })),
         initial: this._recordInitialTimes(),
       };
+      if (!fromState) this._recordBotStats(result);
     } catch (err) {
       // A broken record must never break the game-over flow — review is
       // simply unavailable for that game.
@@ -1255,6 +1278,36 @@ export class Controller {
       return { w: this.clock.initialMs, b: this.clock.initialMs };
     }
     return null;
+  }
+
+  /** Feed a finished bot game into the local rating and remember what to tell the player. */
+  _recordBotStats(result) {
+    if (this.mode !== MODES.HUMAN_VS_AI || this._statsRecorded || !this.stats) return;
+    this._statsRecorded = true;
+    const plies = this.game.history().length;
+    const humanWon = (result === '1-0') === (this.humanSide === 'w');
+    const score = result === '1/2-1/2' ? 0.5 : humanWon ? 1 : 0;
+    let outcome;
+    try {
+      outcome = this.stats.recordBotGame({
+        level: this.levelIndex + 1, score, color: this.humanSide, plies, assisted: this._assisted,
+      });
+    } catch { return; } // stats must never break the game-over flow
+    this.ui.setPlayerRating?.(outcome.rating, outcome.provisional);
+    if (!outcome.rated) {
+      this._statsNote = this._assisted ? 'เกมนี้ไม่นับเรตติ้ง (ใช้ย้อนตาหรือคำใบ้)' : 'เกมสั้นเกินไป ไม่นับเรตติ้ง';
+      return;
+    }
+    const sign = outcome.delta > 0 ? '+' : outcome.delta < 0 ? '−' : '±';
+    const lines = [`เรตติ้งของคุณ ${outcome.rating} (${sign}${Math.abs(outcome.delta)})${outcome.provisional ? ' · ชั่วคราว' : ''}`];
+    if (outcome.hint === 'up' && this.levelIndex + 1 < LEVELS.length) {
+      const next = LEVELS[this.levelIndex + 1];
+      lines.push(`ระดับนี้ง่ายไปแล้ว — ลองระดับ ${next.level} (Elo ${next.elo})`);
+    } else if (outcome.hint === 'down' && this.levelIndex > 0) {
+      const easier = LEVELS[this.levelIndex - 1];
+      lines.push(`ระดับนี้ยากไปหน่อย — ลองระดับ ${easier.level} (Elo ${easier.elo})`);
+    }
+    this._statsNote = lines.join('\n');
   }
 
   _recordPlayers() {
@@ -1430,6 +1483,7 @@ export class Controller {
   /** Pop the game-over card after a short beat so players can take in the
    *  final position first — game-over sounds already played immediately. */
   _showGameOverSoon(title, detail, delayMs = this._gameOverDelayMs) {
+    if (this._statsNote) detail = `${detail}\n${this._statsNote}`;
     this._lastGameOver = { title, detail };
     const open = () => {
       if (this._gameOverOverlay?.body?.isConnected) return;
@@ -1841,13 +1895,28 @@ export class Controller {
     // The level's own movetime is the search ceiling: kept in full whenever the
     // clock affords it (so strength doesn't change with the time control) and
     // shortened only as far as the bot's clock requires.
-    const { delay, search } = this._thinkTime(cfg.movetime);
+    const bookMove = this._bookMove();
+    const plan = this._thinkTime(bookMove ? 0 : cfg.movetime);
+    // Known theory comes out faster than a position the bot has to work out.
+    const delay = bookMove ? Math.max(400, Math.round(plan.delay * 0.6)) : plan.delay;
+    const search = plan.search;
     const fen = this.game.fen();
     this._aiTimer = setTimeout(() => {
       if (this._isOver() || !this.engine || !this.engineReady) return;
+      if (bookMove) {
+        this._onEngineBestMove(bookMove);
+        return;
+      }
       this.engine.setPosition(fen);
       this.engine.go({ movetime: search, depth: cfg.depth });
     }, delay);
+  }
+
+  /** A sound opening move for the bot to play from theory, or null when out of book. */
+  _bookMove() {
+    if (!this.botBook || this.game.history().length >= bookPlies(this.levelIndex + 1)) return null;
+    const legal = new Set(this.game.moves({ verbose: true }).map((m) => m.from + m.to + (m.promotion ?? '')));
+    return this.botBook.pick(this.game.fen(), { isLegal: (uci) => legal.has(uci) });
   }
 
   _onEngineBestMove(uci) {
@@ -1900,6 +1969,7 @@ export class Controller {
       return;
     }
     this.hintBusy = true;
+    this._assisted = true;
     this.ui.setBusy?.(true);
     this.ui.setStatus('บอท GM กำลังคิดคำใบ้…', 'busy');
     if (!this.hintEngine) {

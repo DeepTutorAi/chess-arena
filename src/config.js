@@ -1,5 +1,7 @@
 // Chess Arena — central configuration & local room storage engine.
 
+import { LEVEL_RATINGS } from './level-ratings.js';
+
 // Engine worker loaded at runtime (public assets, same-origin, no COOP/COEP
 // required — compatible with GitHub Pages). Keep in sync with scripts/copy-engine.mjs.
 export const ENGINE_WORKER_URL = './engine/stockfish-18-lite-single.js';
@@ -46,20 +48,34 @@ export function setStrongEnginePreference(value) {
   }
 }
 
-// Human vs AI — strength mapping (level 1..8 -> UCI Skill Level 1..20 & Elo).
-export const LEVELS = [
-  { level: 1, elo: 800, skill: 2, depth: 4, movetime: 500, label: '800 (มือใหม่)' },
-  { level: 2, elo: 1000, skill: 5, depth: 5, movetime: 600, label: '1000' },
-  { level: 3, elo: 1200, skill: 8, depth: 6, movetime: 700, label: '1200' },
-  { level: 4, elo: 1400, skill: 10, depth: 7, movetime: 800, label: '1400 (ทั่วไป)' },
-  { level: 5, elo: 1600, skill: 13, depth: 8, movetime: 900, label: '1600' },
-  { level: 6, elo: 1800, skill: 15, depth: 9, movetime: 1000, label: '1800 (ฝีมือดี)' },
-  { level: 7, elo: 2000, skill: 18, depth: 10, movetime: 1200, label: '2000 (เชี่ยวชาญ)' },
-  { level: 8, elo: 2200, skill: 20, depth: 12, movetime: 1500, label: '2200+ (มาสเตอร์)' },
-  { level: 9, elo: 2400, skill: 20, depth: 14, movetime: 1800, label: '2400' },
-  { level: 10, elo: 2600, skill: 20, depth: 16, movetime: 2200, label: '2600' },
-  { level: 11, elo: 2800, skill: 20, depth: 18, movetime: 2800, label: '2800 (กรังด์มาสเตอร์)' },
+// Human vs AI — the 11 bot levels. `nominal` is the design target used to
+// choose the settings; `elo` is what the level actually measured in the Bot
+// Arena (scripts/calibrate-levels.mjs: the levels played each other and the
+// results were fitted to Elo). Until a calibration exists `elo` falls back to
+// the nominal value. It is a scale relative to these bots, not a FIDE rating.
+const LEVEL_TAGS = { 1: 'มือใหม่', 4: 'ทั่วไป', 6: 'ฝีมือดี', 7: 'เชี่ยวชาญ', 8: 'มาสเตอร์', 11: 'กรังด์มาสเตอร์' };
+const LEVEL_SETTINGS = [
+  { level: 1, nominal: 800, skill: 2, depth: 4, movetime: 500 },
+  { level: 2, nominal: 1000, skill: 5, depth: 5, movetime: 600 },
+  { level: 3, nominal: 1200, skill: 8, depth: 6, movetime: 700 },
+  { level: 4, nominal: 1400, skill: 10, depth: 7, movetime: 800 },
+  { level: 5, nominal: 1600, skill: 13, depth: 8, movetime: 900 },
+  { level: 6, nominal: 1800, skill: 15, depth: 9, movetime: 1000 },
+  { level: 7, nominal: 2000, skill: 18, depth: 10, movetime: 1200 },
+  { level: 8, nominal: 2200, skill: 20, depth: 12, movetime: 1500 },
+  { level: 9, nominal: 2400, skill: 20, depth: 14, movetime: 1800 },
+  { level: 10, nominal: 2600, skill: 20, depth: 16, movetime: 2200 },
+  { level: 11, nominal: 2800, skill: 20, depth: 18, movetime: 2800 },
 ];
+
+export const LEVELS = LEVEL_SETTINGS.map((settings) => {
+  const elo = LEVEL_RATINGS.ratings?.[settings.level] ?? settings.nominal;
+  const tag = LEVEL_TAGS[settings.level];
+  return { ...settings, elo, label: tag ? `${elo} (${tag})` : String(elo) };
+});
+
+/** Strength of a bot level (1-based) on the calibrated scale. */
+export const levelRating = (level) => LEVELS[Math.max(1, Math.min(LEVELS.length, level)) - 1].elo;
 
 // Player-facing WebSocket rooms use bounded retries. The room-scoped session
 // capability is persisted separately by src/online.js.

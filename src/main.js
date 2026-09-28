@@ -19,6 +19,7 @@ import {
   parseWatchInviteLocation,
 } from './online.js';
 import { createLobbyView } from './lobby.js';
+import { createProfileView } from './profile-ui.js';
 import { sounds } from './sounds.js';
 import { iconBolt, iconHome, iconSound, iconMute, iconFlag, iconArrowRight } from './icons.js';
 
@@ -131,6 +132,7 @@ ui.refs.board.addEventListener('click', (e) => {
 });
 
 const controller = new Controller({ ui, ground, onPromotion: openPromotion });
+ui.setPlayerRating(controller.stats.rating, controller.stats.provisional);
 
 // ---- mode dialogs -----------------------------------------------------------
 
@@ -440,7 +442,7 @@ function openModeDialog(targetMode = null) {
         tag: 'SOLO VS BOT',
         tagClass: 'tag-green',
         title: 'Play Bots (เล่น vs Stockfish 18)',
-        desc: 'ท้าดวล AI ปรับระดับ Elo 800 - 2200+ ได้อย่างอิสระ',
+        desc: `ท้าดวล AI 11 ระดับ (Elo ${LEVELS[0].elo} - ${LEVELS[LEVELS.length - 1].elo}) พร้อมเรตติ้งของคุณ`,
       },
       {
         mode: MODES.AI_VS_AI,
@@ -505,7 +507,11 @@ function openModeDialog(targetMode = null) {
 
       const levelWrap = ui.el('label', 'field');
       const levelLabel = ui.el('div', 'field-label');
-      const initialCfg = LEVELS[3]; // default level 4 = Elo 1400
+      // Level 4 for a newcomer; once the player has rated games, the level that
+      // matches their rating.
+      const rated = controller.stats.ratedGames > 0;
+      const startLevel = rated ? controller.stats.suggestedLevel() : 4;
+      const initialCfg = LEVELS[startLevel - 1];
       levelLabel.innerHTML = `ระดับเอนจิน: <b id="hva-level-label">Elo ${initialCfg.label}</b>`;
       levelWrap.appendChild(levelLabel);
 
@@ -514,7 +520,7 @@ function openModeDialog(targetMode = null) {
       slider.min = '1';
       slider.max = '11';
       slider.step = '1';
-      slider.value = '4';
+      slider.value = String(startLevel);
       slider.addEventListener('input', () => {
         const idx = Number(slider.value) - 1;
         const cfg = LEVELS[idx];
@@ -524,6 +530,10 @@ function openModeDialog(targetMode = null) {
 
       levelWrap.appendChild(slider);
       body.appendChild(levelWrap);
+      if (rated) {
+        body.append(ui.el('p', 'dlg-hint',
+          `แนะนำระดับ ${startLevel} ตามเรตติ้งของคุณ (${controller.stats.rating}) — เลื่อนเปลี่ยนได้`));
+      }
 
       body.append(ui.el('div', 'field-label', 'ตั้งค่าเวลา (Time Control)'));
       body.appendChild(timeControlRadios('hva-tc'));
@@ -724,8 +734,21 @@ function openModeDialog(targetMode = null) {
 
 ui.refs.brandHome.onclick = () => controller.goHome();
 ui.refs.profileBtn.onclick = () => {
-  const body = ui.el('p', 'dlg-hint', 'ระบบสมาชิกและโปรไฟล์ผู้เล่นกำลังอยู่ในการพัฒนาค่ะ!');
-  ui.openModal('โปรไฟล์ผู้เล่น', body);
+  const { stats } = controller;
+  const modal = ui.openModal('โปรไฟล์และสถิติ', createProfileView({
+    document,
+    stats,
+    levels: LEVELS,
+    confirm: (message) => window.confirm(message),
+    onPlayLevel: () => {
+      modal.close();
+      openModeDialog(MODES.HUMAN_VS_AI);
+    },
+    onReset: () => {
+      ui.setPlayerRating(stats.rating, stats.provisional);
+      modal.close();
+    },
+  }));
 };
 
 ui.refs.heroCreateBtn.onclick = () => openModeDialog();

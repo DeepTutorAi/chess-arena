@@ -2,6 +2,7 @@
 // this module; nothing here knows about chess rules or the engine.
 
 import { AVATAR_GLYPHS } from './online.js';
+import { HUMAN_NAME } from './config.js';
 import {
   iconUndo,
   iconHint,
@@ -57,12 +58,12 @@ export class UI {
           <span class="brand-mark">${pieceMarkup('knight')}</span> Chess Arena
         </button>
 
-        <!-- PROFILE PLACEHOLDER (RIGHT TOPBAR) -->
-        <button class="profile-badge-placeholder" id="profile-btn" type="button" title="โปรไฟล์ผู้เล่น (ระบบสมาชิกเร็วๆ นี้)">
+        <!-- PROFILE (RIGHT TOPBAR): your rating from games against the bots -->
+        <button class="profile-badge-placeholder" id="profile-btn" type="button" title="โปรไฟล์และสถิติของคุณ">
           <span class="user-avatar">${iconUser({ size: 16 })}</span>
           <span class="user-info">
-            <span class="user-name">Guest Player</span>
-            <span class="user-rating">${iconRating({ size: 12 })} 1500</span>
+            <span class="user-name">${HUMAN_NAME}</span>
+            <span class="user-rating">${iconRating({ size: 12 })} <span id="profile-rating">—</span></span>
           </span>
         </button>
       </header>
@@ -341,6 +342,7 @@ export class UI {
 
       brandHome: $('#brand-home'),
       profileBtn: $('#profile-btn'),
+      profileRating: $('#profile-rating'),
       heroCreateBtn: $('#hero-create-btn'),
       heroJoinBtn: $('#hero-join-btn'),
 
@@ -482,6 +484,14 @@ export class UI {
       this.refs.btnResign.classList.add('hidden');
       this.refs.btnUndo.classList.add('hidden');
     }
+  }
+
+  /** Topbar rating from games against the bots; "?" while it is still provisional. */
+  setPlayerRating(rating, provisional = false) {
+    this.refs.profileRating.textContent = `${rating}${provisional ? '?' : ''}`;
+    this.refs.profileBtn.title = provisional
+      ? 'เรตติ้งชั่วคราว — เล่นกับบอทให้ครบ 10 เกมเพื่อให้แม่นยำขึ้น'
+      : 'โปรไฟล์และสถิติของคุณ';
   }
 
   setShareVisible(visible) {

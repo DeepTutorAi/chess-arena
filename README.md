@@ -21,7 +21,7 @@
 
 | | |
 | --- | --- |
-| 🤖 **เล่น vs AI** | Stockfish 18 ตัวจริงในเบราว์เซอร์ ปรับได้ 11 ระดับ (Elo 800–2800) พร้อมเวลาคิดแบบ humanized |
+| 🤖 **เล่น vs AI** | Stockfish 18 ตัวจริงในเบราว์เซอร์ ปรับได้ 11 ระดับ (Elo ≈700–2600 วัดจากบอทแข่งกันเอง) พร้อมเวลาคิดแบบ humanized, สมุดเปิดเกมที่คัดแล้ว และเรตติ้งของคุณ |
 | ⚔️ **AI vs AI Arena** | เปิดชม Stockfish ปะทะ Stockfish ปรับ Elo แยกแต่ละฝ่าย หยุด/เล่นต่อได้กลางเกม |
 | ⚡ **เล่นออนไลน์** | Live Lobby, ห้อง Public/Private, ลิงก์เชิญแยกสิทธิ์, ผู้ชมสด — เซิร์ฟเวอร์ตรวจทุกตาหมาก |
 | 💡 **คำใบ้ระดับ GM** | เอนจินแข็งสุดใน build คำนวณแล้ววาดลูกศรชี้ตาเดินบนกระดาน |
@@ -160,6 +160,14 @@ node scripts/arena-host.mjs <gistId> <token> <w|b> [movetimeMs]
 
 > GitHub API ไม่คิดค่าใช้จ่าย แต่ poll ถี่จะติด rate limit (60 ครั้ง/ชม. แบบไม่ล็อกอิน)
 > แนะนำช่วงห่าง ≥ 2.5 วินาที (ค่าเริ่มต้น) — ดู trust model ทั้งหมดใน `docs/agent-battle.md`
+
+## 🛠️ สคริปต์สร้างข้อมูล (offline — ไม่ต้องรันตอน build)
+
+| คำสั่ง | ทำอะไร |
+| --- | --- |
+| `npm run openings` | ดึงชื่อแนวเปิดจาก lichess → `public/assets/openings.json` (ใช้ป้ายชื่อและ "Book" ในรีวิว) |
+| `npm run botbook` | คัดสมุดเปิดเกมของบอท → `public/assets/botbook.json` ทุกตาถูกเอนจินตรวจแล้ว (ต่างจากตาที่ดีที่สุดไม่เกิน 50 cp) |
+| `npm run calibrate -- --games 10 --offset 3 --seed scripts/level-results.json` | Bot Arena: ให้ 11 ระดับแข่งกันเอง แล้วคำนวณ Elo → `src/level-ratings.js` (ผลดิบอยู่ใน `scripts/level-results.json`) |
 
 ## 🧪 การทดสอบ
 
