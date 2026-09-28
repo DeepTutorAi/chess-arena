@@ -646,7 +646,8 @@ export const EQUAL_ALTERNATIVE_DELTA = 3;
  *  engine's move alone for analyses that predate the alternatives list. */
 export function isAcceptableMove(ply, from, to, promotion) {
   const accepted = ply.acceptable?.length ? ply.acceptable : (ply.bestMove ? [ply.bestMove] : []);
-  return accepted.some((m) => m.from === from && m.to === to && (m.promotion ?? 'q') === (promotion ?? 'q'));
+  const attempt = { from, to, promotion };
+  return accepted.some((m) => sameMove(m, attempt));
 }
 
 /** Assemble the full review payload consumed by review-ui.js. opening (from

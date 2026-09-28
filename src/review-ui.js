@@ -8,7 +8,7 @@ import { Chess } from 'chess.js';
 import { sounds } from './sounds.js';
 import { ChessClock } from './clock.js';
 import { Stockfish } from './engine.js';
-import { TIERS, TIER_BY_KEY, pvToSan, ANALYSIS_DEPTH, convertCentipawnsToWinProbability, isAcceptableMove } from './analyzer.js';
+import { TIERS, TIER_BY_KEY, pvToSan, ANALYSIS_DEPTH, convertCentipawnsToWinProbability, isAcceptableMove, sameMove } from './analyzer.js';
 import { explainGoodMove, explainMistake } from './motifs.js';
 import {
   iconBarChart, iconTrendingUp, iconFlip, iconClose, iconSkipBack, iconChevronLeft,
@@ -110,7 +110,8 @@ export function formatEta(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '';
   const seconds = Math.ceil(ms / 1000);
   if (seconds <= 3) return 'เหลืออีกไม่กี่วินาที';
-  if (seconds < 60) return `เหลือประมาณ ${Math.ceil(seconds / 5) * 5} วินาที`;
+  const rounded = Math.ceil(seconds / 5) * 5;
+  if (rounded < 60) return `เหลือประมาณ ${rounded} วินาที`;
   const minutes = Math.floor(seconds / 60);
   const rest = Math.round((seconds % 60) / 10) * 10; // 0..60 in tens
   if (rest === 0 || rest === 60) return `เหลือประมาณ ${minutes + (rest === 60 ? 1 : 0)} นาที`;
@@ -1087,7 +1088,7 @@ export class ReviewUI {
         <div class="retry-status">${glyph(iconAlertTriangle, 14)} ระบบวิเคราะห์ขัดข้องชั่วคราว — ผลครั้งนี้ไม่นับเป็นการเดินผิด</div>`;
     } else if (phase === 'solved') {
       const played = retry.solvedWith;
-      const isEngineChoice = !played || (played.from === retry.ply.bestMove?.from && played.to === retry.ply.bestMove?.to);
+      const isEngineChoice = !played || sameMove(played, retry.ply.bestMove);
       body = isEngineChoice
         ? `
         ${RETRY_HEAD}

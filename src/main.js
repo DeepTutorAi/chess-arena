@@ -1119,6 +1119,9 @@ function openSharedFromHash() {
   const token = shareTokenFromHash(location.hash);
   if (!token) return;
   history.replaceState(null, '', `${location.pathname}${location.search}`);
+  // A link pasted into a tab that is mid-game must not silently end that game.
+  if (controller.hasGameInProgress()
+    && !window.confirm('มีเกมที่กำลังเล่นอยู่ — เปิดเกมจากลิงก์นี้จะจบเกมปัจจุบัน ต้องการเปิดไหม?')) return;
   controller.openSharedToken(token);
 }
 window.addEventListener('hashchange', openSharedFromHash);

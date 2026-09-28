@@ -48,9 +48,10 @@ const escapeTag = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, 
  * Movetext + headers for a finished game.
  * @param {object} record  the app's game record (see controller._captureGameRecord)
  * @param {object} [opts]
- * @param {Date} [opts.date]
+ * @param {Date|null} [opts.date]  when it was played; defaults to record.playedAt, and an
+ *        unknown date is written the PGN way ("????.??.??") rather than as today
  */
-export function recordToPgn(record, { date = new Date() } = {}) {
+export function recordToPgn(record, { date = record.playedAt ? new Date(record.playedAt) : null } = {}) {
   const startFen = record.initialFen || START_FEN;
   const game = new Chess(startFen);
   const sans = [];
@@ -72,7 +73,7 @@ export function recordToPgn(record, { date = new Date() } = {}) {
   const tags = [
     ['Event', 'Chess Arena'],
     ['Site', 'Chess Arena'],
-    ['Date', `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`],
+    ['Date', date && !Number.isNaN(date.getTime()) ? `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}` : '????.??.??'],
     ['Round', '-'],
     ['White', cleanName(record.players?.white?.name, 'White')],
     ['Black', cleanName(record.players?.black?.name, 'Black')],
@@ -170,9 +171,10 @@ export function parsePgn(text) {
 
   const times = clocks.length === verbose.length ? buildTimes(verbose, clocks, headers.TimeControl) : [];
   const record = {
+    playedAt: parsePgnDate(headers.Date),
     initialFen,
     moves: verbose.map((m) => ({ san: m.san, from: m.from, to: m.to, promotion: m.promotion || undefined })),
-    result: cleanResult(headers.Result),
+    result: gameResult(headers.Result, games[0], game),
     reason: /time forfeit/i.test(headers.Termination ?? '') ? 'timeout' : '',
     players: {
       white: { name: cleanName(headers.White, 'ขาว') },
@@ -184,6 +186,26 @@ export function parsePgn(text) {
     timeControl: parseTimeControl(headers.TimeControl),
   };
   return { record, gameCount: games.length };
+}
+
+/** The result: the Result tag when it says something, else the closing token of the
+ *  movetext, else what the final position shows (mate). */
+function gameResult(tag, text, game) {
+  const fromTag = cleanResult(tag);
+  if (fromTag !== '*') return fromTag;
+  const withoutComments = text.replace(/\{[^}]*\}/g, ' ').replace(/;[^\n]*/g, ' ');
+  const token = /(1-0|0-1|1\/2-1\/2)\s*$/.exec(withoutComments.trim());
+  if (token) return token[1];
+  if (game.isCheckmate()) return game.turn() === 'w' ? '0-1' : '1-0';
+  return '*';
+}
+
+/** "2026.09.28" -> epoch ms (local noon), or null for the unknown "????.??.??" forms. */
+function parsePgnDate(value) {
+  const match = /^(\d{4})\.(\d{2})\.(\d{2})$/.exec(String(value ?? ''));
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+  return Number.isNaN(date.getTime()) || date.getMonth() !== Number(match[2]) - 1 ? null : date.getTime();
 }
 
 function parseTimeControl(value) {
@@ -269,6 +291,7 @@ const canCompress = () => typeof CompressionStream === 'function' && typeof Deco
 
 /** The game as a URL-safe token (moves as UCI, names, result — nothing else). */
 export async function encodeShareToken(record) {
+  if ((record.moves?.length ?? 0) > MAX_PLIES) throw new ImportError(`เกมยาวเกินกว่าจะทำลิงก์แชร์ได้ (สูงสุด ${MAX_PLIES} ตา) — ใช้ไฟล์ PGN แทน`);
   const startFen = record.initialFen || START_FEN;
   const payload = {
     v: 1,
@@ -279,11 +302,12 @@ export async function encodeShareToken(record) {
   };
   if (!isStandardStart(startFen)) payload.f = startFen;
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
-  if (canCompress()) {
-    const packed = await pipeBytes(bytes, new CompressionStream('deflate-raw'), MAX_SHARE_JSON_CHARS);
-    return `d.${toBase64Url(packed)}`;
-  }
-  return `u.${toBase64Url(bytes)}`;
+  const token = canCompress()
+    ? `d.${toBase64Url(await pipeBytes(bytes, new CompressionStream('deflate-raw'), MAX_SHARE_JSON_CHARS))}`
+    : `u.${toBase64Url(bytes)}`;
+  // Never hand out a link the receiving side would refuse.
+  if (token.length > MAX_SHARE_TOKEN_CHARS) throw new ImportError('เกมนี้ยาวเกินกว่าจะทำลิงก์แชร์ได้ — ใช้ไฟล์ PGN แทน');
+  return token;
 }
 
 /** Inverse of encodeShareToken; the moves are replayed so a forged token cannot

@@ -12,6 +12,7 @@ function createFakeIndexedDB({ failOpen = false, failWrites = false } = {}) {
   const dbs = new Map(); // name -> { stores: Map(name -> Map(key -> value)), version }
   const factory = {
     opens: 0,
+    failWrites,
     open(name, version) {
       factory.opens += 1;
       const req = { result: null, error: null };
@@ -27,11 +28,11 @@ function createFakeIndexedDB({ failOpen = false, failWrites = false } = {}) {
             const store = data.stores.get(storeName);
             if (!store) throw new Error(`no store ${storeName}`);
             const tx = { pending: 0, error: null };
-            const schedule = (fn) => {
+            const schedule = (fn, isWrite = false) => {
               const r = { result: undefined, error: null };
               tx.pending += 1;
               queueMicrotask(() => {
-                if (failWrites) { tx.error = new Error('write failed'); r.error = tx.error; r.onerror?.(); tx.onerror?.(); return; }
+                if (isWrite && factory.failWrites) { tx.error = new Error('write failed'); r.error = tx.error; r.onerror?.(); tx.onerror?.(); return; }
                 r.result = fn();
                 r.onsuccess?.();
                 tx.pending -= 1;
@@ -40,11 +41,11 @@ function createFakeIndexedDB({ failOpen = false, failWrites = false } = {}) {
               return r;
             };
             tx.objectStore = () => ({
-              put: (value) => schedule(() => { store.set(value.id, structuredClone(value)); return value.id; }),
+              put: (value) => schedule(() => { store.set(value.id, structuredClone(value)); return value.id; }, true),
               get: (id) => schedule(() => structuredClone(store.get(id))),
               getAll: () => schedule(() => [...store.values()].map((v) => structuredClone(v))),
-              delete: (id) => schedule(() => { store.delete(id); }),
-              clear: () => schedule(() => { store.clear(); }),
+              delete: (id) => schedule(() => { store.delete(id); }, true),
+              clear: () => schedule(() => { store.clear(); }, true),
             });
             return tx;
           },
@@ -189,6 +190,40 @@ test('a write that fails halfway does not lose the game or throw', async () => {
   const id = await store.save({ record: record(8), source: 'bot' });
   assert.ok(id);
   assert.equal((await store.list())[0].plies, 8);
+});
+
+test('a failed write costs that game its durability only — earlier games stay listed and open', async () => {
+  const idb = createFakeIndexedDB();
+  const store = makeStore(createIdbAdapter(idb));
+  const durable = await store.save({ record: record(6), source: 'bot' });
+  assert.equal(store.persistent, true);
+
+  idb.failWrites = true; // e.g. quota exceeded for a moment
+  const volatile = await store.save({ record: record(8), source: 'bot' });
+  assert.equal(store.persistent, false, 'the player is told');
+  const list = await store.list();
+  assert.deepEqual(list.map((g) => g.id).sort(), [durable, volatile].sort(), 'both games are still listed');
+  assert.equal((await store.get(durable)).record.moves.length, 6);
+  assert.equal((await store.get(volatile)).record.moves.length, 8);
+
+  // After a reload only what really reached the disk is left.
+  idb.failWrites = false;
+  const reloaded = makeStore(createIdbAdapter(idb));
+  assert.deepEqual((await reloaded.list()).map((g) => g.id), [durable]);
+
+  await store.clear();
+  assert.deepEqual(await store.list(), [], 'clear empties both the disk and the session copy');
+});
+
+test('the summary and the full record can never end up in different places', async () => {
+  const idb = createFakeIndexedDB();
+  const store = makeStore(createIdbAdapter(idb));
+  const id = await store.save({ record: record(6), source: 'bot' });
+  idb.failWrites = true;
+  await store.setAnalysis(id, { accuracy: { w: 88, b: 66 }, opening: null });
+  const [meta] = await store.list();
+  assert.equal(meta.analyzed, true, 'the list shows the analysis that was just kept for this session');
+  assert.equal((await store.get(id)).analysis.accuracy.w, 88);
 });
 
 test('no IndexedDB at all: the adapter is null and the store still works', async () => {

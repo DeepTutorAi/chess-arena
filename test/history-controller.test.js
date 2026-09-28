@@ -106,20 +106,28 @@ test('a finished bot game is saved once, with who the bot was', async (t) => {
   assert.equal(entry.record.result, '0-1');
 });
 
-test('bot-vs-bot games are saved as arena games; the sandbox is not saved', async (t) => {
+test('bot-vs-bot matches and the sandbox are not saved, so they can never push real games out', async (t) => {
+  for (const mode of [MODES.AI_VS_AI, MODES.ANALYZE]) {
+    const { controller, history } = harness(t);
+    controller.mode = mode;
+    controller.game = foolsMate();
+    controller._announceGameOver();
+    await sleep(20);
+    assert.equal((await history.list()).length, 0, mode);
+  }
+});
+
+test('the saved record knows when it was played (for the PGN Date tag)', async (t) => {
   const { controller, history } = harness(t);
-  controller.mode = MODES.AI_VS_AI;
+  controller.mode = MODES.HUMAN_VS_AI;
+  controller.humanSide = 'b';
+  const before = Date.now();
   controller.game = foolsMate();
   controller._announceGameOver();
   await sleep(20);
-  assert.deepEqual((await history.list()).map((g) => g.source), ['arena']);
-
-  const sandbox = harness(t);
-  sandbox.controller.mode = MODES.ANALYZE;
-  sandbox.controller.game = foolsMate();
-  sandbox.controller._announceGameOver();
-  await sleep(20);
-  assert.equal((await sandbox.history.list()).length, 0);
+  const [meta] = await history.list();
+  const { record } = await history.get(meta.id);
+  assert.ok(record.playedAt >= before && record.playedAt <= Date.now());
 });
 
 test('a broken history store never breaks the end of a game', async (t) => {
@@ -289,4 +297,65 @@ test('a clipboard that refuses shows the link so it can be copied by hand', asyn
   controller.shareTools.copy = async () => false;
   assert.equal(await controller.copyShareLink(controller._lastGameRecord), false);
   assert.match(calls.toasts.at(-1).detail, /#g=/u);
+});
+
+// ---- guards -----------------------------------------------------------------------------------
+
+test('hasGameInProgress: only a game somebody is still playing counts', async (t) => {
+  const { controller } = harness(t);
+  assert.equal(controller.hasGameInProgress(), false, 'nothing running');
+  controller.mode = MODES.HUMAN_VS_AI;
+  assert.equal(controller.hasGameInProgress(), false, 'no move played yet');
+  const game = new Chess();
+  game.move('e4');
+  controller.game = game;
+  assert.equal(controller.hasGameInProgress(), true);
+  controller._overPopupShown = true;
+  assert.equal(controller.hasGameInProgress(), false, 'finished');
+  controller._overPopupShown = false;
+  controller.mode = MODES.ANALYZE;
+  assert.equal(controller.hasGameInProgress(), false, 'the sandbox has no game to lose');
+
+  controller.mode = MODES.ONLINE;
+  controller.online = {};
+  controller.onlineRole = 'player';
+  controller.onlineState = { status: 'active' };
+  assert.equal(controller.hasGameInProgress(), true);
+  controller.onlineRole = 'spectator';
+  assert.equal(controller.hasGameInProgress(), false, 'watching is not playing');
+  controller.onlineRole = 'player';
+  controller.onlineState = { status: 'finished' };
+  assert.equal(controller.hasGameInProgress(), false);
+  controller.online = null;
+});
+
+test('opening two games in quick succession: the later one wins, the earlier never lands over it', async (t) => {
+  const { controller } = harness(t);
+  const first = parsePgn('[White "First"]\n\n1. e4 e5 2. Nf3 *').record;
+  const second = parsePgn('[White "Second"]\n\n1. d4 d5 *').record;
+  const a = controller.openRecordForReview(first);
+  const b = controller.openRecordForReview(second);
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(rb.ok, true);
+  assert.equal(ra.ok, false, 'the superseded open reports it did not land');
+  assert.equal(controller._lastGameRecord.players.white.name, 'Second');
+  assert.equal(controller.game.history().length, 2);
+  assert.equal(controller._importedRecord, second);
+});
+
+test('a share link that is too long says why instead of pretending to copy', async (t) => {
+  const { controller, calls, shared } = harness(t);
+  const game = new Chess();
+  const moves = [];
+  const cycle = [['g1', 'f3'], ['g8', 'f6'], ['f3', 'g1'], ['f6', 'g8']];
+  for (let i = 0; i < 620; i++) {
+    const [from, to] = cycle[i % 4];
+    game.move({ from, to });
+    moves.push({ from, to });
+  }
+  const long = { initialFen: null, moves, result: '1/2-1/2', players: { white: { name: 'A' }, black: { name: 'B' } } };
+  assert.equal(await controller.copyShareLink(long), false);
+  assert.equal(shared.copies.length, 0);
+  assert.equal(calls.toasts.at(-1).title, 'สร้างลิงก์ไม่สำเร็จ');
+  assert.match(calls.toasts.at(-1).detail, /PGN/u);
 });

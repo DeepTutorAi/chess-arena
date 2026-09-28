@@ -119,18 +119,49 @@ export function createHistoryStore({
   newId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
   limit = HISTORY_LIMIT,
 } = {}) {
-  let backend = adapter ?? createIdbAdapter() ?? createMemoryAdapter();
-  const fallback = createMemoryAdapter();
+  // The durable backend (IndexedDB) plus a session-only store that catches what
+  // the durable one could not take. Reads merge both, so one failed write costs
+  // durability for that game only — never the games already on disk, and never a
+  // silent switch of the whole history to an empty store.
+  const primary = adapter ?? createIdbAdapter();
+  const session = createMemoryAdapter();
+  let degraded = false;
 
-  /** Run against the real backend; if it cannot be used, keep working in memory. */
-  const call = async (method, ...args) => {
+  const attempt = async (fn, otherwise) => {
+    if (!primary) return otherwise;
     try {
-      return await backend[method](...args);
+      return await fn(primary);
     } catch {
-      if (backend !== fallback) backend = fallback;
-      return fallback[method](...args);
+      degraded = true;
+      return otherwise;
     }
   };
+
+  const io = {
+    async put(store, value) {
+      const ok = await attempt(async (a) => { await a.put(store, value); return true; }, false);
+      if (ok) await session.remove(store, value.id); // the durable copy is the truth
+      else await session.put(store, value);
+    },
+    async get(store, id) {
+      return (await session.get(store, id)) ?? (await attempt((a) => a.get(store, id), null));
+    },
+    async getAll(store) {
+      const durable = await attempt((a) => a.getAll(store), []);
+      const merged = new Map(durable.map((v) => [v.id, v]));
+      for (const v of await session.getAll(store)) merged.set(v.id, v);
+      return [...merged.values()];
+    },
+    async remove(store, id) {
+      await attempt((a) => a.remove(store, id), null);
+      await session.remove(store, id);
+    },
+    async clearAll() {
+      await attempt((a) => a.clearAll(), null);
+      await session.clearAll();
+    },
+  };
+  const call = (method, ...args) => io[method](...args);
 
   async function trim() {
     const all = (await call('getAll', META)).sort((a, b) => b.savedAt - a.savedAt);
@@ -141,7 +172,8 @@ export function createHistoryStore({
   }
 
   return {
-    get persistent() { return Boolean(backend.persistent); },
+    /** False when there is no durable storage, or a write to it has failed. */
+    get persistent() { return Boolean(primary?.persistent) && !degraded; },
 
     /**
      * Save (or overwrite, when `id` is given) a game.

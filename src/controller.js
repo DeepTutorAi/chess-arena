@@ -60,6 +60,7 @@ export class Controller {
     this.shareTools = shareTools;
     this._historySlot = { id: null, saving: null }; // this game's history entry (see _saveToHistory)
     this._importedRecord = null; // set while a game opened from history / a link is on screen
+    this._openTicket = 0;        // bumped by every open-from-history so a slow one cannot land late
     this.stats = stats; // local rating + results against the bots (src/stats.js)
     this._assisted = false; // undo / hint used in this bot game: it is not rated
     this._statsRecorded = false;
@@ -1313,6 +1314,7 @@ export class Controller {
 
   /** Who the bot was and the time control — what a PGN header and the history list need. */
   _addRecordExtras(record, fromState) {
+    record.playedAt ??= Date.now();
     if (!fromState && this.mode === MODES.HUMAN_VS_AI) {
       record.botLevel = this.levelIndex + 1;
       record.humanColor = this.humanSide;
@@ -1328,8 +1330,10 @@ export class Controller {
    * own slot and can never be overwritten by an older game's save.
    */
   _saveToHistory(record, fromState) {
-    if (!this.history || this._importedRecord || this.mode === MODES.ANALYZE) return;
-    const source = fromState ? 'online' : this.mode === MODES.AI_VS_AI ? 'arena' : 'bot';
+    // Bot-vs-bot matches are entertainment: kept out so they can never push a
+    // player's own games out of the 200-game history.
+    if (!this.history || this._importedRecord || this.mode === MODES.ANALYZE || this.mode === MODES.AI_VS_AI) return;
+    const source = fromState ? 'online' : 'bot';
     const slot = this._historySlot;
     slot.saving = Promise.resolve(slot.saving)
       .then(() => this.history.save({ id: slot.id, record, source }))
@@ -2207,12 +2211,25 @@ export class Controller {
 
   // ---- history, import and sharing (roadmap B6) -------------------------------
 
+  /** A game someone is still playing — opening another game would end it. */
+  hasGameInProgress() {
+    if (this._reviewActive) return false;
+    if (this.mode === MODES.ONLINE) {
+      return Boolean(this.online) && this.onlineRole !== 'spectator' && ['active', 'waiting'].includes(this.onlineState?.status);
+    }
+    if (this.mode === MODES.HUMAN_VS_AI || this.mode === MODES.AI_VS_AI) {
+      return !this._isOver() && !this._overPopupShown && this.game.history().length > 0;
+    }
+    return false;
+  }
+
   /**
    * Put a finished game on the board and start reviewing it — for a game opened
    * from history, a pasted PGN or a share link.
    * @returns {Promise<{ok: boolean, error?: string}>}
    */
   async openRecordForReview(record, { analysis = null, historyId = null, source = 'import' } = {}) {
+    const ticket = ++this._openTicket;
     let replayed;
     try {
       replayed = new Chess(record.initialFen || undefined);
@@ -2224,6 +2241,7 @@ export class Controller {
       return { ok: false, error: 'เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา' };
     }
     await this.start(MODES.ANALYZE, { initialFen: record.initialFen || undefined });
+    if (ticket !== this._openTicket) return { ok: false, superseded: true }; // a newer open took over
     this.game = replayed;
     this._gameInitialFen = record.initialFen || this._gameInitialFen;
     this._lastGameRecord = record;
@@ -2243,6 +2261,8 @@ export class Controller {
       try {
         id = await this.history.save({ record, source });
       } catch { id = null; }
+      // Another game was opened / started while this one was being saved.
+      if (ticket !== this._openTicket || this._importedRecord !== record) return { ok: false, superseded: true };
     }
     this._historySlot = { id, saving: Promise.resolve(id) };
     this._overPopupShown = true;
@@ -2279,7 +2299,9 @@ export class Controller {
       return { ok: false, error: error instanceof ImportError ? error.message : 'นำเข้าไม่สำเร็จ' };
     }
     if (parsed.kind === 'fen') {
+      const ticket = ++this._openTicket;
       await this.start(MODES.ANALYZE, { initialFen: parsed.fen });
+      if (ticket !== this._openTicket) return { ok: false, superseded: true };
       this.toggleSpectatorAnalysis(true);
       return { ok: true };
     }
@@ -2324,8 +2346,12 @@ export class Controller {
     let link;
     try {
       link = this.shareTools.url(await encodeShareToken(record));
-    } catch {
-      this.ui.showFloatingToast?.({ title: 'สร้างลิงก์ไม่สำเร็จ', actions: [['ตกลง']] });
+    } catch (error) {
+      this.ui.showFloatingToast?.({
+        title: 'สร้างลิงก์ไม่สำเร็จ',
+        detail: error instanceof ImportError ? error.message : '',
+        actions: [['ตกลง']],
+      });
       return false;
     }
     const ok = await this.shareTools.copy(link);

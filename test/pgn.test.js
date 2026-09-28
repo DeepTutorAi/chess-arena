@@ -51,6 +51,34 @@ test('recordToPgn writes the seven-tag roster, numbered moves and the result', (
   assert.equal(pgn.includes('SetUp'), false, 'a standard start has no FEN tag');
 });
 
+test('the Date tag is the day it was played; an unknown day is written the PGN way, never as today', () => {
+  const played = new Date(2026, 2, 7, 15, 30).getTime();
+  assert.match(recordToPgn(recordFrom(['e4'], { playedAt: played, result: '*' })), /\[Date "2026\.03\.07"\]/u);
+  assert.match(recordToPgn(recordFrom(['e4'], { result: '*' })), /\[Date "\?\?\?\?\.\?\?\.\?\?"\]/u);
+  assert.match(recordToPgn(recordFrom(['e4'], { result: '*' }), { date: new Date(2020, 0, 2) }), /\[Date "2020\.01\.02"\]/u);
+});
+
+test('the Date tag comes back as playedAt on import (and "????.??.??" as unknown)', () => {
+  const dated = parsePgn('[Date "2026.03.07"]\n\n1. e4 e5 *').record;
+  const day = new Date(dated.playedAt);
+  assert.deepEqual([day.getFullYear(), day.getMonth() + 1, day.getDate()], [2026, 3, 7]);
+  assert.equal(parsePgn('[Date "????.??.??"]\n\n1. e4 e5 *').record.playedAt, null);
+  assert.equal(parsePgn('[Date "2026.13.45"]\n\n1. e4 e5 *').record.playedAt, null, 'an impossible date is dropped');
+  // export -> import keeps the day
+  const again = parsePgn(recordToPgn(recordFrom(['e4', 'e5'], { playedAt: new Date(2026, 2, 7).getTime(), result: '*' }))).record;
+  assert.equal(new Date(again.playedAt).getDate(), 7);
+});
+
+test('the result comes from the closing token or the final position when the tag is missing or "*"', () => {
+  assert.equal(parsePgn('1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0').record.result, '1-0');
+  assert.equal(parsePgn('[Result "*"]\n\n1. e4 e5 2. Qh5 Nc6 3. Bc4 Nf6 4. Qxf7# 1-0').record.result, '1-0');
+  assert.equal(parsePgn('1. e4 e5 {a comment 1-0 inside} *').record.result, '*', 'a result mentioned in a comment is not the result');
+  assert.equal(parsePgn('1. e4 e5 2. Nf3 Nc6 1/2-1/2').record.result, '1/2-1/2');
+  assert.equal(parsePgn('1. f3 e5 2. g4 Qh4#').record.result, '0-1', 'a mate with no token at all');
+  assert.equal(parsePgn('[Result "0-1"]\n\n1. e4 e5 0-1').record.result, '0-1', 'a tag that agrees with the movetext');
+  assert.equal(parsePgn('[Result "0-1"]\n\n1. e4 e5 1-0').record.result, '1-0', 'when they disagree the movetext token (what the game ended with) wins');
+});
+
 test('a timeout is reported as a time forfeit and the time control is written', () => {
   const pgn = recordToPgn(recordFrom(['e4', 'e5'], {
     result: '0-1', reason: 'timeout', timeControl: { initialMs: 300000, incMs: 2000 },
@@ -242,6 +270,12 @@ test('tampered, truncated and oversized tokens are refused with an ImportError',
   }
   const flipped = `${good.slice(0, 10)}${good[10] === 'A' ? 'B' : 'A'}${good.slice(11)}`;
   await assert.rejects(decodeShareToken(flipped), ImportError);
+});
+
+test('a game that could never be opened from a link is refused when the link is made', async () => {
+  const shuffle = Array.from({ length: MAX_PLIES + 2 }, (_, i) => ['g1f3', 'g8f6', 'f3g1', 'f6g8'][i % 4])
+    .map((uci) => ({ from: uci.slice(0, 2), to: uci.slice(2, 4) }));
+  await assert.rejects(encodeShareToken({ initialFen: null, moves: shuffle, players: {} }), /ยาวเกิน/u);
 });
 
 test('a token that decodes to an illegal game is refused move by move', async () => {

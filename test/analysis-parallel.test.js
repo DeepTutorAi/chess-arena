@@ -328,7 +328,9 @@ test('formatEta reads naturally and stays silent while unknown', () => {
   assert.equal(formatEta(-5), '');
   assert.equal(formatEta(2500), 'เหลืออีกไม่กี่วินาที');
   assert.equal(formatEta(12_000), 'เหลือประมาณ 15 วินาที');
-  assert.equal(formatEta(59_000), 'เหลือประมาณ 60 วินาที');
+  assert.equal(formatEta(55_000), 'เหลือประมาณ 55 วินาที');
+  assert.equal(formatEta(57_000), 'เหลือประมาณ 1 นาที', 'rounding up to 60 s switches to minutes');
+  assert.equal(formatEta(59_000), 'เหลือประมาณ 1 นาที');
   assert.equal(formatEta(60_000), 'เหลือประมาณ 1 นาที');
   assert.equal(formatEta(95_000), 'เหลือประมาณ 1 นาที 40 วินาที');
   assert.equal(formatEta(180_000), 'เหลือประมาณ 3 นาที');
