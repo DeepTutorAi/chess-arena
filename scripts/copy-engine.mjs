@@ -15,11 +15,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'public', 'engine');
 
 // 'lite-single' = Stockfish 18 lite single-threaded (~7MB, no CORS headers needed).
+// 'lite-multi'  = Stockfish 18 lite multi-threaded (~7MB, REQUIRES COOP/COEP —
+//                 served only when the host sets the headers, see config.js).
 // Other options: 'full-single' (stronger, ~40MB), 'asm' (slow fallback).
 const variant = process.argv[2] ?? 'lite-single';
 
 const files = {
   'lite-single': ['stockfish-18-lite-single.js', 'stockfish-18-lite-single.wasm'],
+  'lite-multi': ['stockfish-18-lite.js', 'stockfish-18-lite.wasm'],
   'full-single': ['stockfish-18-single.js', 'stockfish-18-single.wasm'],
   asm: ['stockfish-18-asm.js'],
 }[variant];

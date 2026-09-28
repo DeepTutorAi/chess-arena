@@ -9,7 +9,7 @@ import './styles.css';
 
 import { UI } from './ui.js';
 import { Controller, MODES } from './controller.js';
-import { LEVELS, TIME_CONTROLS, HUMAN_NAME, getRooms, saveRoom } from './config.js';
+import { LEVELS, TIME_CONTROLS, HUMAN_NAME, getRooms, saveRoom, isCrossOriginIsolated, getStrongEnginePreference, setStrongEnginePreference } from './config.js';
 import {
   buildInviteUrl,
   buildWatchInviteUrl,
@@ -20,7 +20,7 @@ import {
 } from './online.js';
 import { createLobbyView } from './lobby.js';
 import { sounds } from './sounds.js';
-import { iconBolt, iconBot, iconArena, iconWrench, iconHome, iconSound, iconMute } from './icons.js';
+import { iconBolt, iconBot, iconArena, iconWrench, iconHome, iconSound, iconMute, iconFlag, iconSettings } from './icons.js';
 
 const ui = new UI(document.getElementById('app'));
 const PLAYER_NAME_KEY = 'chess-arena-player-name';
@@ -737,11 +737,14 @@ ui.refs.tabLog.onclick = () => ui.showTab('log');
 
 // Action Strip Buttons (Chess.com controls)
 ui.refs.btnUndo.onclick = () => controller.undo();
-ui.refs.btnResign.onclick = () => {
+ui.refs.btnResign.onclick = () => openResignDialog();
+ui.refs.btnOptions.onclick = () => openOptionsDialog();
+
+function openResignDialog() {
   const body = ui.el('p', 'dlg-hint', 'คุณแน่ใจหรือไม่ว่าต้องการยอมแพ้?');
   const row = ui.el('div', 'dlg-actions');
   const keepPlaying = ui.el('button', 'btn', 'เล่นต่อ');
-  const confirmResign = ui.el('button', 'btn primary', 'ยอมแพ้');
+  const confirmResign = ui.el('button', 'btn primary danger', 'ยอมแพ้');
   const modal = ui.openModal('ยืนยันการยอมแพ้', body);
   keepPlaying.onclick = () => modal.close();
   confirmResign.onclick = () => {
@@ -751,7 +754,93 @@ ui.refs.btnResign.onclick = () => {
   row.append(keepPlaying, confirmResign);
   body.appendChild(row);
   confirmResign.focus();
-};
+}
+
+function openOptionsDialog() {
+  const body = ui.el('div', 'options-dialog');
+
+  // Option 1: Sound Toggle
+  const soundRow = ui.el('div', 'option-item-card');
+  const soundInfo = ui.el('div', 'option-item-info');
+  const soundIconWrap = ui.el('span', 'option-item-icon');
+  soundIconWrap.innerHTML = sounds.muted ? iconMute({ size: 20 }) : iconSound({ size: 20 });
+  const soundTextWrap = ui.el('div', 'option-item-text');
+  soundTextWrap.append(
+    ui.el('strong', null, 'เสียงเอฟเฟกต์ (Sound)'),
+    ui.el('span', 'option-item-sub', sounds.muted ? 'ปิดเสียงอยู่' : 'เปิดเสียงอยู่')
+  );
+  soundInfo.append(soundIconWrap, soundTextWrap);
+
+  const soundBtn = ui.el('button', `btn ${sounds.muted ? '' : 'primary'}`, sounds.muted ? 'เปิดเสียง' : 'ปิดเสียง');
+  soundBtn.onclick = () => {
+    setSoundMuted(!sounds.muted);
+    soundBtn.className = `btn ${sounds.muted ? '' : 'primary'}`;
+    soundBtn.textContent = sounds.muted ? 'เปิดเสียง' : 'ปิดเสียง';
+    soundIconWrap.innerHTML = sounds.muted ? iconMute({ size: 20 }) : iconSound({ size: 20 });
+    soundTextWrap.querySelector('.option-item-sub').textContent = sounds.muted ? 'ปิดเสียงอยู่' : 'เปิดเสียงอยู่';
+  };
+  soundRow.append(soundInfo, soundBtn);
+
+  // Option 2: Resign Game
+  const resignRow = ui.el('div', 'option-item-card');
+  const resignInfo = ui.el('div', 'option-item-info');
+  const resignIconWrap = ui.el('span', 'option-item-icon danger');
+  resignIconWrap.innerHTML = iconFlag({ size: 20 });
+  const resignTextWrap = ui.el('div', 'option-item-text');
+  resignTextWrap.append(
+    ui.el('strong', null, 'ยอมแพ้ (Resign)'),
+    ui.el('span', 'option-item-sub', 'ยอมรับความพ่ายแพ้ในเกมนี้ทันที')
+  );
+  resignInfo.append(resignIconWrap, resignTextWrap);
+
+  const canResign = !controller._isOver() && controller.mode !== MODES.SPECTATOR && controller.onlineRole !== 'spectator';
+  const resignBtn = ui.el('button', 'btn danger', 'ยอมแพ้');
+  if (!canResign) {
+    resignBtn.disabled = true;
+    resignBtn.textContent = controller._isOver() ? 'เกมจบแล้ว' : 'ไม่สามารถยอมแพ้';
+  } else {
+    resignBtn.onclick = () => {
+      modal.close();
+      openResignDialog();
+    };
+  }
+  resignRow.append(resignInfo, resignBtn);
+
+  // Option 3: Strong multi-threaded engine (roadmap D2) — only when the host
+  // serves COOP/COEP (crossOriginIsolated). Otherwise the single-thread build
+  // is the only one that works, so the row is hidden entirely.
+  if (isCrossOriginIsolated()) {
+    const strongRow = ui.el('div', 'option-item-card');
+    const strongInfo = ui.el('div', 'option-item-info');
+    const strongIconWrap = ui.el('span', 'option-item-icon');
+    strongIconWrap.innerHTML = iconBolt({ size: 20 });
+    const strongTextWrap = ui.el('div', 'option-item-text');
+    strongTextWrap.append(
+      ui.el('strong', null, 'เอนจินแรงสูง (Multi-thread)'),
+      ui.el('span', 'option-item-sub', getStrongEnginePreference()
+        ? 'เปิดอยู่ — มีผลตั้งแต่เริ่มเกมถัดไป'
+        : 'ปิดอยู่ — มีผลตั้งแต่เริ่มเกมถัดไป'),
+    );
+    strongInfo.append(strongIconWrap, strongTextWrap);
+
+    const strongOn = getStrongEnginePreference();
+    const strongBtn = ui.el('button', `btn ${strongOn ? 'primary' : ''}`, strongOn ? 'เปิดอยู่' : 'เปิดใช้');
+    strongBtn.onclick = () => {
+      const next = !getStrongEnginePreference();
+      setStrongEnginePreference(next);
+      strongBtn.className = `btn ${next ? 'primary' : ''}`;
+      strongBtn.textContent = next ? 'เปิดอยู่' : 'เปิดใช้';
+      strongTextWrap.querySelector('.option-item-sub').textContent = next
+        ? 'เปิดอยู่ — มีผลตั้งแต่เริ่มเกมถัดไป'
+        : 'ปิดอยู่ — มีผลตั้งแต่เริ่มเกมถัดไป';
+    };
+    strongRow.append(strongInfo, strongBtn);
+    body.append(strongRow);
+  }
+
+  body.append(soundRow, resignRow);
+  const modal = ui.openModal('ตัวเลือกของเกม (Options)', body);
+}
 ui.refs.btnShare.onclick = () => {
   if (!controller.onlineRoomId || !controller.onlineInviteToken) return;
   const body = ui.el('div', 'share-room-dialog');
@@ -780,6 +869,7 @@ ui.refs.btnHome.onclick = () => controller.goHome();
 ui.refs.btnFlip.onclick = () => controller.flip();
 ui.refs.btnPause.onclick = () => controller.togglePause();
 ui.refs.btnHint.onclick = () => controller.showHint();
+ui.refs.btnAnalysis.onclick = () => controller.toggleSpectatorAnalysis();
 ui.refs.btnSound.onclick = () => setSoundMuted(!sounds.muted);
 
 function setSoundMuted(muted) {
@@ -963,4 +1053,14 @@ document.addEventListener(
 // Debug/testing hook — dev builds only, never shipped to production.
 if (import.meta.env?.DEV) {
   window.__arena = { controller, ui, ground };
+}
+
+// PWA (roadmap D1) — installable + offline for vs-bot/review. Never registered
+// on localhost so the Vite dev server is not intercepted by the worker.
+if ('serviceWorker' in navigator && !['localhost', '127.0.0.1'].includes(location.hostname)) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      ui.log('ลงทะเบียน offline mode ไม่สำเร็จ (โหมดออนไลน์ยังใช้ได้ปกติ)', 'warn');
+    });
+  });
 }

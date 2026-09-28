@@ -1,9 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Chess } from 'chess.js';
+import { Window } from 'happy-dom';
 
 import { Controller, MODES } from '../src/controller.js';
 import { sounds } from '../src/sounds.js';
+
+class FakeWorker {
+  static latest = null;
+  constructor() {
+    this.messages = [];
+    this.terminated = false;
+    this.onmessage = null;
+    this.onerror = null;
+    FakeWorker.latest = this;
+  }
+  postMessage(cmd) {
+    const line = String(cmd);
+    this.messages.push(line);
+    if (line === 'uci') this.onmessage?.({ data: 'uciok' });
+    if (line === 'isready') this.onmessage?.({ data: 'readyok' });
+  }
+  terminate() { this.terminated = true; }
+  finish(pvUci, scoreCp) {
+    this.onmessage?.({
+      data: `info depth 10 multipv 1 score cp ${scoreCp} nodes 1 nps 1 time 1 pv ${pvUci.join(' ')}`,
+    });
+    this.onmessage?.({ data: `bestmove ${pvUci[0]}` });
+  }
+}
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const ROOM_ID = 'abcdefgh23456722';
@@ -41,19 +66,27 @@ function stateAfter(moves = [], overrides = {}) {
     spectatorCount: 0,
     clock: null,
     afk: null,
+    hostColor: 'w',
     expiresAt: Date.now() + 60_000,
     ...overrides,
   };
 }
 
 function makeHarness() {
-  const calls = { moves: [], logs: [], ground: [], stopped: 0 };
+  const calls = { moves: [], logs: [], ground: [], stopped: 0, rematch: [], actionStrip: [] };
   const ui = new Proxy({
     log(message, level) { calls.logs.push([message, level]); },
     renderMoves(moves) { calls.renderedMoves = moves; },
     setPlayers(top, bottom) { calls.players = [top, bottom]; },
     setAfkWarning(value) { calls.afk = value; },
-    showGameOver(title, detail) { calls.gameOver = [title, detail]; },
+    setActionStrip(opts) { calls.actionStrip.push(opts); },
+    showGameOver(title, detail, onNewGame, onHome, onReview, rematch) {
+      calls.gameOver = [title, detail];
+      calls.gameOverRematch = rematch;
+      calls.gameOverRenders = (calls.gameOverRenders ?? 0) + 1;
+      const overlay = { body: { isConnected: true }, close() { overlay.body.isConnected = false; } };
+      return overlay;
+    },
   }, {
     get(target, key) {
       if (key in target) return target[key];
@@ -87,12 +120,16 @@ function makeHarness() {
     connect() { callbacks.onConnectionState('connected'); },
     sendMove(...args) { calls.moves.push(args); },
     resign() { calls.resigned = true; },
+    requestRematch(...args) { calls.rematch.push(['request', ...args]); },
+    acceptRematch(...args) { calls.rematch.push(['accept', ...args]); },
+    declineRematch(...args) { calls.rematch.push(['decline', ...args]); },
     stop() { calls.stopped += 1; },
   };
   const controller = new Controller({
     ui,
     ground,
     onPromotion: async () => 'q',
+    gameOverDelayMs: 0, // popup must appear synchronously for assertions
     onlineClientFactory(options) { callbacks = options; return client; },
   });
   return { controller, client, calls };
@@ -237,5 +274,191 @@ test('spectators see a neutral result title instead of being called the loser', 
     revision: 2, status: 'finished', result: '1-0', reason: 'opening_afk_timeout', afk: null,
   }));
   assert.equal(calls.gameOver[0], 'เกมจบแล้ว');
+  controller.dispose();
+});
+
+test('accepted rematch resets the finished online game and swaps sides (roadmap B)', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  assert.equal(controller.onlineSide, 'w');
+
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation', revision: 2,
+  }));
+  assert.ok(calls.gameOver, 'game over card shown for the finished game');
+
+  const reset = stateAfter([], { status: 'active', revision: 4, hostColor: 'b' });
+  controller._onOnlineState(reset);
+  assert.equal(controller.onlineSide, 'b', 'the rematch swaps my color');
+  assert.equal(controller.orientation, 'black', 'board reorients to my new side (chessground spelling)');
+  assert.equal(controller.game.fen(), reset.fen);
+  assert.equal(controller._onlineRematch, null);
+
+  const moved = stateAfter(['e2e4'], { revision: 5, hostColor: 'b' });
+  controller._onOnlineState(moved);
+  assert.equal(controller.game.fen(), moved.fen);
+  controller.dispose();
+});
+
+test('finished online game exposes rematch request/accept actions (roadmap B)', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, client, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation', rematch: null, revision: 2,
+  }));
+
+  const request = controller._onlineRematchActions();
+  assert.equal(request.mode, 'request');
+  request.onRequest();
+  assert.deepEqual(calls.rematch.at(-1), ['request', 2]);
+
+  // Opponent counters with their own offer -> the card offers ACCEPT instead.
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation',
+    rematch: { requestedBy: 'b' }, revision: 3,
+  }));
+  const offer = controller._onlineRematchActions();
+  assert.equal(offer.mode, 'accept');
+  offer.onAccept();
+  assert.deepEqual(calls.rematch.at(-1), ['accept', 3]);
+
+  // Spectators never see rematch actions.
+  const spectatorActions = (() => {
+    const saved = controller.onlineRole;
+    controller.onlineRole = 'spectator';
+    try { return controller._onlineRematchActions(); } finally { controller.onlineRole = saved; }
+  })();
+  assert.equal(spectatorActions, null);
+  assert.ok(client.requestRematch, 'client exposes the rematch API');
+  controller.dispose();
+});
+
+test('spectator mode exposes the live-analysis toggle, player modes do not (roadmap C)', async (t) => {
+  const window = new Window({ url: 'https://chess.example.test/' });
+  t.after(() => window.close());
+  globalThis.window = window;
+  globalThis.document = window.document;
+  globalThis.Worker = FakeWorker;
+  const layer = document.createElement('div');
+  layer.id = 'review-badge-layer';
+  document.body.appendChild(layer);
+  const bar = document.createElement('div');
+  bar.id = 'eval-bar';
+  bar.innerHTML = '<div data-eval-fill></div><span data-eval-label></span>';
+  document.body.appendChild(bar);
+  sounds.play = () => {};
+
+  const spectator = makeHarness();
+  await spectator.controller.start(MODES.ONLINE, {
+    action: 'watch', roomId: ROOM_ID, playerName: 'Viewer', avatar: 'bishop',
+  });
+  assert.equal(spectator.calls.actionStrip.at(-1).liveAnalysis, true);
+  assert.ok(spectator.controller.spectatorEval, 'analysis session exists for spectators');
+
+  assert.equal(spectator.controller.toggleSpectatorAnalysis(), true);
+  assert.equal(spectator.controller.toggleSpectatorAnalysis(), false);
+  spectator.controller.dispose();
+
+  const player = makeHarness();
+  await player.controller.start(MODES.HUMAN_VS_AI, {
+    color: 'w', level: 1, timeControlId: 'unlimited',
+  });
+  assert.equal(player.calls.actionStrip.at(-1).liveAnalysis, false);
+  assert.equal(player.controller.toggleSpectatorAnalysis(), null, 'players can never enable it');
+  player.controller.dispose();
+});
+
+test('rematch offer re-renders the open game-over card with accept actions (P0-3)', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation', rematch: null, revision: 2,
+  }));
+  assert.equal(calls.gameOverRematch?.mode, 'request');
+  const rendersAfterFirst = calls.gameOverRenders;
+
+  // Opponent requests the rematch — the open card must re-render to ACCEPT.
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation',
+    rematch: { requestedBy: 'b' }, revision: 3,
+  }));
+  assert.equal(calls.gameOverRematch?.mode, 'accept', 'card re-rendered with the live offer');
+  assert.equal(calls.gameOverRenders, rendersAfterFirst + 1);
+
+  // A duplicate broadcast with the SAME rematch state must not re-render again.
+  const rendersBefore = calls.gameOverRenders;
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation',
+    rematch: { requestedBy: 'b' }, revision: 3,
+  }));
+  assert.equal(calls.gameOverRenders, rendersBefore, 'same key does not re-render');
+  controller.dispose();
+});
+
+test('spectator analysis is suppressed during review and resumes after (P1-1)', async (t) => {
+  const window = new Window({ url: 'https://chess.example.test/' });
+  t.after(() => window.close());
+  globalThis.window = window;
+  globalThis.document = window.document;
+  globalThis.Worker = FakeWorker;
+  const layer = document.createElement('div');
+  layer.id = 'review-badge-layer';
+  document.body.appendChild(layer);
+  const bar = document.createElement('div');
+  bar.id = 'eval-bar';
+  bar.innerHTML = '<div data-eval-fill></div><span data-eval-label></span>';
+  document.body.appendChild(bar);
+  sounds.play = () => {};
+
+  const { controller } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'watch', roomId: ROOM_ID, playerName: 'Viewer', avatar: 'bishop',
+  });
+  controller.toggleSpectatorAnalysis(true);
+  FakeWorker.latest.finish(['d2d4'], 40);
+  const fill = document.querySelector('#eval-bar [data-eval-fill]');
+  const heightWhileEnabled = fill.style.height;
+  assert.ok(heightWhileEnabled, 'spectator analysis painted the bar');
+
+  controller._reviewActive = true;
+  controller._renderSpectatorAnalysis({ whiteCp: -500, whiteWinProb: 5, depth: 10, best: null, fen: START_FEN });
+  assert.equal(fill.style.height, heightWhileEnabled, 'review owns the bar — no overwrite');
+
+  controller._reviewActive = false;
+  controller._spectatorAnalysisResume = true;
+  controller._finishReviewSession();
+  assert.equal(controller.spectatorEval.enabled, true, 'resumes after the review ends');
+  controller.dispose();
+});
+
+test('rematch reset closes the review summary modal (P2)', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, calls } = makeHarness();
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  controller._onOnlineState(stateAfter([], {
+    status: 'finished', result: '0-1', reason: 'resignation', revision: 2,
+  }));
+  const closed = [];
+  controller.reviewUI = {
+    exitStepperMode() { closed.push('stepper'); },
+    closeSummaryModal() { closed.push('summary'); },
+    closeProgressModal() { closed.push('progress'); },
+    hideEvalBar() { closed.push('bar'); },
+  };
+  controller._reviewActive = true;
+
+  controller._onOnlineState(stateAfter([], { status: 'active', revision: 4, hostColor: 'b' }));
+  assert.deepEqual(closed, ['summary', 'progress', 'stepper', 'bar'], 'no dead modals over the new game');
   controller.dispose();
 });

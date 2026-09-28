@@ -367,6 +367,19 @@ export class ChessRoom extends DurableObject {
       return;
     }
 
+    // A rematch swap recolors both seats — live sockets must follow or their
+    // next move would carry the stale color and be rejected as unauthorized.
+    if (parsed.value.type === 'rematch-accept') {
+      for (const live of this.ctx.getWebSockets('host')) {
+        const attached = live.deserializeAttachment();
+        live.serializeAttachment({ ...attached, color: result.state.hostColor });
+      }
+      for (const live of this.ctx.getWebSockets('guest')) {
+        const attached = live.deserializeAttachment();
+        live.serializeAttachment({ ...attached, color: result.state.guestColor });
+      }
+    }
+
     await this.ctx.storage.put(ROOM_KEY, result.state);
     await this.scheduleAlarm(result.state);
     this.broadcast(result.state);

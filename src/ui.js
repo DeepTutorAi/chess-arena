@@ -14,6 +14,7 @@ import {
   iconShare,
   iconRefresh,
   iconSwords,
+  iconTrendingUp,
   iconLink,
   iconBolt,
   iconBot,
@@ -27,6 +28,8 @@ import {
   iconTrash,
   iconList,
   iconTerminal,
+  iconBarChart,
+  iconSettings,
 } from './icons.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -162,8 +165,20 @@ export class UI {
                 <div class="clock-badge" id="clock-top">--:--</div>
               </div>
 
-              <!-- BOARD WRAPPER -->
-              <div id="board" class="board-wrap"></div>
+              <!-- BOARD WRAPPER (vertical evaluation bar docks beside the board
+                   in review mode; hidden in normal play). The badge layer is a
+                   permanent SIBLING of #board — chessground wipes foreign
+                   children of its own element on orientation changes. -->
+              <div class="board-with-eval">
+                <div class="eval-bar-container hidden" id="eval-bar">
+                  <div class="eval-bar-track"><div class="eval-bar-fill" data-eval-fill></div></div>
+                  <span class="eval-bar-label" data-eval-label></span>
+                </div>
+                <div class="board-frame">
+                  <div id="board" class="board-wrap"></div>
+                  <div class="review-badge-layer hidden" id="review-badge-layer"></div>
+                </div>
+              </div>
 
               <!-- BOTTOM PLAYER -->
               <div class="player-bar bottom-player" id="player-bar-bottom">
@@ -232,7 +247,15 @@ export class UI {
                   <span class="icon">${iconHint({ size: 18 })}</span>
                   <span class="label">คำใบ้</span>
                 </button>
-                <button id="btn-resign" class="action-btn danger" title="ยอมแพ้ (Resign)">
+                <button id="btn-flip" class="action-btn" title="กลับกระดาน (Flip Board)">
+                  <span class="icon">${iconFlip({ size: 18 })}</span>
+                  <span class="label">กลับกระดาน</span>
+                </button>
+                <button id="btn-options" class="action-btn" title="ตัวเลือก (Options)">
+                  <span class="icon">${iconSettings({ size: 18 })}</span>
+                  <span class="label">ตัวเลือก</span>
+                </button>
+                <button id="btn-resign" class="action-btn danger hidden" title="ยอมแพ้ (Resign)">
                   <span class="icon">${iconFlag({ size: 18 })}</span>
                   <span class="label">ยอมแพ้</span>
                 </button>
@@ -240,15 +263,15 @@ export class UI {
                   <span class="icon">${iconShare({ size: 18 })}</span>
                   <span class="label">แชร์</span>
                 </button>
-                <button id="btn-flip" class="action-btn hidden" title="กลับกระดาน (Flip Board)">
-                  <span class="icon">${iconFlip({ size: 18 })}</span>
-                  <span class="label">กลับกระดาน</span>
-                </button>
                 <button id="btn-pause" class="action-btn hidden" title="หยุด/เล่นต่อ (Pause/Resume)">
                   <span class="icon">${iconPause({ size: 18 })}</span>
                   <span class="label">หยุด</span>
                 </button>
-                <button id="btn-sound" class="action-btn" type="button" title="เปิด/ปิดเสียง" aria-pressed="false">
+                <button id="btn-analysis" class="action-btn hidden" type="button" title="ประเมินสถานการณ์สด (Live Analysis)" aria-pressed="false">
+                  <span class="icon">${iconTrendingUp({ size: 18 })}</span>
+                  <span class="label">ประเมิน</span>
+                </button>
+                <button id="btn-sound" class="action-btn hidden" type="button" title="เปิด/ปิดเสียง" aria-pressed="false">
                   <span class="icon">${iconSound({ size: 18 })}</span>
                   <span class="label">เสียง</span>
                 </button>
@@ -334,10 +357,12 @@ export class UI {
 
       btnUndo: $('#btn-undo'),
       btnHint: $('#btn-hint'),
+      btnFlip: $('#btn-flip'),
+      btnOptions: $('#btn-options'),
       btnResign: $('#btn-resign'),
       btnShare: $('#btn-share'),
-      btnFlip: $('#btn-flip'),
       btnPause: $('#btn-pause'),
+      btnAnalysis: $('#btn-analysis'),
       btnSound: $('#btn-sound'),
       btnHome: $('#btn-home'),
       spectatorControl: $('#spectator-control'),
@@ -427,12 +452,15 @@ export class UI {
   }
 
   // ---- action strip (per-mode buttons) -------------------------------------
-  setActionStrip({ undo = true, resign = true, flip = false, pause = false, hint = false } = {}) {
+  setActionStrip({ undo = true, resign = false, flip = true, pause = false, hint = false, liveAnalysis = false, options = true, sound = false } = {}) {
     this.refs.btnUndo.classList.toggle('hidden', !undo);
     this.refs.btnResign.classList.toggle('hidden', !resign);
     this.refs.btnFlip.classList.toggle('hidden', !flip);
     this.refs.btnPause.classList.toggle('hidden', !pause);
     this.refs.btnHint.classList.toggle('hidden', !hint);
+    this.refs.btnAnalysis.classList.toggle('hidden', !liveAnalysis);
+    if (this.refs.btnOptions) this.refs.btnOptions.classList.toggle('hidden', !options);
+    if (this.refs.btnSound) this.refs.btnSound.classList.toggle('hidden', !sound);
   }
 
   setOnlineRole(role) {
@@ -669,14 +697,49 @@ export class UI {
   }
 
   // ---- game over popup ---------------------------------------------------
-  showGameOver(title, detail = '', onNewGame, onHome) {
+  showGameOver(title, detail = '', onNewGame, onHome, onReview, rematch = null, onRestore = null) {
     const body = this.el('div', 'gameover');
     const big = this.el('div', 'gameover-title', title);
     const sub = this.el('div', 'gameover-detail', detail);
     body.append(big, sub);
     const row = this.el('div', 'dlg-actions');
 
-    const again = this.el('button', 'btn primary');
+    // Online rematch (roadmap B) — the card is the handshake surface.
+    if (rematch?.mode === 'accept') {
+      const accept = this.el('button', 'btn primary');
+      accept.innerHTML = `<span class="btn-svg">${iconRefresh({ size: 16 })}</span> <span>ยอมรับรีเมตช์</span>`;
+      accept.onclick = () => {
+        overlay.close();
+        rematch.onAccept();
+      };
+      const decline = this.el('button', 'btn');
+      decline.textContent = 'ปฏิเสธ';
+      decline.onclick = () => {
+        overlay.close();
+        rematch.onDecline();
+      };
+      row.append(accept, decline);
+    } else if (rematch?.mode === 'request') {
+      const ask = this.el('button', 'btn');
+      ask.innerHTML = `<span class="btn-svg">${iconRefresh({ size: 16 })}</span> <span>ขอรีเมตช์</span>`;
+      ask.onclick = () => {
+        ask.disabled = true;
+        ask.textContent = 'ส่งคำขอแล้ว — รอฝ่ายตรงข้าม';
+        rematch.onRequest();
+      };
+      row.append(ask);
+    }
+    if (onReview) {
+      const review = this.el('button', 'btn primary');
+      review.innerHTML = `<span class="btn-svg">${iconBarChart({ size: 16 })}</span> <span>รีวิวเกม</span>`;
+      review.onclick = () => {
+        overlay.close();
+        onReview();
+      };
+      row.append(review);
+    }
+
+    const again = this.el('button', onReview ? 'btn' : 'btn primary');
     again.innerHTML = `<span class="btn-svg">${iconRefresh({ size: 16 })}</span> <span>เริ่มเกมใหม่</span>`;
     again.onclick = () => {
       overlay.close();
@@ -694,7 +757,100 @@ export class UI {
     body.appendChild(row);
     const overlay = this.openModal('จบเกม', body);
     overlay.body.querySelector('.btn.primary').focus();
+
+    // Minimize — the card becomes a small floating pill that never blocks the
+    // board; dragging repositions it, clicking restores the full card.
+    const head = overlay.body.closest('.modal')?.querySelector('.modal-head');
+    if (head) {
+      const minimize = this.el('button', 'modal-close gameover-minimize', '–');
+      minimize.type = 'button';
+      minimize.setAttribute('aria-label', 'ย่อการ์ดผลการแข่งขัน (ไม่บังกระดาน)');
+      minimize.title = 'ย่อการ์ด — ลากแถบป้ายย้ายได้ กดเพื่อเปิดใหม่';
+      minimize.onclick = () => {
+        overlay.close();
+        this._spawnGameOverPill(title, detail, onNewGame, onHome, onReview, rematch, onRestore);
+      };
+      head.insertBefore(minimize, head.querySelector('.modal-close'));
+    }
     return overlay;
+  }
+
+  _spawnGameOverPill(title, detail, onNewGame, onHome, onReview, rematch = null, onRestore = null) {
+    document.querySelectorAll('.gameover-pill').forEach((p) => p.remove());
+    const pill = this.el('button', 'gameover-pill');
+    pill.type = 'button';
+    pill.setAttribute('aria-label', 'เปิดการ์ดผลการแข่งขัน (ลากเพื่อย้าย)');
+    pill.innerHTML = `<span class="pill-title">${title}</span><span class="pill-detail">${detail}</span><span class="pill-expand">▲</span>`;
+    pill.title = 'กดเพื่อเปิดการ์ด · ลากเพื่อย้าย';
+
+    let dragged = false;
+    pill.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      dragged = false; // each gesture starts clean — a stale flag must not
+      // swallow the click after pointerup
+      const rect = pill.getBoundingClientRect();
+      const offX = e.clientX - rect.left;
+      const offY = e.clientY - rect.top;
+      const move = (ev) => {
+        const dx = Math.abs(ev.clientX - e.clientX);
+        const dy = Math.abs(ev.clientY - e.clientY);
+        if (dx > 4 || dy > 4) dragged = true;
+        const x = Math.min(Math.max(0, ev.clientX - offX), window.innerWidth - pill.offsetWidth);
+        const y = Math.min(Math.max(0, ev.clientY - offY), window.innerHeight - pill.offsetHeight);
+        pill.style.left = `${x}px`;
+        pill.style.top = `${y}px`;
+        pill.style.right = 'auto';
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+    });
+    pill.onclick = () => {
+      if (dragged) {
+        dragged = false;
+        return;
+      }
+      pill.remove();
+      if (onRestore) {
+        // Restore through the controller so rematch actions are re-derived
+        // from the LIVE state (a stale captured offer would mislead the card).
+        onRestore();
+        return;
+      }
+      this.showGameOver(title, detail, onNewGame, onHome, onReview, rematch);
+    };
+    document.body.appendChild(pill);
+  }
+
+  /** Non-blocking corner toast — used during review for online events
+   *  (opponent disconnect, future rematch offers). Never covers the board. */
+  showFloatingToast({ title, detail = '', actions = [] } = {}) {
+    document.querySelectorAll('.floating-toast').forEach((t) => t.remove());
+    const toast = this.el('div', 'floating-toast');
+    toast.setAttribute('role', 'status');
+    toast.append(
+      this.el('div', 'floating-toast-title', title),
+      this.el('div', 'floating-toast-detail', detail),
+    );
+    if (actions.length) {
+      const row = this.el('div', 'floating-toast-actions');
+      for (const [label, onClick, primary = false] of actions) {
+        const btn = this.el('button', `btn ${primary ? 'primary' : ''}`, label);
+        btn.onclick = () => {
+          toast.remove();
+          onClick?.();
+        };
+        row.appendChild(btn);
+      }
+      toast.appendChild(row);
+    }
+    document.body.appendChild(toast);
+    return toast;
   }
 
   el(tag, className, text) {

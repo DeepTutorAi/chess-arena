@@ -98,6 +98,7 @@ export function createGameState(input, now = Date.now()) {
     guestColor,
     clock,
     afk: null,
+    rematch: null,
     createdAt: now,
     updatedAt: now,
     expiresAt: input.expiresAt,
@@ -132,6 +133,39 @@ export function realizeTimeout(state, now = Date.now()) {
   return { changed: true, state: finishByTimeout(state, state.turn, now) };
 }
 
+/** Rematch (roadmap B): a finished game restarts immediately with the SAME
+ *  players on swapped colors, same settings/initial position, fresh clocks and
+ *  AFK state. Room identity, visibility and expiry are unchanged. */
+export function resetForRematch(state, now = Date.now()) {
+  const next = copy(state);
+  const hostPlayer = state.players[state.hostColor];
+  const guestPlayer = state.players[state.guestColor];
+  next.hostColor = state.guestColor;
+  next.guestColor = state.hostColor;
+  next.players[next.hostColor] = { role: 'host', name: hostPlayer.name, avatar: hostPlayer.avatar };
+  next.players[next.guestColor] = { role: 'guest', name: guestPlayer.name, avatar: guestPlayer.avatar };
+
+  const game = new Chess(next.initialFen);
+  next.fen = game.fen();
+  next.turn = game.turn();
+  next.lastMove = null;
+  next.lastMoveSan = null;
+  next.moves = [];
+  next.result = null;
+  next.reason = null;
+  next.status = 'active';
+  next.revision += 1;
+  next.updatedAt = now;
+  if (next.clock) {
+    next.clock.whiteMs = next.clock.initialMs;
+    next.clock.blackMs = next.clock.initialMs;
+    next.clock.activeSince = now;
+  }
+  next.afk = createAfkState(next.timeControlId, now);
+  next.rematch = null;
+  return next;
+}
+
 export function applyGameCommand(state, actor, command, now = Date.now()) {
   if (now >= state.expiresAt) return error('room_expired', 'ห้องนี้หมดอายุแล้ว');
   if (!actor || !['host', 'guest'].includes(actor.role) || !['w', 'b'].includes(actor.color)) {
@@ -143,6 +177,38 @@ export function applyGameCommand(state, actor, command, now = Date.now()) {
   if (!command || command.expectedRevision !== state.revision) {
     return error('stale_revision', 'สถานะเกมเปลี่ยนแล้ว กรุณาซิงก์ใหม่');
   }
+
+  // Rematch handshake (roadmap B) — only meaningful once a game has finished.
+  if (command.type === 'rematch-request' || command.type === 'rematch-accept' || command.type === 'rematch-decline') {
+    if (state.status !== 'finished') {
+      return error('game_not_active', 'รีเมตช์ใช้ได้หลังจบเกมเท่านั้น');
+    }
+    const next = copy(state);
+    if (command.type === 'rematch-request') {
+      if (next.rematch?.requestedBy && next.rematch.requestedBy !== actor.color) {
+        return error('rematch_pending', 'อีกฝ่ายเสนอรีเมตช์อยู่แล้ว — กดยอมรับเพื่อเริ่มเกม');
+      }
+      if (next.rematch?.requestedBy === actor.color) return { ok: true, state };
+      next.rematch = { requestedBy: actor.color };
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    if (command.type === 'rematch-decline') {
+      if (!next.rematch) return { ok: true, state };
+      next.rematch = null;
+      next.revision += 1;
+      next.updatedAt = now;
+      return { ok: true, state: next };
+    }
+    // rematch-accept: only the OTHER player may accept.
+    if (!next.rematch) return error('no_rematch_offer', 'ยังไม่มีคำขอรีเมตช์');
+    if (next.rematch.requestedBy === actor.color) {
+      return error('rematch_pending', 'รอคำตอบของฝ่ายตรงข้ามอยู่');
+    }
+    return { ok: true, state: resetForRematch(next, now) };
+  }
+
   if (state.status !== 'active') {
     return error('game_not_active', 'เกมยังไม่พร้อมหรือจบแล้ว');
   }
@@ -235,6 +301,7 @@ export function toPublicState(state, connections = {}) {
     title: state.title,
     visibility: state.visibility ?? 'public',
     allowSpectators: state.allowSpectators ?? true,
+    hostColor: state.hostColor,
     revision: state.revision,
     status: state.status,
     initialFen: state.initialFen,
@@ -245,6 +312,7 @@ export function toPublicState(state, connections = {}) {
     moves: [...state.moves],
     result: state.result,
     reason: state.reason,
+    rematch: state.rematch ? { requestedBy: state.rematch.requestedBy } : null,
     players: publicPlayers,
     clock: state.clock ? copy(state.clock) : null,
     afk: toPublicAfk(state),

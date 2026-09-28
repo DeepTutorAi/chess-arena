@@ -151,6 +151,12 @@ export function parseSocketCommand(input) {
     return { ok: true, value: { type: 'resign', expectedRevision: value.expectedRevision } };
   }
 
+  if (value.type === 'rematch-request' || value.type === 'rematch-accept' || value.type === 'rematch-decline') {
+    if (!hasOnlyKeys(value, ['type', 'expectedRevision'])) return invalid();
+    if (!Number.isSafeInteger(value.expectedRevision) || value.expectedRevision < 0) return invalid();
+    return { ok: true, value: { type: value.type, expectedRevision: value.expectedRevision } };
+  }
+
   if (value.type === 'move') {
     if (!hasOnlyKeys(value, ['type', 'from', 'to', 'promotion', 'expectedRevision'])) return invalid();
     if (!SQUARE_PATTERN.test(value.from) || !SQUARE_PATTERN.test(value.to)) return invalid('ช่องเดินไม่ถูกต้อง');

@@ -3,6 +3,10 @@
 
 import { Chess } from 'chess.js';
 import { Stockfish } from './engine.js';
+import { GameReviewAnalyzer } from './analyzer.js';
+import { ReviewUI } from './review-ui.js';
+import { getOpeningBook } from './openings.js';
+import { SpectatorEval as SpectatorAnalysisEngine } from './spectator-eval.js';
 import { AVATAR_GLYPHS, OnlineRoomClient } from './online.js';
 import { ChessClock } from './clock.js';
 import { sounds } from './sounds.js';
@@ -13,6 +17,10 @@ import {
   TIME_CONTROLS,
   DEFAULT_TIME_CONTROL,
   ENGINE_HINT_URL,
+  ENGINE_MULTI_URL,
+  resolveEngineWorkerUrl,
+  getStrongEnginePreference,
+  isCrossOriginIsolated,
 } from './config.js';
 
 export const MODES = {
@@ -23,10 +31,17 @@ export const MODES = {
 };
 
 export class Controller {
-  constructor({ ui, ground, onPromotion, onlineClientFactory = (options) => new OnlineRoomClient(options) }) {
+  constructor({
+    ui,
+    ground,
+    onPromotion,
+    onlineClientFactory = (options) => new OnlineRoomClient(options),
+    gameOverDelayMs = 3000,
+  }) {
     this.ui = ui;
     this.ground = ground;
     this.onPromotion = onPromotion;
+    this._gameOverDelayMs = gameOverDelayMs;
 
     this.game = new Chess();
     this.mode = null;
@@ -65,6 +80,22 @@ export class Controller {
     this._lastOpts = null;
     this._overPopupShown = false;
 
+    // Game Review System state (plan.md §Step 4)
+    this._gameInitialFen = null;
+    this._lastGameRecord = null;
+    this._lastGameOver = null;
+    this._gameOverOverlay = null;
+    this._reviewActive = false;
+    this._analysis = null;
+    this._activeAnalyzer = null;
+    this.reviewUI = null;
+    this._reviewDisconnectNotified = false;
+    this._gameOverDelayTimer = null;
+
+    // Per-ply clock snapshots for the review replay (remaining {w,b} ms after
+    // each move, keyed by history length).
+    this._clockSnapshots = [];
+
     // Interactive Sandbox Board Setup State
     this.sandboxSetup = false;
     this.sandboxTool = 'move';       // 'move' | 'replace'
@@ -94,6 +125,13 @@ export class Controller {
     } catch {
       this.game = new Chess(); // fallback to standard
     }
+    this._gameInitialFen = initialFen;
+    this._lastGameRecord = null;
+    this._lastGameOver = null;
+    this._gameOverOverlay = null;
+    this._analysis = null;
+    this._activeAnalyzer = null;
+    this._clockSnapshots = [];
 
     this.ui.clearLog();
     this.ui.resetMoves();
@@ -407,6 +445,10 @@ export class Controller {
 
     if (this.engine) this.engine.stop();
     if (this.engineBlack) this.engineBlack.stop();
+    if (this.clock) {
+      this.clock.stop();
+      this._restoreClockDisplay();
+    }
     this.ui.setBusy?.(false);
     // Lock the board: without a re-sync the flagged side keeps the pre-timeout
     // movable config and could keep dragging pieces after the flag.
@@ -418,12 +460,9 @@ export class Controller {
 
     if (!this._overPopupShown) {
       this._overPopupShown = true;
-      this.ui.showGameOver(
-        text,
-        detail,
-        () => this.newGame(),
-        () => this.goHome()
-      );
+      this._pushClockSnapshot(); // flag time (loser at 0:00) for the replay
+      this._captureGameRecord({ result: winnerCode, reason: 'timeout' });
+      this._showGameOverSoon(text, detail);
     }
 
     this._playGameOverSound();
@@ -451,7 +490,10 @@ export class Controller {
 
     if (this.engine) this.engine.stop();
     if (this.engineBlack) this.engineBlack.stop();
-    this.clock?.stop();
+    if (this.clock) {
+      this.clock.stop();
+      this._restoreClockDisplay();
+    }
     this.ui.setBusy?.(false);
 
     this.ui.setStatus(`จบเกม · ${text}`, 'done');
@@ -459,12 +501,9 @@ export class Controller {
 
     if (!this._overPopupShown) {
       this._overPopupShown = true;
-      this.ui.showGameOver(
-        text,
-        detail,
-        () => this.newGame(),
-        () => this.goHome()
-      );
+      this._pushClockSnapshot(); // freeze the times the resignation happened at
+      this._captureGameRecord({ result: winnerCode, reason: 'resign' });
+      this._showGameOverSoon(text, detail);
     }
 
     // The human always loses when resigning.
@@ -561,6 +600,7 @@ export class Controller {
   flip() {
     this.orientation = this.orientation === 'white' ? 'black' : 'white';
     this.ground.set({ orientation: this.orientation });
+    if (this._reviewActive) this.reviewUI?.rerender(); // badges follow the flip
     this.ui.log(`กลับกระดาน — ${this.orientation === 'white' ? 'ขาว' : 'ดำ'} อยู่ด้านล่าง`, 'sys');
   }
 
@@ -580,7 +620,7 @@ export class Controller {
       this.ui.setStatus('⏸ หยุดชั่วคราว — กด ▶️ ต่อเพื่อเล่นต่อ', '');
       this.ui.setPauseState(true);
     } else {
-      this.clock?.start(this.game.turn());
+      if (!this._isOver()) this.clock?.start(this.game.turn());
       this.ui.setPauseState(false);
       this.ui.setStatus(`AI (${this.game.turn() === 'w' ? 'ขาว' : 'ดำ'}) กำลังคิด…`, 'busy');
       this._maybeStartAiLoop();
@@ -593,6 +633,7 @@ export class Controller {
     if (this.engineBlack) { this.engineBlack.quit(); this.engineBlack = null; }
     if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
     if (this._hintTimer) { clearTimeout(this._hintTimer); this._hintTimer = null; }
+    if (this.spectatorEval) { this.spectatorEval.destroy(); this.spectatorEval = null; }
     if (this.online) { this.online.stop(); this.online = null; }
     if (this._onlineClockTimer) { clearInterval(this._onlineClockTimer); this._onlineClockTimer = null; }
     if (this._onlineAfkTimer) { clearInterval(this._onlineAfkTimer); this._onlineAfkTimer = null; }
@@ -613,7 +654,20 @@ export class Controller {
     this.paused = false;
     this.sandboxSetup = false;
     this.ground.setShapes([]);
+    this.ground.setAutoShapes?.([]);
     if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
+
+    // Review teardown — a running analysis must not outlive its game.
+    if (this._activeAnalyzer) { this._activeAnalyzer.abort(); this._activeAnalyzer = null; }
+    if (this._gameOverDelayTimer) { clearTimeout(this._gameOverDelayTimer); this._gameOverDelayTimer = null; }
+    if (this._reviewActive) {
+      this.reviewUI?.exitStepperMode();
+      this.reviewUI?.closeSummaryModal();
+      this.reviewUI?.closeProgressModal();
+      this.reviewUI?.hideEvalBar();
+      this._reviewActive = false;
+    }
+    this._analysis = null;
   }
 
   // ------------------------------------------------------------------ modes
@@ -640,9 +694,10 @@ export class Controller {
     // The WASM download is several MB on first load — say so instead of a
     // silent gap between the dialog closing and the engine's first move.
     this.ui.setStatus(`กำลังโหลดเอนจิน ${ENGINE_NAME}…`, 'busy');
-    this.ui.setActionStrip({ undo: true, resign: true, flip: false, pause: false, hint: true });
+    this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, hint: true, liveAnalysis: false, options: true });
 
     this.engine = new Stockfish({
+      workerUrl: this._engineUrl(),
       onReady: () => {
         this.engineReady = true;
         if (this.engine) {
@@ -690,8 +745,9 @@ export class Controller {
     this.ui.setStatus(`AI vs AI · ขาว Elo ${cfgW.elo} ปะทะ ดำ Elo ${cfgB.elo}`, '');
     this.paused = false;
     this.ui.setPauseState(false);
-    // AI vs AI: flip to watch the other side + pause/resume; no resign/undo.
-    this.ui.setActionStrip({ undo: false, resign: false, flip: true, pause: true });
+    // AI vs AI: flip to watch the other side + pause/resume; options menu for audio.
+    this.ui.setActionStrip({ undo: false, resign: false, flip: true, pause: true, liveAnalysis: true, options: true });
+    this._ensureSpectatorAnalysis();
 
     let readyCount = 0;
 
@@ -712,6 +768,7 @@ export class Controller {
     };
 
     this.engine = new Stockfish({
+      workerUrl: this._engineUrl(),
       onReady: () => onWorkerReady('w'),
       onBestMove: (uci) => this._onAiLoopMove('w', uci),
       onError: (msg) => {
@@ -721,6 +778,7 @@ export class Controller {
     });
 
     this.engineBlack = new Stockfish({
+      workerUrl: this._engineUrl(),
       onReady: () => onWorkerReady('b'),
       onBestMove: (uci) => this._onAiLoopMove('b', uci),
       onError: (msg) => {
@@ -739,7 +797,7 @@ export class Controller {
       { name: 'ฝ่ายขาว (มือคุณ)' }
     );
     this.ui.setStatus('โหมด Sandbox — เล่นได้ทั้งสองสี', '');
-    this.ui.setActionStrip({ undo: true, resign: true, flip: false, pause: false });
+    this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, liveAnalysis: false, options: true });
     this._syncBoard();
     this._renderMoves();
   }
@@ -810,7 +868,8 @@ export class Controller {
     this.viewerMode = this.onlineRole === 'spectator';
     this.orientation = this.onlineSide === 'b' ? 'black' : 'white';
     if (result.state) this._onOnlineState(result.state);
-    this.ui.setActionStrip({ undo: false, resign: this.onlineRole !== 'spectator', flip: false, pause: false });
+    this.ui.setActionStrip({ undo: false, resign: false, flip: true, pause: false, liveAnalysis: this.onlineRole === 'spectator', options: true });
+    if (this.onlineRole === 'spectator') this._ensureSpectatorAnalysis();
     this.ui.setOnlineRole?.(this.onlineRole);
     this.ui.setShareVisible?.(this.onlineRole === 'host');
     this.online.connect();
@@ -846,7 +905,69 @@ export class Controller {
       return;
     }
 
+    const wasFinished = this.onlineState?.status === 'finished';
+
     this.onlineState = state;
+    // Rematch handshake (roadmap B): remember the live offer for the game-over
+    // card, even while review owns the screen.
+    this._onlineRematch = state.rematch ?? null;
+    if (state.hostColor && this.onlineRole !== 'spectator') {
+      const expectedSide = this.onlineRole === 'host'
+        ? state.hostColor
+        : (state.hostColor === 'w' ? 'b' : 'w');
+      if (expectedSide !== this.onlineSide) {
+        this.onlineSide = expectedSide;
+        // chessground wants 'white'/'black', not 'w'/'b'.
+        this.orientation = expectedSide === 'b' ? 'black' : 'white';
+      }
+    }
+    // A rematch flips the finished room back to an empty active game — clear
+    // every local "game over" remnant so the new game starts clean.
+    if (wasFinished && state.status === 'active' && state.moves.length === 0) {
+      this._overPopupShown = false;
+      this._gameOverOverlay?.close();
+      this._gameOverOverlay = null;
+      this._lastGameOver = null;
+      this._clockSnapshots.length = 0;
+      if (this._reviewActive) {
+        // The summary modal/ progress modal would float dead over the new game.
+        this.reviewUI?.closeSummaryModal();
+        this.reviewUI?.closeProgressModal();
+        this.reviewUI?.exitStepperMode();
+        this.reviewUI?.hideEvalBar();
+        this._finishReviewSession();
+      }
+      this.ui.log('รีเมตช์ได้รับการยอมรับ — เริ่มเกมใหม่แล้ว (สลับฝั่งกัน)', 'sys');
+    }
+    // Server clock truth at this revision — the review replay replays these.
+    if (state.clock) {
+      const snap = { ply: state.moves.length, w: state.clock.whiteMs, b: state.clock.blackMs };
+      const last = this._clockSnapshots[this._clockSnapshots.length - 1];
+      if (last && last.ply === snap.ply) this._clockSnapshots[this._clockSnapshots.length - 1] = snap;
+      else this._clockSnapshots.push(snap);
+    }
+    if (this._reviewActive) {
+      // Live data keeps flowing while reviewing, but review owns the screen —
+      // no board/ clock re-renders, only non-blocking toasts.
+      this._maybeNotifyReviewDisconnect(state);
+      this._maybeNotifyReviewRematch(state);
+      return;
+    }
+    // A rematch offer/decision that lands while the game-over card is open
+    // changes which buttons the card must show — re-render it from the LIVE
+    // state instead of letting stale buttons sit there.
+    const rematchKey = this._rematchStateKey();
+    if (
+      this._lastGameOver
+      && this._gameOverOverlay?.body?.isConnected
+      && rematchKey !== null
+      && rematchKey !== this._rematchCardKey
+    ) {
+      this._rematchCardKey = rematchKey;
+      this._gameOverOverlay.close();
+      this._gameOverOverlay = null;
+      this._reshowGameOver();
+    }
     this.ui.setSpectators?.({ visible: state.allowSpectators, spectators: state.spectators ?? [] });
     const topColor = this.orientation === 'white' ? 'b' : 'w';
     const bottomColor = topColor === 'w' ? 'b' : 'w';
@@ -884,6 +1005,35 @@ export class Controller {
     return this.online?.now?.() ?? Date.now();
   }
 
+  /** Rematch actions for the game-over card (roadmap B) — null for spectators,
+   *  unfinished games, or non-online modes. */
+  _onlineRematchActions() {
+    if (this.mode !== MODES.ONLINE || this.onlineRole === 'spectator') return null;
+    if (this.onlineState?.status !== 'finished') return null;
+    const revision = this.onlineState.revision;
+    const offer = this.onlineState.rematch;
+    if (offer && offer.requestedBy !== this.onlineSide) {
+      return {
+        mode: 'accept',
+        onAccept: () => this.online?.acceptRematch(revision),
+        onDecline: () => this.online?.declineRematch(revision),
+      };
+    }
+    if (offer) return { mode: 'waiting' };
+    return { mode: 'request', onRequest: () => this.online?.requestRematch(revision) };
+  }
+
+  /** Non-blocking toast while review owns the screen (roadmap B). */
+  _maybeNotifyReviewRematch(state) {
+    if (!state.rematch || state.rematch.requestedBy === this.onlineSide) return;
+    if (this._reviewRematchNotifiedFor === state.revision) return;
+    this._reviewRematchNotifiedFor = state.revision;
+    this.ui.showFloatingToast?.({
+      title: 'คำขอรีเมตช์',
+      detail: 'ฝ่ายตรงข้ามขอรีเมตช์ — ออกจากรีวิวเพื่อยอมรับหรือปฏิเสธ',
+    });
+  }
+
   _renderOnlineClock(state) {
     if (this._onlineClockTimer) clearInterval(this._onlineClockTimer);
     this._onlineClockTimer = null;
@@ -904,8 +1054,9 @@ export class Controller {
       const topColor = this.orientation === 'white' ? 'b' : 'w';
       const topMs = topColor === 'w' ? whiteMs : blackMs;
       const bottomMs = topColor === 'w' ? blackMs : whiteMs;
-      this.ui.setClock('top', ChessClock.formatTime(topMs), state.turn === topColor, topMs <= 20_000);
-      this.ui.setClock('bottom', ChessClock.formatTime(bottomMs), state.turn !== topColor, bottomMs <= 20_000);
+      const isOnlineActive = state.status === 'active';
+      this.ui.setClock('top', ChessClock.formatTime(topMs), isOnlineActive && state.turn === topColor, topMs <= 20_000);
+      this.ui.setClock('bottom', ChessClock.formatTime(bottomMs), isOnlineActive && state.turn !== topColor, bottomMs <= 20_000);
     };
     render();
     if (state.status === 'active') this._onlineClockTimer = setInterval(render, 250);
@@ -946,6 +1097,10 @@ export class Controller {
   }
 
   _announceOnlineResult(state) {
+    if (this._onlineClockTimer) {
+      clearInterval(this._onlineClockTimer);
+      this._onlineClockTimer = null;
+    }
     if (this._overPopupShown) return;
     this._overPopupShown = true;
     const draw = state.result === '1/2-1/2';
@@ -963,14 +1118,358 @@ export class Controller {
     const detail = `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
     this.ui.setStatus(`จบเกม · ${title}`, 'done');
     this.ui.log(`จบเกมออนไลน์: ${title} — ${detail}`, 'sys');
-    this.ui.showGameOver(title, detail, () => this.goHome(), () => this.goHome());
+
+    // Cache the full game locally the moment it ends — the review must keep
+    // working even if the opponent rage-quits right away (plan.md §5.2B).
+    this._captureGameRecord({
+      result: state.result,
+      reason: state.reason,
+      fromState: state,
+    });
+    this._showGameOverSoon(title, detail);
     const afkResult = ['opening_afk_timeout', 'unlimited_afk_timeout', 'unlimited_afk_strikes'].includes(state.reason);
     sounds.play(afkResult ? 'afk' : draw ? 'draw' : won ? 'victory' : 'lose');
   }
 
+  // ------------------------------------------------------------------ game review
+
+  /** Snapshot remaining clock time for the review replay — keyed by history
+   *  length so undo() naturally invalidates later snapshots. */
+  _pushClockSnapshot() {
+    if (!this.clock || this.clock.unlimited) return;
+    const ply = this.game.history().length;
+    while (this._clockSnapshots.length && this._clockSnapshots[this._clockSnapshots.length - 1].ply >= ply) {
+      this._clockSnapshots.pop();
+    }
+    this._clockSnapshots.push({ ply, w: this.clock.times.w, b: this.clock.times.b });
+  }
+
+  /** Snapshot the finished game into the mode-agnostic GameHistoryRecord
+   *  (plan.md §5.1). Online games rebuild from the server state's UCI list. */
+  _captureGameRecord({ result, reason, fromState = null } = {}) {
+    try {
+      let initialFen = this._gameInitialFen ?? null;
+      let moves;
+      let players;
+      if (fromState) {
+        initialFen = fromState.initialFen ?? initialFen;
+        moves = fromState.moves.map((uci) => ({
+          from: uci.slice(0, 2),
+          to: uci.slice(2, 4),
+          promotion: uci.length > 4 ? uci[4] : undefined,
+        }));
+        players = {
+          white: { name: fromState.players.w.name },
+          black: { name: fromState.players.b.name },
+        };
+      } else {
+        const history = this.game.history({ verbose: true });
+        if (!history.length) return;
+        moves = history.map((m) => ({
+          san: m.san,
+          from: m.from,
+          to: m.to,
+          promotion: m.promotion || undefined,
+        }));
+        players = this._recordPlayers();
+      }
+      this._lastGameRecord = {
+        initialFen,
+        moves,
+        result,
+        reason,
+        players,
+        gamemode: this.mode === MODES.ANALYZE ? 'sandbox' : this.mode,
+        times: this._clockSnapshots.map((s) => ({ ply: s.ply, w: s.w, b: s.b })),
+        initial: this._recordInitialTimes(),
+      };
+    } catch (err) {
+      // A broken record must never break the game-over flow — review is
+      // simply unavailable for that game.
+      this.ui.log(`บันทึกไว้รีวิวไม่สำเร็จ: ${err.message}`, 'warn');
+    }
+  }
+
+  /** Starting clock times for the replay (null when the game had no clock). */
+  _recordInitialTimes() {
+    if (this.mode === MODES.ONLINE) {
+      const clock = this.onlineState?.clock;
+      return clock ? { w: clock.initialMs, b: clock.initialMs } : null;
+    }
+    if (this.clock && !this.clock.unlimited) {
+      return { w: this.clock.initialMs, b: this.clock.initialMs };
+    }
+    return null;
+  }
+
+  _recordPlayers() {
+    if (this.mode === MODES.ONLINE && this.onlineState?.players) {
+      const p = this.onlineState.players;
+      return { white: { name: p.w.name }, black: { name: p.b.name } };
+    }
+    if (this.mode === MODES.HUMAN_VS_AI) {
+      const cfg = LEVELS[this.levelIndex];
+      const engineName = `${ENGINE_NAME} Elo ${cfg?.elo ?? '?'}`;
+      return this.humanSide === 'w'
+        ? { white: { name: HUMAN_NAME }, black: { name: engineName } }
+        : { white: { name: engineName }, black: { name: HUMAN_NAME } };
+    }
+    if (this.mode === MODES.AI_VS_AI) {
+      const w = LEVELS[this.aivaLevelW];
+      const b = LEVELS[this.aivaLevelB];
+      return {
+        white: { name: `${ENGINE_NAME} Elo ${w?.elo ?? '?'}` },
+        black: { name: `${ENGINE_NAME} Elo ${b?.elo ?? '?'}` },
+      };
+    }
+    return { white: { name: 'ฝ่ายขาว' }, black: { name: 'ฝ่ายดำ' } };
+  }
+
+  startReview() {
+    if (this._reviewActive) return;
+    if (!this._lastGameRecord?.moves?.length) {
+      this.ui.log('ยังไม่มีประวัติเกมให้รีวิว', 'warn');
+      this._reshowGameOver();
+      return;
+    }
+    this._gameOverOverlay?.close();
+    this._gameOverOverlay = null;
+    this._reviewDisconnectNotified = false;
+    // Spectator live analysis must not fight the review for the eval bar and
+    // board arrows — pause it and resume when the review session ends.
+    if (this.spectatorEval?.enabled) {
+      this._spectatorAnalysisResume = true;
+      this.spectatorEval.setEnabled(false);
+      this.ui.refs.btnAnalysis?.setAttribute('aria-pressed', 'false');
+    }
+
+    // Hole 2 — clocks, AFK timers and engines stop the moment review begins.
+    this.clock?.stop();
+    if (this._onlineClockTimer) { clearInterval(this._onlineClockTimer); this._onlineClockTimer = null; }
+    if (this._onlineAfkTimer) { clearInterval(this._onlineAfkTimer); this._onlineAfkTimer = null; }
+    this.ui.setAfkWarning?.({ visible: false });
+    this.engine?.stop();
+    this.engineBlack?.stop();
+    this.ui.setBusy?.(false);
+
+    this._reviewActive = true;
+    this.reviewUI = this.reviewUI ?? new ReviewUI();
+    const analyzer = new GameReviewAnalyzer();
+    this._activeAnalyzer = analyzer;
+    this.reviewUI.showProgressModal(() => {
+      analyzer.abort();
+      this._finishReviewSession();
+      this._reshowGameOver();
+    });
+    // Opening book (roadmap A2) loads lazily and never blocks/ breaks review —
+    // a failed fetch resolves null and grading falls back to the old heuristic.
+    getOpeningBook()
+      .then((book) => {
+        analyzer.openingBook = book;
+        return analyzer.analyzeGame(this._lastGameRecord, (p) =>
+          this.reviewUI.updateProgress(p.percentage, p.currentPly, p.totalPlies));
+      })
+      .then((analysis) => {
+        this._activeAnalyzer = null;
+        if (!this._reviewActive) return; // cancelled while the tail ran
+        this._analysis = analysis;
+        this.reviewUI.closeProgressModal();
+        this.reviewUI.showReviewSummaryModal(
+          analysis,
+          (ply) => this.enterBoardStepper(ply),
+          () => { this._finishReviewSession(); this.newGame(); },
+          () => { this._finishReviewSession(); this._reshowGameOver(); },
+          () => { this.enterBoardStepper(0); this.reviewUI.startPuzzleRun(); },
+        );
+      })
+      .catch((err) => {
+        this._activeAnalyzer = null;
+        this.reviewUI?.closeProgressModal();
+        if (err?.message === 'review_aborted') return; // cancel path handled above
+        this._finishReviewSession();
+        this.ui.log(`รีวิวล้มเหลว: ${err.message}`, 'err');
+        this._reshowGameOver();
+      });
+  }
+
+  enterBoardStepper(ply = 0) {
+    if (!this._reviewActive || !this._analysis) return;
+    this.reviewUI.enterStepperMode(this, this._analysis, ply);
+  }
+
+  exitReview() {
+    if (!this._reviewActive) return;
+    this.reviewUI?.exitStepperMode();
+    this.reviewUI?.hideEvalBar();
+    this._finishReviewSession();
+    this._syncBoard();
+    this._restoreClockDisplay();
+    this._reshowGameOver();
+  }
+
+  /** Put the clock badges back to the game's final frozen times — the review
+   *  stepper rewrote them with per-ply replay values. */
+  _restoreClockDisplay() {
+    if (this.mode === MODES.ONLINE) {
+      if (this.onlineState) this._renderOnlineClock(this.onlineState);
+      return;
+    }
+    if (!this.clock) return;
+    const topColor = this.orientation === 'white' ? 'b' : 'w';
+    const bottomColor = topColor === 'w' ? 'b' : 'w';
+    const t = this.clock.times;
+    this.ui.setClock('top', ChessClock.formatTime(t[topColor]), false, t[topColor] <= 20_000);
+    this.ui.setClock('bottom', ChessClock.formatTime(t[bottomColor]), false, t[bottomColor] <= 20_000);
+  }
+
+  _finishReviewSession() {
+    this._reviewActive = false;
+    this._analysis = null;
+    // Resume the spectator live analysis it was paused for (roadmap C1).
+    if (this._spectatorAnalysisResume) {
+      this._spectatorAnalysisResume = false;
+      if (this._spectatorAnalysisAllowed() && this.spectatorEval) {
+        this.spectatorEval.setEnabled(true);
+        this.spectatorEval.notifyPosition();
+        this.ui.refs.btnAnalysis?.setAttribute('aria-pressed', 'true');
+      }
+    }
+  }
+
+  /** Pop the game-over card after a short beat so players can take in the
+   *  final position first — game-over sounds already played immediately. */
+  _showGameOverSoon(title, detail, delayMs = this._gameOverDelayMs) {
+    this._lastGameOver = { title, detail };
+    const open = () => {
+      if (this._gameOverOverlay?.body?.isConnected) return;
+      this._gameOverOverlay = this.ui.showGameOver(
+        title,
+        detail,
+        () => this.newGame(),
+        () => this.goHome(),
+        () => this.startReview(),
+        this._onlineRematchActions(),
+        () => this._reshowGameOver(),
+      );
+      this._rematchCardKey = this._rematchStateKey();
+    };
+    if (!delayMs) {
+      open();
+      return;
+    }
+    if (this._gameOverDelayTimer) clearTimeout(this._gameOverDelayTimer);
+    this._gameOverDelayTimer = setTimeout(() => {
+      this._gameOverDelayTimer = null;
+      open();
+    }, delayMs);
+  }
+
+  _reshowGameOver() {
+    if (!this._lastGameOver || this._gameOverOverlay?.body?.isConnected) return;
+    this._gameOverOverlay = this.ui.showGameOver(
+      this._lastGameOver.title,
+      this._lastGameOver.detail,
+      () => this.newGame(),
+      () => this.goHome(),
+      () => this.startReview(),
+      this._onlineRematchActions(),
+      () => this._reshowGameOver(),
+    );
+    this._rematchCardKey = this._rematchStateKey();
+  }
+
+  /** Identity of the rematch state the open card was rendered from — a change
+   *  means the card's rematch buttons are stale and must be re-rendered. */
+  _rematchStateKey() {
+    if (this.onlineState?.status !== 'finished') return null;
+    return `${this.onlineState.revision}:${this.onlineState.rematch ? this.onlineState.rematch.requestedBy : '-'}`;
+  }
+
+  /** Real online events during review surface as non-blocking corner toasts. */
+  _maybeNotifyReviewDisconnect(state) {
+    if (this._reviewDisconnectNotified || state.status !== 'finished') return;
+    const disconnected = ['w', 'b'].filter((c) => state.players[c]?.connected === false);
+    if (!disconnected.length) return;
+    this._reviewDisconnectNotified = true;
+    const name = state.players[disconnected[0]]?.name || 'คู่แข่ง';
+    this.ui.showFloatingToast({
+      title: `${name} ออกจากห้องแล้ว`,
+      detail: 'คุณรีวิวเกมต่อได้ตามปกติ — ประวัติการเดินถูกเก็บไว้ในเครื่องแล้ว',
+      actions: [['รู้แล้ว', () => {}]],
+    });
+  }
+
   // ------------------------------------------------------------------ internal flow
 
+  /** Engine worker URL for GAME engines (roadmap D2) — honours the strong
+   *  multi-thread preference, but only when the host supports it. Spectator
+   *  analysis/ review/ forecast stay on the single build to save resources. */
+  _engineUrl() {
+    return resolveEngineWorkerUrl({ strong: getStrongEnginePreference() && isCrossOriginIsolated() });
+  }
+
+  /** Spectator live analysis (roadmap C1) — available only while WATCHING (AI
+   *  vs AI arena or an online room as spectator), never while playing. */
+  _spectatorAnalysisAllowed() {
+    return this.mode === MODES.AI_VS_AI
+      || (this.mode === MODES.ONLINE && this.onlineRole === 'spectator');
+  }
+
+  _ensureSpectatorAnalysis() {
+    if (!this.spectatorEval) {
+      this.spectatorEval = new SpectatorAnalysisEngine({
+        fenProvider: () => this.game?.fen() ?? null,
+      });
+      this.spectatorEval.setHandler((result) => this._renderSpectatorAnalysis(result));
+    }
+    return this.spectatorEval;
+  }
+
+  /** Action-strip toggle — returns the new enabled state (or null if N/A). */
+  toggleSpectatorAnalysis(force) {
+    if (!this._spectatorAnalysisAllowed()) return null;
+    const session = this._ensureSpectatorAnalysis();
+    const next = session.setEnabled(typeof force === 'boolean' ? force : !session.enabled);
+    this.ui.refs.btnAnalysis?.setAttribute('aria-pressed', String(next));
+    if (!next) this._clearSpectatorAnalysisDisplay();
+    else session.notifyPosition();
+    return next;
+  }
+
+  _renderSpectatorAnalysis(result) {
+    if (typeof document === 'undefined') return;
+    if (this._reviewActive) return; // review owns the eval bar and arrows
+    const bar = document.getElementById('eval-bar');
+    if (!bar) return;
+    if (!result) {
+      bar.classList.add('hidden');
+      this.ground?.setAutoShapes?.([]);
+      return;
+    }
+    bar.classList.remove('hidden');
+    const whitePct = Math.max(0, Math.min(100, result.whiteWinProb));
+    bar.querySelector('[data-eval-fill]').style.height = `${whitePct}%`;
+    const cp = result.whiteCp;
+    const evalText = Math.abs(cp) >= 10000
+      ? (cp > 0 ? 'M' : '-M')
+      : (cp >= 0 ? '+' : '') + (cp / 100).toFixed(1);
+    bar.querySelector('[data-eval-label]').textContent = `${evalText} · d${result.depth}`;
+    if (result.best && this.ground?.setAutoShapes) {
+      this.ground.setAutoShapes([{ orig: result.best.from, dest: result.best.to, brush: 'green' }]);
+    }
+  }
+
+  _clearSpectatorAnalysisDisplay() {
+    if (typeof document === 'undefined') return;
+    const bar = document.getElementById('eval-bar');
+    bar?.classList.add('hidden');
+    this.ground?.setAutoShapes?.([]);
+  }
+
   _syncBoard() {
+    // Review mode owns the board — game-driven syncs must not unlock it or
+    // wipe the review arrows/ badges.
+    if (this._reviewActive) return;
     // The board can move between layouts (sandbox panels hide/show) without a
     // resize or scroll, so chessground's cached bounds go stale and every drag
     // maps to a shifted square. Force a re-measure before syncing, and again
@@ -1035,6 +1534,9 @@ export class Controller {
     const botTurn = this.orientation === 'white' ? this.game.turn() === 'w' : this.game.turn() === 'b';
     this.ui.setPlayerActive('top', topTurn && !this._isOver());
     this.ui.setPlayerActive('bottom', botTurn && !this._isOver());
+
+    // Spectator live eval (roadmap C1) follows every displayed position change.
+    this.spectatorEval?.notifyPosition();
   }
 
   /**
@@ -1090,13 +1592,23 @@ export class Controller {
     this._renderMoves();
     this._syncBoard();
 
+    const over = this._isOver();
     if (this.clock) {
-      this.clock.switchTurn(this.game.turn());
+      if (over) {
+        this.clock.stop();
+      } else {
+        this.clock.switchTurn(this.game.turn());
+      }
+      this._pushClockSnapshot();
     }
 
-    const over = this._isOver();
     if (over) {
+      if (this.clock) {
+        this.clock.stop();
+        this._restoreClockDisplay();
+      }
       this._announceGameOver();
+      return;
     } else if (this.mode !== MODES.ANALYZE) {
       // move / capture / check feedback (human or bot) — silent in
       // sandbox / custom (analyze) mode.
@@ -1104,8 +1616,6 @@ export class Controller {
       else sounds.play('move');
       if (this.game.inCheck()) sounds.play('check');
     }
-
-    if (over) return;
 
     if (this.mode === MODES.HUMAN_VS_AI && this.game.turn() !== this.humanSide) {
       this._engineTurn();
@@ -1121,6 +1631,8 @@ export class Controller {
    * Humanized engine thinking: the bot pauses before moving with a
    * time-control-scaled, position-aware delay — not just a random number.
    *  - longer time controls get a longer base pause (unlimited/8-30min longest)
+   *  - Elo-based pace: strong engines answer quickly and confidently, weak
+   *    ones hem and haw (level 1 ×1.3 … level 11 ×0.3; default 1400 = ×1.0)
    *  - complex positions (many legal moves) / endgames (little material)
    *    make the engine "calculate" longer
    *  - being in check or replying to a capture/check makes it think longer
@@ -1133,10 +1645,20 @@ export class Controller {
     const ms = tc?.initialMs ?? 0;
     let base;
     let search;
-    if (ms <= 0 || ms >= 8 * 60000) { base = 7000; search = 1500; }   // unlimited / 8-30min
+    if (this.timeControlId === 'blitz_5_0' || ms === 5 * 60000) {
+      base = 1400; search = 400;                                      // 5min blitz: faster pace
+    }
+    else if (this.timeControlId === 'rapid_10_0' || ms === 10 * 60000) {
+      base = 2000; search = 500;                                      // 10min rapid: faster pace requested
+    }
+    else if (ms <= 0 || ms >= 12 * 60000) { base = 7000; search = 1500; } // unlimited / 15-30min
     else if (ms >= 4 * 60000) { base = 5000; search = 800; }          // 4-7min
-    else if (ms >= 60000) { base = 2000; search = 450; }              // 1-5min: snappier
+    else if (ms >= 60000) { base = 2000; search = 450; }              // 1-3min: snappy
     else { base = 1200; search = 250; }                               // <1min: fastest
+
+    // Pace by the moving engine's strength (AI vs AI uses the side to move).
+    const level = this._activeEngineLevel();
+    base *= 1.3 - 0.1 * (level - 1);
 
     // Opening: the first 3 plies come quick (~0.6-1.6s) whatever the control.
     if (this.game.history().length < 3) {
@@ -1158,10 +1680,21 @@ export class Controller {
     else if (last && (last.captured || last.san.includes('+'))) factor *= 1.25; // recapture/check follow-up
 
     // Skewed human-like distribution: ~12% quick ("obvious"), 76% normal, 12% deep.
+    // Math.random is deliberate here — gameplay pacing jitter, not a security
+    // primitive (see docs/security-triage.md).
     const u = Math.random();
     const skew = u < 0.12 ? 0.55 : u < 0.88 ? 1 : 1.55;
-    const delay = Math.max(800, Math.round(base * factor * skew + (Math.random() - 0.5) * base * 0.3));
+    const minDelay = this.timeControlId === 'blitz_5_0' ? 600 : this.timeControlId === 'rapid_10_0' ? 700 : 800;
+    const delay = Math.min(12000, Math.max(minDelay, Math.round(base * factor * skew + (Math.random() - 0.5) * base * 0.3)));
     return { delay, search };
+  }
+
+  /** 1-based level of the engine whose turn it is (drives thinking pace). */
+  _activeEngineLevel() {
+    if (this.mode === MODES.AI_VS_AI) {
+      return (this.game.turn() === 'w' ? this.aivaLevelW : this.aivaLevelB) + 1;
+    }
+    return this.levelIndex + 1;
   }
 
   _engineTurn() {
@@ -1170,12 +1703,14 @@ export class Controller {
     this.ui.setBusy?.(true);
     this.ui.setStatus('เอนจินกำลังคิด…', 'busy');
     const cfg = LEVELS[this.levelIndex];
-    const { delay } = this._thinkTime();
+    const { delay, search } = this._thinkTime();
     const fen = this.game.fen();
     this._aiTimer = setTimeout(() => {
       if (this._isOver() || !this.engine || !this.engineReady) return;
       this.engine.setPosition(fen);
-      this.engine.go({ movetime: cfg.movetime, depth: cfg.depth });
+      const isFastMode = this.timeControlId === 'blitz_5_0' || this.timeControlId === 'rapid_10_0';
+      const movetime = isFastMode ? Math.min(cfg.movetime, search ?? 500) : cfg.movetime;
+      this.engine.go({ movetime, depth: cfg.depth });
     }, delay);
   }
 
@@ -1233,7 +1768,7 @@ export class Controller {
     this.ui.setStatus('💡 บอท GM กำลังคิดคำใบ้…', 'busy');
     if (!this.hintEngine) {
       this.hintEngine = new Stockfish({
-        workerUrl: ENGINE_HINT_URL,
+        workerUrl: getStrongEnginePreference() && isCrossOriginIsolated() ? ENGINE_MULTI_URL : ENGINE_HINT_URL,
         onReady: () => {
           if (!this.hintEngine) return;
           this.hintEngine.setOption('Skill Level', 20);
@@ -1320,6 +1855,10 @@ export class Controller {
   }
 
   _announceGameOver() {
+    if (this.clock) {
+      this.clock.stop();
+      this._restoreClockDisplay();
+    }
     let title = 'จบเกม';
     let detail = '';
 
@@ -1339,17 +1878,19 @@ export class Controller {
       else detail = 'กฎ 50 ตา';
     }
 
+    this._captureGameRecord({
+      result: this.game.isCheckmate() ? (this.game.turn() === 'w' ? '0-1' : '1-0') : '1/2-1/2',
+      reason: this.game.isCheckmate()
+        ? 'checkmate'
+        : this.game.isStalemate() ? 'stalemate' : 'draw',
+    });
+
     this.ui.setStatus(`จบเกม · ${title}`, 'done');
     this.ui.log(`จบเกม: ${title} (${detail})`, 'sys');
 
     if (!this._overPopupShown) {
       this._overPopupShown = true;
-      this.ui.showGameOver(
-        title,
-        detail,
-        () => this.newGame(),
-        () => this.goHome()
-      );
+      this._showGameOverSoon(title, detail);
     }
 
     this._playGameOverSound();

@@ -34,3 +34,61 @@
 ไม่มีการแก้โค้ดที่ต้องทำจากข้อหาชุดนี้ หากต้องการให้ gate ยอมรับ
 ต้องปรับ policy ฝั่ง Mimosa hook (acknowledge findings เหล่านี้) หรือ
 commit นอกช่องทางที่ hook ดักกล่าว
+
+## 2026-09-06: Math.random() ใน controller.js (_thinkTime) — false positive
+
+Mimosa แจ้ง "弱随机数/weak randomness" ที่ `Math.random()` ใน `_thinkTime()`
+(controller.js ~บรรทัด 1370-1396) ระหว่างแก้ delay ของ AI
+
+**ประเมิน: ไม่ใช่ช่องโหว่** — `Math.random()` ถูกใช้กับจังหวะพักก่อนบอทเดิน
+(humanized pacing jitter) เท่านั้น ไม่มีผลด้านความปลอดภัยใดๆ:
+- ไม่เกี่ยวกับ token/capability/session (capability tokens ของ worker ใช้
+  `crypto.getRandomValues` อยู่แล้วใน lobby-registry/room)
+- การคาดเดา delay ของบอทได้ไม่สร้างผลกระทบเชิงความปลอดภัย
+
+จึงไม่แก้โค้ด และเพิ่ม comment กำกับที่จุดเรียกแล้ว
+
+## 2026-09-07: Commit-time SSRF findings ก่อน commit ระบบรีวิว — false positives (ชุดเดิม)
+
+Mimosa L3 บล็อค commit ครั้งแรก: 11 high + 11 medium, ทั้งหมดเป็น "SSRF/Request
+入口" ที่ worker/index.js, src/online.js, public/engine/stockfish-18-lite-single.js
+และ dist-preview/assets/*.js
+
+**ประเมิน: false positive ชุดเดียวกับบันทึกด้านบน** — ไฟล์ที่ถูกแจ้ง**ไม่ได้อยู่ใน
+staged changes เลย** (staged = ระบบรีวิว: analyzer/review-ui/openings/controller/
+styles/tests):
+- worker/index.js — fetch ทั้งหมดเป็น literal ไปยัง GitHub API/Durable Object stub
+  ตามบันทึก 2026-09-06 (ตรวจ `rg "fetch\(" worker/` แล้ว ไม่มี URL จาก input ผู้ใช้)
+- src/online.js — request เรียก API worker ของโปรเจกต์เองด้วย URL คงที่จาก config
+- stockfish-18-lite-single.js — engine bundle ของบุคคลที่สาม (obfuscated wasm
+  loader) ไม่ใช่โค้ดที่เราเขียน
+- dist-preview/ — build artifact ที่ gitignored แล้ว; เศษไฟล์ค้างในดิสก์
+  ลบออกอีกครั้งเพื่อลด noise (สร้างใหม่ด้วย `npm run build` ได้เสมอ)
+
+จึงไม่แก้โค้ดจากข้อหาชุดนี้ พร้อม commit ระบบรีวิวต่อ
+
+## 2026-09-29: Commit-time SSRF 12 high + 1 medium ก่อน commit roadmap — false positives (ชุดเดิม + engine multithread)
+
+Mimosa L3 บล็อค commit รอบ commit ระบบรีวิว/PWA/openings: 12 high + 1 medium
+
+**ประเมิน: false positive ชุดเดิมตามบันทึก 2026-09-06/09-07** โดยมีจุดใหม่คือ
+`public/engine/stockfish-18-lite.js` (ตัว multithread) ที่ถูก stage ครั้งนี้เป็นครั้งแรก:
+
+- `worker/index.js:110,153,167,181,195` — ชุดเดิมทุกประการ (Durable Object stub
+  fetch ด้วย string literal + GitHub API URL คงที่) ตามบันทึก 2026-09-06
+- `src/online.js:326,334,342` — ชุดเดิม: fetch ฝั่ง browser ไปยัง API worker
+  ของโปรเจกต์เอง ด้วย URL คงที่จาก config ไม่เข้าข่าย SSRF ตามนิยาม
+- `public/engine/stockfish-18-lite.js:11` (+ `-single.js:11` ที่ flag ซ้ำ) —
+  ยืนยันจากซอร์ส: เป็น glue ของแพ็กเกจ npm `stockfish@^18.0.8` (Chess.com LLC,
+  GPLv3) คัดลอกมา verbatim จาก `node_modules/stockfish/bin/` โดย
+  `scripts/copy-engine.mjs` รันเป็น **Web Worker ในเบราว์เซอร์** ไม่ใช่โปรเซส
+  เซิร์ฟเวอร์ — ข้อหา SSRF/命令行参数 จึงเป็นไปไม่ได้ตามโครงสร้าง เช่นเดียวกับ
+  `-single.js` ที่ triage ไว้แล้ว
+
+จึงไม่แก้โค้ดจากข้อหาชุดนี้ — รัน Mimosa scan ใหม่ผ่านช่องทางทางการเพื่อให้ได้
+sealed scan ประจำ commit นี้ แล้ว commit ตามกระบวนการเดิม (ไม่มีการ bypass hook)
+
+Sealed scan ประจำรอบนี้: `scan-2026-09-28T18-36-08.431Z-99a0388f56b9`
+(seal `sha256:1c766ebf...11714fa`, deep scan, 13 findings — ตรงชุดที่ hook
+รายงาน, `verdictEffect: none` คือ advisory ไม่มีผลตัดสิน, dependency scan
+167 packages ไม่มี advisory ที่ match)

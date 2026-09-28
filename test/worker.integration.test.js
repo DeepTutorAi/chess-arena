@@ -543,4 +543,103 @@ describe('online room Worker', () => {
     for (const socket of sockets) socket.close(1000, 'done');
     await Promise.all(closed);
   }, 15_000);
+
+  it('supports a rematch handshake that swaps colors and resets the game', async () => {
+    const created = await createRoom();
+    const joined = await exports.default.fetch(jsonRequest(
+      `http://worker.test/api/rooms/${created.body.roomId}/join`,
+      'POST',
+      { playerName: 'Guest', inviteToken: created.body.inviteToken },
+    ));
+    const guest = await joined.json();
+    const hostSocket = await connect(created.body.roomId, created.body.sessionToken);
+    const guestSocket = await connect(created.body.roomId, guest.sessionToken);
+    // The client always syncs right after opening the socket — the connect-time
+    // broadcast can race the client's accept() and is dropped by the runtime.
+    hostSocket.send(JSON.stringify({ type: 'sync' }));
+    const hostInitial = await nextMessage(hostSocket);
+    expect(hostInitial.revision).toBe(1);
+    guestSocket.send(JSON.stringify({ type: 'sync' }));
+    const guestInitial = await nextMessage(guestSocket);
+    expect(guestInitial.revision).toBe(1);
+
+    // Finish the game: host resigns at revision 1.
+    const hostResign = nextMessage(hostSocket);
+    const guestResign = nextMessage(guestSocket);
+    hostSocket.send(JSON.stringify({ type: 'resign', expectedRevision: 1 }));
+    const finished = await guestResign;
+    expect(finished.status).toBe('finished');
+    await hostResign;
+
+    // Accepting before any offer is rejected.
+    hostSocket.send(JSON.stringify({ type: 'rematch-accept', expectedRevision: 2 }));
+    await nextMessage(hostSocket);
+
+    // The opponent (guest) requests the rematch; both sides see the offer.
+    const hostSees = nextMessage(hostSocket);
+    guestSocket.send(JSON.stringify({ type: 'rematch-request', expectedRevision: 2 }));
+    const offered = await hostSees;
+    expect(offered.status).toBe('finished');
+    expect(offered.rematch).toEqual({ requestedBy: 'b' });
+
+    // Host accepts -> new active game, colors swapped, history cleared.
+    const hostNext = nextMessage(hostSocket);
+    const guestNext = nextMessage(guestSocket);
+    hostSocket.send(JSON.stringify({ type: 'rematch-accept', expectedRevision: 3 }));
+    const [hostState, guestState] = await Promise.all([hostNext, guestNext]);
+    expect(hostState.status).toBe('active');
+    expect(hostState.rematch).toBeNull();
+    expect(hostState.moves).toEqual([]);
+    expect(hostState.result).toBeNull();
+    expect(hostState.revision).toBe(4);
+    expect(guestState.fen).toBe(hostState.fen);
+
+    // Live sockets keep working with their NEW colors: old guest (now white)
+    // moves first, then old host (now black) answers.
+    await playMove(guestSocket, hostSocket, { from: 'e2', to: 'e4' }, 4);
+    await playMove(hostSocket, guestSocket, { from: 'e7', to: 'e5' }, 5);
+
+    hostSocket.close(1000, 'done');
+    guestSocket.close(1000, 'done');
+  });
+
+  it('lets the opponent decline a rematch offer', async () => {
+    const created = await createRoom();
+    const joined = await exports.default.fetch(jsonRequest(
+      `http://worker.test/api/rooms/${created.body.roomId}/join`,
+      'POST',
+      { playerName: 'Guest', inviteToken: created.body.inviteToken },
+    ));
+    const guest = await joined.json();
+    const hostSocket = await connect(created.body.roomId, created.body.sessionToken);
+    const guestSocket = await connect(created.body.roomId, guest.sessionToken);
+    hostSocket.send(JSON.stringify({ type: 'sync' }));
+    await nextMessage(hostSocket);
+    guestSocket.send(JSON.stringify({ type: 'sync' }));
+    await nextMessage(guestSocket);
+
+    const hostResign = nextMessage(hostSocket);
+    const guestResign = nextMessage(guestSocket);
+    hostSocket.send(JSON.stringify({ type: 'resign', expectedRevision: 1 }));
+    await Promise.all([hostResign, guestResign]);
+
+    const guestSees = nextMessage(guestSocket);
+    hostSocket.send(JSON.stringify({ type: 'rematch-request', expectedRevision: 2 }));
+    const offered = await guestSees;
+    expect(offered.rematch).toEqual({ requestedBy: 'w' });
+
+    const guestSeesDecline = nextMessage(guestSocket);
+    guestSocket.send(JSON.stringify({ type: 'rematch-decline', expectedRevision: 3 }));
+    const declined = await guestSeesDecline;
+    expect(declined.status).toBe('finished');
+    expect(declined.rematch).toBeNull();
+    expect(declined.revision).toBe(4);
+
+    // Accepting after a decline fails until a fresh offer exists.
+    guestSocket.send(JSON.stringify({ type: 'rematch-accept', expectedRevision: 4 }));
+    await nextMessage(guestSocket);
+
+    hostSocket.close(1000, 'done');
+    guestSocket.close(1000, 'done');
+  });
 });

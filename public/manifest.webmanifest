@@ -1,0 +1,26 @@
+{
+  "name": "Chess Arena — หมากรุกสากล vs AI",
+  "short_name": "Chess Arena",
+  "description": "เล่นหมากรุกสากลกับ Stockfish, ชม AI ปะทะ AI, และรีวิวเกมของคุณ — เล่นได้แม้ไม่มีอินเทอร์เน็ต",
+  "lang": "th",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111110",
+  "theme_color": "#111110",
+  "icons": [
+    {
+      "src": "./assets/icons/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/icons/icon-maskable.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
+}

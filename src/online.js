@@ -523,6 +523,18 @@ export class OnlineRoomClient {
     this.send({ type: 'resign', expectedRevision });
   }
 
+  requestRematch(expectedRevision = this.state?.revision) {
+    this.send({ type: 'rematch-request', expectedRevision });
+  }
+
+  acceptRematch(expectedRevision = this.state?.revision) {
+    this.send({ type: 'rematch-accept', expectedRevision });
+  }
+
+  declineRematch(expectedRevision = this.state?.revision) {
+    this.send({ type: 'rematch-decline', expectedRevision });
+  }
+
   sync() {
     this.send({ type: 'sync' });
   }

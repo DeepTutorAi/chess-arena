@@ -14,6 +14,38 @@ export const ENGINE_HINT_URL = './engine/stockfish-18-lite-single.js';
 export const ENGINE_NAME = 'Stockfish 18 (Lite)';
 export const HUMAN_NAME = 'คุณ';
 
+// Engine builds (roadmap D2): the multi-threaded lite build is stronger but
+// requires COOP/COEP (crossOriginIsolated). Hosts without those headers —
+// GitHub Pages — always resolve to the single-threaded build.
+export const ENGINE_MULTI_URL = './engine/stockfish-18-lite.js';
+export const ENGINE_STRONG_KEY = 'chess-arena:strong-engine';
+
+export function isCrossOriginIsolated() {
+  return (typeof self !== 'undefined' && self.crossOriginIsolated === true)
+    || (typeof globalThis !== 'undefined' && globalThis.crossOriginIsolated === true);
+}
+
+export function resolveEngineWorkerUrl({ strong = false } = {}) {
+  return strong && isCrossOriginIsolated() ? ENGINE_MULTI_URL : ENGINE_WORKER_URL;
+}
+
+export function getStrongEnginePreference() {
+  try {
+    return globalThis.localStorage?.getItem(ENGINE_STRONG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setStrongEnginePreference(value) {
+  try {
+    if (value) globalThis.localStorage?.setItem(ENGINE_STRONG_KEY, '1');
+    else globalThis.localStorage?.removeItem(ENGINE_STRONG_KEY);
+  } catch {
+    // blocked storage — preference stays session-only
+  }
+}
+
 // Human vs AI — strength mapping (level 1..8 -> UCI Skill Level 1..20 & Elo).
 export const LEVELS = [
   { level: 1, elo: 800, skill: 2, depth: 4, movetime: 500, label: '800 (มือใหม่)' },

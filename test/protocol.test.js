@@ -123,3 +123,23 @@ test('parseSocketCommand rejects invalid moves and client-owned canonical fields
   assert.equal(parseSocketCommand({ type: 'heartbeat', visibility: 'visible', strikes: 2 }).ok, false);
   assert.equal(parseSocketCommand({ type: 'unknown' }).ok, false);
 });
+
+test('parseSocketCommand accepts the rematch handshake commands (roadmap B)', () => {
+  for (const type of ['rematch-request', 'rematch-accept', 'rematch-decline']) {
+    const ok = parseSocketCommand({ type, expectedRevision: 7 });
+    assert.equal(ok.ok, true);
+    assert.deepEqual(ok.value, { type, expectedRevision: 7 });
+
+    const fromJson = parseSocketCommand(JSON.stringify({ type, expectedRevision: 0 }));
+    assert.equal(fromJson.ok, true);
+  }
+});
+
+test('parseSocketCommand rejects malformed rematch commands', () => {
+  assert.equal(parseSocketCommand({ type: 'rematch-request' }).ok, false);
+  assert.equal(parseSocketCommand({ type: 'rematch-accept', expectedRevision: -1 }).ok, false);
+  assert.equal(
+    parseSocketCommand({ type: 'rematch-decline', expectedRevision: 1, extra: true }).ok,
+    false,
+  );
+});
