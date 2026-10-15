@@ -62,3 +62,12 @@ test('legacy colour names are gone once every screen is migrated', () => {
     assert.equal(value(name), undefined, `--${name} is still defined`);
   }
 });
+
+test('the low-time clock stays readable (3:1 large text) on its red fill', () => {
+  const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const rule = styles.match(/^\.clock-badge\.low-time\s*\{[^}]*\}/mu)?.[0] ?? '';
+  const fg = rule.match(/(?:^|[;{\s])color:\s*var\(--([a-z0-9-]+)\)/u)?.[1];
+  const bg = rule.match(/background:\s*var\(--([a-z0-9-]+)\)/u)?.[1];
+  assert.ok(fg && bg, rule);
+  assert.ok(contrast(value(fg), value(bg)) >= 3, `--${fg} on --${bg}`);
+});

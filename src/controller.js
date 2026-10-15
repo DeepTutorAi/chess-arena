@@ -400,7 +400,7 @@ export class Controller {
     } catch (err) {
       const msg = err.message ?? '';
       const hint = /king/i.test(msg) ? ' — ต้องมี King ครบทั้งสองฝ่าย' : ' — กระดานนี้ไม่ถูกต้องตามกฎหมากรุก';
-      this.ui.log(`กระดานยังไม่ถูกต้อง: ${msg}${hint}`, 'error');
+      this.ui.log(`กระดานยังไม่ถูกต้อง: ${msg}${hint}`, 'err');
       return;
     }
 
@@ -459,7 +459,7 @@ export class Controller {
     } catch (err) {
       // Game failed to start (e.g. network) — return to the editor with the
       // custom board intact so the user can retry.
-      this.ui.log(`เริ่มเกมล้มเหลว: ${err.message}`, 'error');
+      this.ui.log(`เริ่มเกมล้มเหลว: ${err.message}`, 'err');
       this.startSandboxSetup({ initialFen: cleanFen });
     }
   }
@@ -544,7 +544,7 @@ export class Controller {
         this.online.resign(this.onlineState.revision);
         this.ui.log('ส่งคำขอยอมแพ้แล้ว — รอเซิร์ฟเวอร์ยืนยัน', 'sys');
       } catch (err) {
-        this.ui.log(`ยอมแพ้ไม่สำเร็จ: ${err.message}`, 'error');
+        this.ui.log(`ยอมแพ้ไม่สำเร็จ: ${err.message}`, 'err');
       }
       return;
     }
@@ -617,7 +617,7 @@ export class Controller {
         this.online.sendMove(orig, dest, promotion, this.onlineState.revision);
         this.ui.log(`ส่งตาเดิน ${orig}${dest}${promotion ?? ''} — รอเซิร์ฟเวอร์ยืนยัน`, 'sys');
       } catch (err) {
-        this.ui.log(`ส่งตาเดินไม่สำเร็จ: ${err.message}`, 'error');
+        this.ui.log(`ส่งตาเดินไม่สำเร็จ: ${err.message}`, 'err');
       }
       // Chessground already animated the drop. Snap it back to the last
       // canonical snapshot until the server accepts and broadcasts the move.
@@ -858,7 +858,7 @@ export class Controller {
       },
       onBestMove: (uci, info, lines, searchedFen) => this._onEngineBestMove(uci, lines, searchedFen),
       onError: (msg) => {
-        this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'error');
+        this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err');
         if (!this.engineReady) {
           this.ui.setStatus('โหลดเอนจินไม่สำเร็จ — กลับหน้าแรกแล้วเริ่มเกมใหม่อีกครั้ง', 'error');
         }
@@ -918,7 +918,7 @@ export class Controller {
       onReady: () => onWorkerReady('w'),
       onBestMove: (uci) => this._onAiLoopMove('w', uci),
       onError: (msg) => {
-        this.ui.log(`เอนจินขาวผิดพลาด: ${msg}`, 'error');
+        this.ui.log(`เอนจินขาวผิดพลาด: ${msg}`, 'err');
         this.ui.setStatus('เอนจินฝ่ายขาวล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'error');
       },
     });
@@ -928,7 +928,7 @@ export class Controller {
       onReady: () => onWorkerReady('b'),
       onBestMove: (uci) => this._onAiLoopMove('b', uci),
       onError: (msg) => {
-        this.ui.log(`เอนจินดำผิดพลาด: ${msg}`, 'error');
+        this.ui.log(`เอนจินดำผิดพลาด: ${msg}`, 'err');
         this.ui.setStatus('เอนจินฝ่ายดำล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'error');
       },
     });
@@ -966,7 +966,7 @@ export class Controller {
     this.online = this.onlineClientFactory({
       onState: (state) => this._onOnlineState(state),
       onError: (message, detail) => {
-        this.ui.log(`Online: ${message}`, 'error');
+        this.ui.log(`Online: ${message}`, 'err');
         if (detail?.code === 'stale_revision') this.online?.sync();
         // A refused draw / takeback / abort is the player's to know about, not just a log line.
         if (OFFER_ERROR_CODES.has(detail?.code)) {
@@ -1055,7 +1055,7 @@ export class Controller {
       if (game.fen() !== state.fen) throw new Error('FEN ไม่ตรงกับประวัติการเดิน');
       this.game = game;
     } catch (err) {
-      this.ui.log(`Online snapshot ถูกปฏิเสธ: ${err.message}`, 'error');
+      this.ui.log(`Online snapshot ถูกปฏิเสธ: ${err.message}`, 'err');
       return;
     }
 
@@ -1219,7 +1219,7 @@ export class Controller {
     try {
       this.online[method](this.onlineState.revision);
     } catch (err) {
-      this.ui.log(`ส่งคำสั่งไม่สำเร็จ: ${err.message}`, 'error');
+      this.ui.log(`ส่งคำสั่งไม่สำเร็จ: ${err.message}`, 'err');
       return false;
     }
     return true;
@@ -1756,7 +1756,7 @@ export class Controller {
       engine_timeout: 'เอนจินวิเคราะห์ไม่ตอบสนอง — ลองใหม่อีกครั้ง',
     };
     const detail = known[err?.message] ?? `เกิดข้อผิดพลาดระหว่างวิเคราะห์: ${err?.message ?? 'ไม่ทราบสาเหตุ'}`;
-    this.ui.log(`รีวิวล้มเหลว: ${detail}`, 'error');
+    this.ui.log(`รีวิวล้มเหลว: ${detail}`, 'err');
     this._reshowGameOver();
     this.ui.showFloatingToast?.({
       title: 'รีวิวเกมไม่สำเร็จ',
@@ -2305,7 +2305,7 @@ export class Controller {
     const promotion = uci.length > 4 ? uci[4] : undefined;
     const move = this.game.move({ from: orig, to: dest, promotion });
     if (!move) {
-      this.ui.log(`เอนจินส่งการเดินผิดกฎ: ${uci}`, 'error');
+      this.ui.log(`เอนจินส่งการเดินผิดกฎ: ${uci}`, 'err');
       return;
     }
     this.ui.log(`${this.botStyle === 'standard' ? 'Stockfish' : 'บอท'} เดิน ${move.san}`, 'engine');
@@ -2320,7 +2320,7 @@ export class Controller {
     if (!uci) {
       // Stockfish answers (none) for illegal/custom positions — don't stall silently.
       if (!this._isOver()) {
-        this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}): กระดานไม่ถูกต้อง — เอนจินไม่มีหมากให้เดิน`, 'error');
+        this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}): กระดานไม่ถูกต้อง — เอนจินไม่มีหมากให้เดิน`, 'err');
       }
       return;
     }
@@ -2330,7 +2330,7 @@ export class Controller {
     const promotion = uci.length > 4 ? uci[4] : undefined;
     const move = this.game.move({ from: orig, to: dest, promotion });
     if (!move) {
-      this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}) ส่งการเดินผิดกฎ: ${uci}`, 'error');
+      this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}) ส่งการเดินผิดกฎ: ${uci}`, 'err');
       return;
     }
     this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}) เดิน ${move.san}`, 'engine');
@@ -2375,7 +2375,7 @@ export class Controller {
     if (this._hintTimer) { clearTimeout(this._hintTimer); this._hintTimer = null; }
     if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
     this.ui.setBusy?.(false);
-    this.ui.log(logMessage, 'error');
+    this.ui.log(logMessage, 'err');
     this.ui.setStatus('คำใบ้ใช้ไม่ได้ตอนนี้ — ลองอีกครั้ง', '');
   }
 
@@ -2534,7 +2534,7 @@ export class Controller {
         if (!replayed.move({ from: mv.from, to: mv.to, promotion: mv.promotion || undefined })) throw new Error('illegal');
       }
     } catch {
-      this.ui.log('เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา', 'error');
+      this.ui.log('เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา', 'err');
       return { ok: false, error: 'เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา' };
     }
     await this.start(MODES.ANALYZE, { initialFen: record.initialFen || undefined });

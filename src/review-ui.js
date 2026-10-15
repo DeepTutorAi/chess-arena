@@ -16,6 +16,19 @@ import {
   iconBook, iconRefresh, iconHint, iconClock, iconAlertTriangle, iconShare,
 } from './icons.js';
 import { escapeHtml } from './html.js';
+import { trapTab } from './ui.js';
+
+/** Escape and a Tab trap for the review's own overlays, matching ui.openModal.
+ *  Returns the function that unbinds them. */
+function bindDialogKeys(dialog, onEscape) {
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') onEscape();
+    else if (event.key === 'Tab') trapTab(event, dialog);
+  };
+  document.addEventListener('keydown', onKeyDown);
+  dialog.focus?.();
+  return () => document.removeEventListener('keydown', onKeyDown);
+}
 
 const BAD_TIERS = new Set(['inaccuracy', 'mistake', 'blunder', 'miss']);
 const RETRYABLE_TIERS = new Set(['inaccuracy', 'mistake', 'blunder', 'miss']);
@@ -156,7 +169,7 @@ export class ReviewUI {
     const overlay = document.createElement('div');
     overlay.className = 'review-modal-overlay';
     overlay.innerHTML = `
-      <div class="review-modal review-progress-modal modal modal--sm" role="dialog" aria-modal="true" aria-label="กำลังวิเคราะห์เกม">
+      <div class="review-modal review-progress-modal modal modal--sm" tabindex="-1" role="dialog" aria-modal="true" aria-label="กำลังวิเคราะห์เกม">
         <button class="review-modal-close modal-close" type="button" aria-label="ยกเลิกการวิเคราะห์">${iconClose({ size: 16 })}</button>
         <div class="review-progress-icon">${iconBarChart({ size: 28 })}</div>
         <div class="review-progress-title">กำลังวิเคราะห์รูปเกม…</div>
@@ -170,6 +183,7 @@ export class ReviewUI {
     overlay.querySelector('.review-modal-close').onclick = () => onCancel?.();
     document.body.appendChild(overlay);
     this._progressOverlay = overlay;
+    this._progressKeys = bindDialogKeys(overlay.querySelector('.review-modal'), () => onCancel?.());
   }
 
   updateProgress(percentage, currentPly, totalPlies, etaMs = null) {
@@ -183,6 +197,8 @@ export class ReviewUI {
   }
 
   closeProgressModal() {
+    this._progressKeys?.();
+    this._progressKeys = null;
     this._progressOverlay?.remove();
     this._progressOverlay = null;
   }
@@ -198,7 +214,7 @@ export class ReviewUI {
     const blackAcc = analysis.accuracy.b ?? null;
     const runCount = analysis.plies.filter((p) => RETRYABLE_TIERS.has(p.tier) && p.bestMove).length;
     overlay.innerHTML = `
-      <div class="review-modal review-summary-modal modal modal--lg" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
+      <div class="review-modal review-summary-modal modal modal--lg" tabindex="-1" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
         <div class="modal-head">
           <div class="review-summary-title">Game Review · การรีวิวเกม</div>
           <button class="review-modal-close modal-close" type="button" aria-label="ปิด">${iconClose({ size: 16 })}</button>
@@ -285,6 +301,7 @@ export class ReviewUI {
     };
     document.body.appendChild(overlay);
     this._summaryOverlay = overlay;
+    this._summaryKeys = bindDialogKeys(overlay.querySelector('.review-modal'), () => overlay.querySelector('.review-modal-close').click());
     // Wire after mount — hover math reads live layout boxes.
     this._wireAdvantageGraph(overlay, analysis, (ply) => {
       this.closeSummaryModal();
@@ -293,6 +310,8 @@ export class ReviewUI {
   }
 
   closeSummaryModal() {
+    this._summaryKeys?.();
+    this._summaryKeys = null;
     if (this._summaryOverlay) {
       this._summaryOverlay.remove();
       this._summaryOverlay = null;

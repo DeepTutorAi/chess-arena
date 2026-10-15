@@ -512,11 +512,22 @@ body {
   border: 1px solid var(--border);
 }
 
+/* Plex Thai has tall ascenders; a tight line-height keeps name, score and
+   captured pieces inside the pinned bar height. */
 .player-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 1px;
   min-width: 0;
+  line-height: 1.25;
+}
+
+/* Name and score share the first row, captured pieces the second, so all
+   three fit the pinned bar height even when a material score shows. */
+.player-meta .captured-row {
+  grid-column: 1 / -1;
 }
 
 .pname {
@@ -606,7 +617,7 @@ square.hint-dest {
 
 .clock-badge.low-time {
   background: var(--loss);
-  color: var(--text);
+  color: var(--bg); /* 6.5:1 on --loss; light text was 2.6:1 */
   border-color: var(--loss);
   animation: pulse-red 0.8s infinite;
 }
@@ -724,6 +735,7 @@ square.hint-dest {
 .log-line.sys { color: var(--info); }
 .log-line.warn { color: var(--warn); }
 .log-line.err { color: var(--loss); }
+.log-line.hint { color: var(--gold); }
 
 /* CHESS.COM ACTION STRIP (BOTTOM SIDEBAR) */
 
@@ -2067,7 +2079,7 @@ input[type='range'] {
 
 @media (max-width:980px) { .live-room-grid{grid-template-columns:repeat(2,minmax(0,1fr))} .live-lobby-controls{grid-template-columns:1fr 1fr} .lobby-tabs{overflow-x:auto} }
 @media (max-width:640px) {
-  .live-lobby-overlay{padding:14px 12px 44px}.live-lobby-topbar{grid-template-columns:auto 1fr auto;gap:8px}.live-lobby-identity{text-align:left}.live-lobby-identity h1{font-size: var(--fs-display);padding-inline:11px;font-size: var(--fs-xs);align-items:stretch;flex-direction:column;padding:24px 18px}.live-lobby-hero h2{font-size: var(--fs-3xl);z-index:8;top:0;grid-template-columns:1fr 1fr}.lobby-tabs{grid-column:1/-1}.lobby-refresh-btn{grid-column:1/-1}.live-room-grid{grid-template-columns:1fr}.lobby-meta-row{gap:10px}.spectator-panel{position:fixed;inset:auto 10px 10px;width:auto;max-height:calc(70 * var(--vh));border-radius:18px}.recent-room-item{align-items:stretch;flex-direction:column}
+  .live-lobby-overlay{padding:14px 12px 44px}.live-lobby-topbar{grid-template-columns:auto 1fr auto;gap:8px}.live-lobby-identity{text-align:left}.live-lobby-identity h1{font-size: var(--fs-lg)}.live-lobby-kicker{display:none}.live-lobby-overlay .lobby-back-btn,.live-lobby-overlay .lobby-create-btn{min-height:38px;padding-inline:11px;font-size: var(--fs-xs)}.live-lobby-hero{min-height:0;align-items:stretch;flex-direction:column;padding:24px 18px}.live-lobby-hero h2{font-size: var(--fs-3xl)}.lobby-profile-pill{width:auto}.live-lobby-controls{position:sticky;z-index:8;top:0;grid-template-columns:1fr 1fr}.lobby-tabs{grid-column:1/-1}.lobby-refresh-btn{grid-column:1/-1}.live-room-grid{grid-template-columns:1fr}.lobby-meta-row{gap:10px}.spectator-panel{position:fixed;inset:auto 10px 10px;width:auto;max-height:calc(70 * var(--vh));border-radius:18px}.recent-room-item{align-items:stretch;flex-direction:column}
 }
 @media (prefers-reduced-motion:reduce) { square.hint-from,square.hint-dest{animation:none} .clock-badge.low-time{animation:none} .live-room-card.skeleton{animation:none;opacity:.65} .lobby-back-btn,.lobby-refresh-btn,.room-action{transition:none} }
 

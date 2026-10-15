@@ -133,3 +133,24 @@ test('a toast takes a tone and defaults to info', (t) => {
   assert.ok(info.classList.contains('toast--info'));
   assert.ok(info.classList.contains('floating-toast'), 'the positioning class stays');
 });
+
+test('Shift+Tab from the dialog container itself stays inside the modal', (t) => {
+  const { window, ui } = setup(t);
+  const body = document.createElement('div');
+  body.innerHTML = '<button id="a">a</button><button id="b">b</button>';
+  ui.openModal('T', body);
+  assert.equal(document.activeElement.classList.contains('modal'), true, 'focus starts on the container');
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement.id, 'b', 'wraps to the last control instead of escaping');
+});
+
+test('Escape closes a modal and returns focus to the control that opened it', (t) => {
+  const { window, ui } = setup(t);
+  const opener = document.createElement('button');
+  document.body.appendChild(opener);
+  opener.focus();
+  ui.openModal('T', null);
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(document.querySelector('.modal'), null);
+  assert.equal(document.activeElement, opener);
+});

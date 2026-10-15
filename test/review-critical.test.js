@@ -98,3 +98,18 @@ test('the summary is a large shared modal whose close button lives in its sticky
   assert.ok(head.querySelector('.review-modal-close'), 'close button sits in the header');
   assert.ok(head.querySelector('.review-summary-title'), 'title sits in the header');
 });
+
+test('the review summary traps Tab and closes on Escape like every other modal', (t) => {
+  const window = setup(t);
+  const ui = new ReviewUI();
+  let exited = 0;
+  ui.showReviewSummaryModal(analysisWithMoments(), () => {}, () => {}, () => { exited += 1; });
+  const dialog = document.querySelector('.review-summary-modal');
+  const focusables = [...dialog.querySelectorAll('button')];
+  focusables.at(-1).focus();
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement, focusables[0], 'Tab wraps inside the summary');
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(document.querySelector('.review-summary-modal'), null, 'Escape closes it');
+  assert.equal(exited, 1, 'through the same path as the close button');
+});

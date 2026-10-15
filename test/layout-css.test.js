@@ -114,3 +114,48 @@ test('history actions keep the 40px button height and the import box keeps a foc
   const importFocus = styles.match(/\.import-text:focus[^{]*\{[^}]*\}/u)?.[0] ?? '';
   assert.doesNotMatch(importFocus, /outline:\s*none/u);
 });
+
+test('no rule declares the same property twice (catches merged or corrupted rules)', () => {
+  const offenders = [];
+  for (const file of ['styles.css', 'components.css', 'board-night.css', 'tokens.css']) {
+    for (const [, selector, body] of readCss(file).matchAll(/([^{}]+)\{([^{}]*)\}/gu)) {
+      const seen = new Set();
+      for (const [, prop] of body.matchAll(/(?:^|;)\s*([a-z-]+)\s*:/gu)) {
+        if (seen.has(prop)) offenders.push(`${file}: ${selector.trim().slice(-50)} → ${prop}`);
+        seen.add(prop);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('the phone lobby keeps its compact layout rules', () => {
+  const phone = readCss('styles.css').match(/@media \(max-width:640px\)\s*\{([\s\S]*?)\n\}/u)?.[1] ?? '';
+  assert.match(phone, /\.live-lobby-kicker\{display:none\}/u);
+  assert.match(phone, /\.live-lobby-hero\{[^}]*flex-direction:column/u);
+  assert.match(phone, /\.live-lobby-controls\{[^}]*position:sticky/u);
+  assert.match(phone, /\.live-lobby-identity h1\{font-size: var\(--fs-lg\)\}/u);
+});
+
+test('hidden buttons stay hidden even though .btn sets display', () => {
+  assert.match(readCss('components.css'), /\.btn\[hidden\]\s*\{\s*display:\s*none/u);
+});
+
+test('every game-log level the code uses has a colour rule', () => {
+  const styles = readCss('styles.css');
+  const src = ['controller.js', 'main.js', 'ui.js', 'review-ui.js'].map((f) => readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8')).join('\n');
+  const levels = new Set([...src.matchAll(/ui\.log\([^;]*?,\s*'([a-z]+)'\)/gu)].map((m) => m[1]));
+  assert.ok(levels.size >= 5, 'found the log calls');
+  for (const level of levels) assert.ok(styles.includes(`.log-line.${level} {`), `.log-line.${level}`);
+});
+
+test('modal close buttons meet the 40px (44px on phones) hit target', () => {
+  const c = readCss('components.css');
+  assert.match(c, /^\.modal-close\s*\{[^}]*min-width:\s*40px;[^}]*min-height:\s*40px/mu);
+  assert.match(c, /@media \(max-width: 600px\)[\s\S]*?\.modal-close\s*\{[^}]*min-height:\s*44px/u);
+});
+
+test('player bar text is tight enough to fit the pinned bar height', () => {
+  assert.match(readCss('styles.css'), /^\.player-meta\s*\{[^}]*line-height:\s*1\.25/mu);
+  assert.match(readCss('styles.css'), /^\.player-meta \.captured-row\s*\{\s*grid-column:\s*1 \/ -1/mu, 'name and score share a row');
+});

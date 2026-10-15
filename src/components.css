@@ -22,6 +22,11 @@
   transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
+/* .btn sets display, which would otherwise beat the hidden attribute. */
+.btn[hidden] {
+  display: none;
+}
+
 .btn:hover:not(:disabled) {
   background: var(--surface-3);
 }
@@ -149,8 +154,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 40px;
+  min-height: 40px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-3);
@@ -204,6 +209,11 @@
   }
 
   .btn {
+    min-height: 44px;
+  }
+
+  .modal-close {
+    min-width: 44px;
     min-height: 44px;
   }
 }

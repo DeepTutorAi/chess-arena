@@ -50,6 +50,28 @@ export function pieceMarkup(role, color = 'white', className = '') {
   return `<span class="cg-wrap piece-icon ${className}" aria-hidden="true"><piece class="${color} ${role}"></piece></span>`;
 }
 
+/** Keep Tab inside a dialog. Focusables are collected per keypress because
+ *  callers append buttons after a dialog opens (game-over card, review). Focus
+ *  on the dialog box itself (right after opening, or after clicking its
+ *  background) counts as outside, so the first Tab or Shift+Tab lands inside. */
+export function trapTab(event, container) {
+  const focusables = [...container.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  )].filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  const active = document.activeElement;
+  const inside = active !== container && container.contains(active);
+  if (event.shiftKey && (active === first || !inside)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || !inside)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 /** chessground animates in JS, so the CSS reduced-motion rule cannot stop it;
  *  the board reads the preference here instead. */
 export function boardAnimationEnabled(matchMediaImpl = globalThis.matchMedia) {
@@ -748,26 +770,7 @@ export class UI {
     const dialog = overlay.querySelector('.modal');
     const onKeyDown = (event) => {
       if (event.key === 'Escape') close();
-      if (event.key === 'Tab') trapFocus(event);
-    };
-    // Keep Tab inside the dialog. Focusables are collected per keypress because
-    // callers append buttons after the modal opens (game-over card, review).
-    const trapFocus = (event) => {
-      const focusables = [...dialog.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )].filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
-      if (!focusables.length) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      const active = document.activeElement;
-      const inside = dialog.contains(active);
-      if (event.shiftKey && (active === first || !inside)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (active === last || !inside)) {
-        event.preventDefault();
-        first.focus();
-      }
+      if (event.key === 'Tab') trapTab(event, dialog);
     };
     const close = () => {
       if (!overlay.isConnected) return;
