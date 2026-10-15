@@ -49,3 +49,10 @@ test('no type token below 12px', () => {
   }
   assert.equal(value('fs-display'), 'clamp(28px, 4vw, 44px)');
 });
+
+test('board coordinates reach 4.5:1 against the squares they sit on', () => {
+  const board = readFileSync(new URL('../src/board-night.css', import.meta.url), 'utf8');
+  const boardValue = (name) => board.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6});`, 'iu'))?.[1];
+  assert.ok(contrast(boardValue('board-coord-on-light'), boardValue('board-light')) >= 4.5);
+  assert.ok(contrast(boardValue('board-coord-on-dark'), boardValue('board-dark')) >= 4.5);
+});

@@ -9,9 +9,9 @@ import '@fontsource/ibm-plex-sans-thai/500.css';
 import '@fontsource/ibm-plex-sans-thai/600.css';
 import '@fontsource/ibm-plex-sans-thai/700.css';
 import 'chessground/assets/chessground.base.css';
-import 'chessground/assets/chessground.brown.css';
 import 'chessground/assets/chessground.cburnett.css';
 import './tokens.css';
+import './board-night.css';
 import './styles.css';
 
 import { UI, makeActivatable } from './ui.js';

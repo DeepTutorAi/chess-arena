@@ -37,9 +37,10 @@ test('full-screen lobby ends in a solid colour so the home screen never shows th
   assert.match(rule, /background:[^;]*,\s*#[0-9a-f]{6};/iu);
 });
 
-test('board coordinates scale with the board and stay inside it', () => {
-  assert.match(css, /\.board-wrap\.cg-wrap coords\s*\{[^}]*font-size:\s*clamp\([^)]*var\(--board-size\)[^}]*opacity:\s*1/u);
-  assert.match(css, /\.board-wrap\.cg-wrap coords\.files\s*\{\s*left:\s*0;/u);
+test('board coordinates scale with the board, respect the 12px floor and stay inside it', () => {
+  const board = readFileSync(new URL('../src/board-night.css', import.meta.url), 'utf8');
+  assert.match(board, /\.board-wrap\.cg-wrap coords\s*\{[^}]*font-size:\s*clamp\(12px,[^)]*var\(--board-size\)[^}]*opacity:\s*1/u);
+  assert.match(board, /\.board-wrap\.cg-wrap coords\.files\s*\{\s*left:\s*0;/u);
 });
 
 test('mode descriptions wrap to two lines instead of being cut to one', () => {
@@ -58,4 +59,14 @@ test('game-over and history results are neutral unless the viewer won, lost or d
 
 test('the review summary keeps its close button visible while scrolling', () => {
   assert.match(css, /\.review-summary-modal \.review-modal-close\s*\{[^}]*position:\s*sticky/u);
+});
+
+test('the night board replaces the brown theme', () => {
+  const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(main, /chessground\.brown\.css/u);
+  assert.match(main, /import '\.\/board-night\.css';/u);
+  const board = readFileSync(new URL('../src/board-night.css', import.meta.url), 'utf8');
+  for (const name of ['board-light', 'board-dark', 'board-coord-on-light', 'board-coord-on-dark', 'board-last-move', 'board-selected', 'board-check']) {
+    assert.match(board, new RegExp(`--${name}:`, 'u'), `--${name}`);
+  }
 });

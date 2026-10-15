@@ -1,0 +1,85 @@
+/* Night board — square colours, highlights and coordinates for chessground.
+   Replaces chessground.brown.css; piece images still come from cburnett. */
+
+:root {
+  --board-light: #cfd8dc;
+  --board-dark: #466f68;
+  --board-coord-on-light: #2f4f49;
+  --board-coord-on-dark: #f2f5f7;
+  --board-last-move: color-mix(in srgb, var(--gold) 45%, transparent);
+  --board-selected: color-mix(in srgb, var(--accent) 55%, transparent);
+  --board-check: radial-gradient(ellipse at center, color-mix(in srgb, var(--loss) 85%, transparent) 0%, transparent 70%);
+}
+
+/* 8x8 pattern; the SVG repeats --board-light / --board-dark, which a data URI
+   cannot reference as variables. */
+cg-board {
+  background-color: var(--board-light);
+  background-image: url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4IDgiIHNoYXBlLXJlbmRlcmluZz0iY3Jpc3BFZGdlcyI+PHJlY3Qgd2lkdGg9IjgiIGhlaWdodD0iOCIgZmlsbD0iI2NmZDhkYyIvPjxwYXRoIGZpbGw9IiM0NjZmNjgiIGQ9Ik0xIDBoMXYxaC0xek0zIDBoMXYxaC0xek01IDBoMXYxaC0xek03IDBoMXYxaC0xek0wIDFoMXYxaC0xek0yIDFoMXYxaC0xek00IDFoMXYxaC0xek02IDFoMXYxaC0xek0xIDJoMXYxaC0xek0zIDJoMXYxaC0xek01IDJoMXYxaC0xek03IDJoMXYxaC0xek0wIDNoMXYxaC0xek0yIDNoMXYxaC0xek00IDNoMXYxaC0xek02IDNoMXYxaC0xek0xIDRoMXYxaC0xek0zIDRoMXYxaC0xek01IDRoMXYxaC0xek03IDRoMXYxaC0xek0wIDVoMXYxaC0xek0yIDVoMXYxaC0xek00IDVoMXYxaC0xek02IDVoMXYxaC0xek0xIDZoMXYxaC0xek0zIDZoMXYxaC0xek01IDZoMXYxaC0xek03IDZoMXYxaC0xek0wIDdoMXYxaC0xek0yIDdoMXYxaC0xek00IDdoMXYxaC0xek02IDdoMXYxaC0xeiIvPjwvc3ZnPg==');
+}
+
+cg-board square.move-dest {
+  background: radial-gradient(var(--board-selected) 22%, transparent 0);
+}
+cg-board square.premove-dest {
+  background: radial-gradient(color-mix(in srgb, var(--info) 55%, transparent) 22%, transparent 0);
+}
+cg-board square.oc.move-dest {
+  background: radial-gradient(transparent 0%, transparent 80%, var(--board-selected) 80%);
+}
+cg-board square.oc.premove-dest {
+  background: radial-gradient(transparent 0%, transparent 80%, color-mix(in srgb, var(--info) 45%, transparent) 80%);
+}
+cg-board square.move-dest:hover {
+  background: var(--board-selected);
+}
+cg-board square.premove-dest:hover {
+  background: color-mix(in srgb, var(--info) 35%, transparent);
+}
+cg-board square.last-move {
+  background-color: var(--board-last-move);
+}
+cg-board square.selected {
+  background-color: var(--board-selected);
+}
+cg-board square.check {
+  background: var(--board-check);
+}
+cg-board square.current-premove {
+  background-color: color-mix(in srgb, var(--info) 45%, transparent);
+}
+
+/* Coordinates: scale with the board (never below the 12px floor), fully
+   opaque, and coloured for the square each label sits on. Files sit in the
+   bottom-right corner of their square and stay inside the board. */
+.board-wrap.cg-wrap coords {
+  font-size: clamp(12px, calc(var(--board-size) * 0.022), 14px);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.board-wrap.cg-wrap coords.files {
+  left: 0;
+}
+
+.board-wrap.cg-wrap coords.files coord {
+  text-align: right;
+  padding-right: 0.3em;
+}
+
+/* Rank labels sit on the a-file here (chessground's brown theme assumes the
+   h-file), so their parity is the reverse of the brown theme's. Checked in the
+   browser for both orientations: every label matches its square. */
+.orientation-white .ranks :nth-child(even),
+.orientation-white .files :nth-child(even),
+.orientation-black .ranks :nth-child(odd),
+.orientation-black .files :nth-child(odd) {
+  color: var(--board-coord-on-light);
+}
+
+.orientation-white .ranks :nth-child(odd),
+.orientation-white .files :nth-child(odd),
+.orientation-black .ranks :nth-child(even),
+.orientation-black .files :nth-child(even) {
+  color: var(--board-coord-on-dark);
+}

@@ -449,24 +449,7 @@ body {
   height: 100%;
 }
 
-/* chessground's 9px coordinates at 80% opacity disappear on a large board:
-   scale them with the board and keep them fully opaque. Files sit in the
-   bottom-right corner of their square and stay inside the board (the default
-   24px offset pushed the last label past its edge on phones). */
-.board-wrap.cg-wrap coords {
-  font-size: clamp(10px, calc(var(--board-size) * 0.022), 14px);
-  font-weight: 700;
-  opacity: 1;
-}
-
-.board-wrap.cg-wrap coords.files {
-  left: 0;
-}
-
-.board-wrap.cg-wrap coords.files coord {
-  text-align: right;
-  padding-right: 0.3em;
-}
+/* Board colours and coordinates live in board-night.css. */
 
 /* PLAYER BARS (TOP & BOTTOM) */
 
