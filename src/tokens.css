@@ -71,16 +71,6 @@
   --dur-base: 200ms;
   --dur-slow: 320ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-
-  /* Legacy names, kept as aliases until every screen is migrated. */
-  --panel: var(--surface-1);
-  --panel-2: var(--surface-2);
-  --line: var(--border);
-  --muted: var(--text-muted);
-  --amber: var(--warn);
-  --red: var(--loss);
-  --lobby-green: var(--accent);
-  --lobby-gold: var(--gold);
 }
 
 @media (prefers-reduced-motion: reduce) {

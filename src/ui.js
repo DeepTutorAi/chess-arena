@@ -135,7 +135,7 @@ export class UI {
             <aside class="sidebar sandbox-left-panel hidden" id="sandbox-left-panel">
               <h3 class="sandbox-tool-title">${iconWrench({ size: 18 })} เลือกโหมด & ตั้งค่า</h3>
 
-              <div style="font-size:11px; color:var(--muted);">เลือกโหมดเกม (หากไม่เลือก = โหมด Solo ฝึกซ้อมเดินหมากทั้ง 2 ฝ่าย):</div>
+              <div style="font-size:var(--fs-xs); color:var(--text-muted);">เลือกโหมดเกม (หากไม่เลือก = โหมด Solo ฝึกซ้อมเดินหมากทั้ง 2 ฝ่าย):</div>
 
               <div style="display:flex; flex-direction:column; gap:8px;">
                 <button class="sandbox-mode-opt-btn" id="sb-mode-online" data-mode="online">

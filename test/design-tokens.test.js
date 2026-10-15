@@ -56,3 +56,9 @@ test('board coordinates reach 4.5:1 against the squares they sit on', () => {
   assert.ok(contrast(boardValue('board-coord-on-light'), boardValue('board-light')) >= 4.5);
   assert.ok(contrast(boardValue('board-coord-on-dark'), boardValue('board-dark')) >= 4.5);
 });
+
+test('legacy colour names are gone once every screen is migrated', () => {
+  for (const name of ['panel', 'panel-2', 'line', 'muted', 'amber', 'red', 'lobby-green', 'lobby-gold']) {
+    assert.equal(value(name), undefined, `--${name} is still defined`);
+  }
+});
