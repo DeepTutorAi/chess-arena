@@ -12,6 +12,7 @@ import 'chessground/assets/chessground.base.css';
 import 'chessground/assets/chessground.cburnett.css';
 import './tokens.css';
 import './board-night.css';
+import './components.css';
 import './styles.css';
 
 import { UI, makeActivatable } from './ui.js';

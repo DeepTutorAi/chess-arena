@@ -94,13 +94,18 @@ test('text on the accent-green fills meets WCAG AA (4.5:1)', () => {
   const onAccent = token('on-accent');
   assert.ok(contrast(onAccent, token('accent')) >= 4.5, `on-accent/accent ${contrast(onAccent, token('accent')).toFixed(2)}`);
   assert.ok(contrast(onAccent, token('accent-hover')) >= 4.5);
+  // .btn.primary lives in components.css; screen-specific green buttons in styles.css.
+  const allCss = `${read('src/components.css')}\n${css}`;
   for (const selector of ['\\.btn\\.primary', '\\.sandbox-start-btn', '\\.lobby-back-btn', '\\.exact-card-action-btn\\.join']) {
-    const block = css.match(new RegExp(`^${selector}\\s*\\{[^}]*\\}`, 'mu'))?.[0] ?? '';
+    const block = allCss.match(new RegExp(`^${selector}\\s*\\{[^}]*\\}`, 'mu'))?.[0] ?? '';
     assert.match(block, /color:\s*var\(--on-accent\)/u, `${selector} must use dark text on green`);
   }
 });
 
-test('danger hover keeps white text readable', () => {
-  const hover = css.match(/\.btn\.danger:hover:not\(:disabled\)\s*\{\s*background:\s*(#[0-9a-f]{6})/iu)[1];
-  assert.ok(contrast('#ffffff', hover) >= 4.5, `white on ${hover}: ${contrast('#ffffff', hover).toFixed(2)}`);
+test('danger buttons are outlined in the loss colour, never filled', () => {
+  const components = read('src/components.css');
+  const danger = components.match(/^\.btn\.danger\s*\{[^}]*\}/mu)?.[0] ?? '';
+  assert.match(danger, /background:\s*transparent/u);
+  assert.match(danger, /border-color:\s*var\(--loss\)/u);
+  assert.match(danger, /color:\s*var\(--loss\)/u);
 });

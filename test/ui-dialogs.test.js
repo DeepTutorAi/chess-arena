@@ -76,3 +76,26 @@ test('the game-over title takes the outcome colour class, or none for a neutral 
   ui.showGameOver('เกมจบแล้ว', '', () => {}, () => {});
   assert.equal(document.querySelector('.gameover-title').className, 'gameover-title');
 });
+
+test('Tab and Shift+Tab stay inside an open modal, including buttons added after it opened', (t) => {
+  const { window, ui } = setup(t);
+  const body = document.createElement('div');
+  body.innerHTML = '<button id="first">a</button>';
+  ui.openModal('T', body);
+  const late = document.createElement('button');
+  late.id = 'last';
+  body.appendChild(late);
+  late.focus();
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement.className, 'modal-close', 'wraps to the first focusable (the close button)');
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }));
+  assert.equal(document.activeElement.id, 'last');
+});
+
+test('openModal applies the requested size', (t) => {
+  const { ui } = setup(t);
+  ui.openModal('T', null, { size: 'lg' });
+  assert.ok(document.querySelector('.modal').classList.contains('modal--lg'));
+  ui.openModal('T', null);
+  assert.ok(document.querySelector('.modal').classList.contains('modal--md'), 'md is the default');
+});

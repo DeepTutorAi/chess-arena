@@ -718,7 +718,7 @@ export class UI {
   }
 
   // ---- modals ------------------------------------------------------------
-  openModal(title, bodyEl) {
+  openModal(title, bodyEl, { size = 'md' } = {}) {
     // One modal at a time: a new open tears the previous one down through its
     // own close path so listeners and focus never leak.
     this._activeModalClose?.();
@@ -729,7 +729,7 @@ export class UI {
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-label', title);
     overlay.innerHTML = `
-      <div class="modal" tabindex="-1">
+      <div class="modal modal--${size}" tabindex="-1">
         <div class="modal-head"><h2></h2><button class="modal-close" type="button" aria-label="ปิด">${iconClose({ size: 16 })}</button></div>
         <div class="modal-body"></div>
       </div>
@@ -740,6 +740,26 @@ export class UI {
     const dialog = overlay.querySelector('.modal');
     const onKeyDown = (event) => {
       if (event.key === 'Escape') close();
+      if (event.key === 'Tab') trapFocus(event);
+    };
+    // Keep Tab inside the dialog. Focusables are collected per keypress because
+    // callers append buttons after the modal opens (game-over card, review).
+    const trapFocus = (event) => {
+      const focusables = [...dialog.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )].filter((el) => !el.disabled && !el.hidden && el.getAttribute('aria-hidden') !== 'true');
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const inside = dialog.contains(active);
+      if (event.shiftKey && (active === first || !inside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !inside)) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     const close = () => {
       if (!overlay.isConnected) return;

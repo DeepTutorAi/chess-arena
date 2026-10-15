@@ -70,3 +70,29 @@ test('the night board replaces the brown theme', () => {
     assert.match(board, new RegExp(`--${name}:`, 'u'), `--${name}`);
   }
 });
+
+const readCss = (file) => readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8');
+const RAW_COLOUR = /#[0-9a-f]{3,8}\b|rgba?\(/giu;
+const NON_TOKEN_FONT_SIZE = /font-size:(?!\s*var\()/gu;
+// Measured on styles.css on 2026-10-15; each screen migration lowers these and
+// the cleanup task sets both to 0.
+const COLOUR_BASELINE = 343;
+const FONT_SIZE_BASELINE = 130;
+
+test('components.css uses tokens only', () => {
+  assert.equal(readCss('components.css').match(RAW_COLOUR), null);
+  assert.equal(readCss('components.css').match(NON_TOKEN_FONT_SIZE), null);
+});
+
+test('raw colours and font sizes in styles.css only go down', () => {
+  const styles = readCss('styles.css');
+  assert.ok((styles.match(RAW_COLOUR) ?? []).length <= COLOUR_BASELINE, `colours ${(styles.match(RAW_COLOUR) ?? []).length}`);
+  assert.ok((styles.match(NON_TOKEN_FONT_SIZE) ?? []).length <= FONT_SIZE_BASELINE, `font sizes ${(styles.match(NON_TOKEN_FONT_SIZE) ?? []).length}`);
+});
+
+test('modal becomes a bottom sheet under 600px with sticky head and actions', () => {
+  const c = readCss('components.css');
+  assert.match(c, /@media \(max-width: 600px\)[\s\S]*?\.modal\s*\{[^}]*align-self:\s*flex-end/u);
+  assert.match(c, /\.modal-head\s*\{[^}]*position:\s*sticky/u);
+  assert.match(c, /\.modal-actions\s*\{[^}]*position:\s*sticky/u);
+});

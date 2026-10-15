@@ -1,0 +1,392 @@
+/* Night Club Chess shared components. Tokens only: no colour literals and no
+   font sizes outside var(--fs-*) (enforced by test/layout-css.test.js). */
+
+/* ---- Buttons ---------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.btn.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.btn.ghost:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* Destructive actions are outlined, never filled. */
+.btn.danger {
+  background: transparent;
+  border-color: var(--loss);
+  color: var(--loss);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--loss) 12%, transparent);
+}
+
+.btn.sm {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-sm);
+}
+
+.btn.lg {
+  min-height: 48px;
+  padding: var(--space-3) var(--space-6);
+  font-size: var(--fs-lg);
+}
+
+.btn.icon {
+  min-width: 40px;
+  padding: var(--space-2);
+}
+
+/* ---- Modal ------------------------------------------------------------ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--scrim);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: calc(88 * var(--vh));
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  color: var(--text);
+}
+
+.modal--sm { max-width: 420px; }
+.modal--md { max-width: 560px; }
+.modal--lg { max-width: 720px; }
+
+@supports (backdrop-filter: blur(1px)) {
+  .modal-overlay {
+    backdrop-filter: blur(6px);
+  }
+}
+
+.modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.modal-head h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.modal-close:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.modal-close:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+}
+
+.modal-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin: var(--space-4) calc(-1 * var(--space-4)) calc(-1 * var(--space-4));
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+/* Under 600px a modal is a bottom sheet. */
+@media (max-width: 600px) {
+  .modal-overlay {
+    padding: 0;
+  }
+
+  .modal {
+    align-self: flex-end;
+    max-width: none;
+    max-height: calc(92 * var(--vh));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .btn {
+    min-height: 44px;
+  }
+}
+
+/* ---- Full-screen pages ------------------------------------------------ */
+
+.screen {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ---- Cards ------------------------------------------------------------ */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.card--interactive {
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.card--interactive:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-2);
+}
+
+.card--interactive:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
+/* ---- Form fields ------------------------------------------------------ */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.field-label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.field-help {
+  font-size: var(--fs-xs);
+  color: var(--text-subtle);
+}
+
+.field input:not([type='range']):not([type='checkbox']):not([type='radio']),
+.field select,
+.field textarea {
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+}
+
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.field input[type='range'] {
+  accent-color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .field input:not([type='range']):not([type='checkbox']):not([type='radio']),
+  .field select,
+  .field textarea {
+    font-size: var(--fs-lg); /* 16px stops iOS from zooming into the field */
+  }
+}
+
+/* ---- Segmented choice ------------------------------------------------- */
+
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.segmented > * {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 34px;
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.segmented > .active,
+.segmented > [aria-selected='true'],
+.segmented > :has(input:checked) {
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.segmented > :focus-visible,
+.segmented > :has(input:focus-visible) {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
+/* ---- Chips ------------------------------------------------------------ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+
+.chip--accent { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.chip--gold { background: color-mix(in srgb, var(--gold) 16%, transparent); color: var(--gold); }
+.chip--info { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
+.chip--neutral { background: var(--surface-3); color: var(--text-muted); }
+
+/* ---- Status bar tones ------------------------------------------------- */
+
+.status-bar.tone-turn { box-shadow: inset 3px 0 0 var(--accent); color: var(--text); }
+.status-bar.tone-thinking { box-shadow: inset 3px 0 0 var(--info); color: var(--text-muted); }
+.status-bar.tone-win { box-shadow: inset 3px 0 0 var(--win); color: var(--win); font-weight: 600; }
+.status-bar.tone-loss {
+  box-shadow: inset 3px 0 0 var(--loss);
+  background: color-mix(in srgb, var(--loss) 10%, var(--surface-1));
+  color: var(--loss);
+  font-weight: 600;
+}
+.status-bar.tone-draw { box-shadow: inset 3px 0 0 var(--draw); color: var(--draw); font-weight: 600; }
+.status-bar.tone-warn { box-shadow: inset 3px 0 0 var(--warn); color: var(--warn); }
+.status-bar.tone-error { box-shadow: inset 3px 0 0 var(--loss); color: var(--loss); }
+
+/* ---- Toasts ----------------------------------------------------------- */
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.toast--info { border-left: 3px solid var(--info); }
+.toast--success { border-left: 3px solid var(--win); }
+.toast--warn { border-left: 3px solid var(--warn); }
+.toast--danger { border-left: 3px solid var(--loss); }
