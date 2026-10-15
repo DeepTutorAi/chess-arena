@@ -86,7 +86,9 @@ function contrast(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 const css = read('src/styles.css');
-const token = (name) => css.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, 'iu'))[1];
+// Colour values are defined in tokens.css (Night Club design system).
+const tokensCss = read('src/tokens.css');
+const token = (name) => tokensCss.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, 'iu'))[1];
 
 test('text on the accent-green fills meets WCAG AA (4.5:1)', () => {
   const onAccent = token('on-accent');

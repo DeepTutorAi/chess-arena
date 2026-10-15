@@ -2,9 +2,16 @@
 // game controller together. All game logic lives in controller.js.
 
 import { Chessground } from 'chessground';
+// The weight files (not the per-subset ones) carry unicode-range, so Thai and
+// Latin both resolve to Plex and each subset downloads only when used.
+import '@fontsource/ibm-plex-sans-thai/400.css';
+import '@fontsource/ibm-plex-sans-thai/500.css';
+import '@fontsource/ibm-plex-sans-thai/600.css';
+import '@fontsource/ibm-plex-sans-thai/700.css';
 import 'chessground/assets/chessground.base.css';
 import 'chessground/assets/chessground.brown.css';
 import 'chessground/assets/chessground.cburnett.css';
+import './tokens.css';
 import './styles.css';
 
 import { UI, makeActivatable } from './ui.js';

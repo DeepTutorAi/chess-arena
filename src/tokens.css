@@ -1,0 +1,94 @@
+/* Night Club Chess design tokens — the single source of every colour, type,
+   spacing, radius, shadow and motion value. See
+   docs/superpowers/specs/2026-10-15-night-club-design-system-design.md. */
+
+:root {
+  /* Surfaces */
+  --bg: #0f1117;
+  --surface-1: #161a22;
+  --surface-2: #1d222c;
+  --surface-3: #262c38;
+  --border: #2e3542;
+  --border-strong: #3d4656;
+
+  /* Text */
+  --text: #eef1f6;
+  --text-muted: #a3acbb;
+  --text-subtle: #8a93a3;
+
+  /* Accent and gold */
+  --accent: #81b64c;
+  --accent-hover: #93c75a;
+  --on-accent: #10200a;
+  --gold: #e7c26a;
+  --on-gold: #1e1606;
+
+  /* Status */
+  --win: var(--accent);
+  --loss: #f36e68;
+  --draw: var(--text-muted);
+  --warn: #f2b33d;
+  --info: #5aa9e6;
+
+  /* Overlays */
+  --scrim: rgba(8, 10, 14, 0.72);
+  --glass: rgba(22, 26, 34, 0.72);
+
+  /* Typography */
+  --font-sans: 'IBM Plex Sans Thai', 'Noto Sans Thai', system-ui, sans-serif;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 32px;
+  --fs-display: clamp(28px, 4vw, 44px);
+
+  /* Spacing (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 999px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --ring-focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Legacy names, kept as aliases until every screen is migrated. */
+  --panel: var(--surface-1);
+  --panel-2: var(--surface-2);
+  --line: var(--border);
+  --muted: var(--text-muted);
+  --amber: var(--warn);
+  --red: var(--loss);
+  --lobby-green: var(--accent);
+  --lobby-gold: var(--gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

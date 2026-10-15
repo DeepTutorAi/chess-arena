@@ -1,17 +1,7 @@
-/* Chess Arena — Chess.com & Park 3D Dark Theme */
+/* Chess Arena — screen layout. Design values come from tokens.css. */
 
 :root {
-  --bg: #1e1c19;
-  --panel: #262421;
-  --panel-2: #312e2b;
-  --line: #403d39;
-  --text: #ffffff;
-  --muted: #bab8b6;
-  --accent: #81b64c;
-  --accent-hover: #a3d168;
-  --on-accent: #14200e; /* text on accent-green fills: 7.0:1 (white was 2.4:1) */
-  --amber: #f59e0b;
-  --red: #fa4141;
+  /* Colours, type and the other design values live in tokens.css. */
 
   /* Viewport height that excludes mobile browser chrome (dvh) where supported;
      use calc(N * var(--vh)) instead of Nvh. */
@@ -50,8 +40,7 @@ body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Thai', 'Sarabun', sans-serif;
+  font-family: var(--font-sans);
   min-height: calc(100 * var(--vh));
 }
 
