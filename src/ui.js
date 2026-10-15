@@ -50,6 +50,13 @@ export function pieceMarkup(role, color = 'white', className = '') {
   return `<span class="cg-wrap piece-icon ${className}" aria-hidden="true"><piece class="${color} ${role}"></piece></span>`;
 }
 
+/** chessground animates in JS, so the CSS reduced-motion rule cannot stop it;
+ *  the board reads the preference here instead. */
+export function boardAnimationEnabled(matchMediaImpl = globalThis.matchMedia) {
+  if (typeof matchMediaImpl !== 'function') return true;
+  return !matchMediaImpl('(prefers-reduced-motion: reduce)').matches;
+}
+
 /** Make a clickable block (a card holding block-level layout, which a <button>
  *  may not contain) reachable and operable from the keyboard like a button. */
 export function makeActivatable(element, onActivate) {
@@ -719,7 +726,7 @@ export class UI {
   }
 
   // ---- modals ------------------------------------------------------------
-  openModal(title, bodyEl, { size = 'md' } = {}) {
+  openModal(title, bodyEl, { size = 'md', onClose = null } = {}) {
     // One modal at a time: a new open tears the previous one down through its
     // own close path so listeners and focus never leak.
     this._activeModalClose?.();
@@ -770,6 +777,7 @@ export class UI {
         previouslyFocused.focus();
       }
       if (this._activeModalClose === close) this._activeModalClose = null;
+      onClose?.();
     };
     overlay.querySelector('.modal-close').onclick = close;
     overlay.addEventListener('click', (e) => {

@@ -76,8 +76,8 @@ const RAW_COLOUR = /#[0-9a-f]{3,8}\b|rgba?\(/giu;
 const NON_TOKEN_FONT_SIZE = /font-size:(?!\s*var\()/gu;
 // Measured on styles.css on 2026-10-15; each screen migration lowers these and
 // the cleanup task sets both to 0.
-const COLOUR_BASELINE = 239;
-const FONT_SIZE_BASELINE = 101;
+const COLOUR_BASELINE = 181;
+const FONT_SIZE_BASELINE = 78;
 
 test('components.css uses tokens only', () => {
   assert.equal(readCss('components.css').match(RAW_COLOUR), null);
@@ -95,4 +95,10 @@ test('modal becomes a bottom sheet under 600px with sticky head and actions', ()
   assert.match(c, /@media \(max-width: 600px\)[\s\S]*?\.modal\s*\{[^}]*align-self:\s*flex-end/u);
   assert.match(c, /\.modal-head\s*\{[^}]*position:\s*sticky/u);
   assert.match(c, /\.modal-actions\s*\{[^}]*position:\s*sticky/u);
+});
+
+test('player bars are pinned to the board-size formula and clocks use tabular digits', () => {
+  const styles = readCss('styles.css');
+  assert.match(styles, /^\.player-bar\s*\{[^}]*height:\s*calc\(var\(--bars-h\) \/ 2\)[^}]*box-sizing:\s*border-box/mu);
+  assert.match(styles, /^\.clock-badge\s*\{[^}]*font-variant-numeric:\s*tabular-nums/mu);
 });

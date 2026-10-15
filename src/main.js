@@ -15,7 +15,7 @@ import './board-night.css';
 import './components.css';
 import './styles.css';
 
-import { UI, makeActivatable } from './ui.js';
+import { UI, boardAnimationEnabled, makeActivatable } from './ui.js';
 import { Controller, MODES } from './controller.js';
 import { LEVELS, TIME_CONTROLS, HUMAN_NAME, getRooms, saveRoom, isCrossOriginIsolated, getStrongEnginePreference, setStrongEnginePreference } from './config.js';
 import {
@@ -55,27 +55,24 @@ function storeLocal(key, value) {
 function openPromotion(orig, dest) {
   // A second drag while the picker is open must not stack a second overlay;
   // it resolves as cancelled and the board snaps back.
-  if (document.querySelector('.promo-overlay')) return Promise.resolve(null);
+  if (document.querySelector('.promo-box')) return Promise.resolve(null);
   return new Promise((resolve) => {
-    const overlay = ui.el('div', 'promo-overlay');
     const box = ui.el('div', 'promo-box');
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-modal', 'true');
-    box.setAttribute('aria-label', 'เลือกตัวหมากสำหรับโปรโมท');
-    box.appendChild(ui.el('div', 'promo-title', 'โปรโมทเบี้ย — เลือกตัวหมาก'));
     const piecesRow = ui.el('div', 'promo-pieces');
     const white = dest[1] === '8'; // promoting side's pieces are the mover's color
     // chess.js uses single letters; chessground CSS keys icons by full role names.
     const pieces = ['q', 'r', 'b', 'n'];
     const labels = { q: 'Queen', r: 'Rook', b: 'Bishop', n: 'Knight' };
     const roles = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight' };
+    // Every way out resolves exactly once: a piece, Cancel, or the modal's own
+    // close paths (Escape, backdrop, close button) through onClose.
+    let settled = false;
+    let modal = null;
     const finish = (value) => {
-      document.removeEventListener('keydown', onKeyDown);
-      overlay.remove();
+      if (settled) return;
+      settled = true;
+      modal?.close();
       resolve(value);
-    };
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') finish(null);
     };
     for (const p of pieces) {
       const btn = ui.el('button', 'promo-btn');
@@ -88,16 +85,11 @@ function openPromotion(orig, dest) {
       piecesRow.appendChild(btn);
     }
     box.appendChild(piecesRow);
-    const cancel = ui.el('button', 'promo-cancel', 'ยกเลิก');
+    const cancel = ui.el('button', 'btn ghost promo-cancel', 'ยกเลิก');
     cancel.type = 'button';
     cancel.onclick = () => finish(null);
     box.appendChild(cancel);
-    overlay.appendChild(box);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) finish(null);
-    });
-    document.addEventListener('keydown', onKeyDown);
-    document.body.appendChild(overlay);
+    modal = ui.openModal('โปรโมทเบี้ย — เลือกตัวหมาก', box, { size: 'sm', onClose: () => finish(null) });
     piecesRow.querySelector('button')?.focus();
   });
 }
@@ -105,7 +97,7 @@ function openPromotion(orig, dest) {
 // ---- board -----------------------------------------------------------------
 
 const ground = Chessground(ui.refs.board, {
-  animation: { enabled: true, duration: 200 },
+  animation: { enabled: boardAnimationEnabled(), duration: 200 },
   draggable: { enabled: true, showGhost: true },
   selectable: { enabled: true },
   // visible (not enabled) so the hint button can draw arrows without letting

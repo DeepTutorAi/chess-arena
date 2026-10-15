@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 
-import { UI, makeActivatable } from '../src/ui.js';
+import { UI, boardAnimationEnabled, makeActivatable } from '../src/ui.js';
 
 function setup(t) {
   const window = new Window({ url: 'http://localhost:5173/' });
@@ -98,4 +98,19 @@ test('openModal applies the requested size', (t) => {
   assert.ok(document.querySelector('.modal').classList.contains('modal--lg'));
   ui.openModal('T', null);
   assert.ok(document.querySelector('.modal').classList.contains('modal--md'), 'md is the default');
+});
+
+test('board animation follows the reduced-motion preference', () => {
+  assert.equal(boardAnimationEnabled(() => ({ matches: true })), false);
+  assert.equal(boardAnimationEnabled(() => ({ matches: false })), true);
+  assert.equal(boardAnimationEnabled(undefined), true, 'no matchMedia (tests, old browsers): animate');
+});
+
+test('openModal reports every way it closes exactly once', (t) => {
+  const { window, ui } = setup(t);
+  let closed = 0;
+  const modal = ui.openModal('T', null, { onClose: () => { closed += 1; } });
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  modal.close();
+  assert.equal(closed, 1, 'Escape closes and reports once; a later close() is a no-op');
 });
