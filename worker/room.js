@@ -388,7 +388,13 @@ export class ChessRoom extends DurableObject {
 
   async webSocketClose(socket, code, reason) {
     this.socketMessageCounts.delete(socket);
-    socket.close(code, reason);
+    try {
+      socket.close(code, reason);
+    } catch {
+      // Abnormal closures report reserved codes (1005/1006) that close()
+      // rejects, or the socket is already closed. Either way the peer is
+      // gone; the presence broadcast below must still run.
+    }
     const state = await this.ctx.storage.get(ROOM_KEY);
     if (state) {
       this.broadcast(state);
@@ -398,7 +404,11 @@ export class ChessRoom extends DurableObject {
 
   async webSocketError(socket) {
     this.socketMessageCounts.delete(socket);
-    socket.close(1011, 'socket_error');
+    try {
+      socket.close(1011, 'socket_error');
+    } catch {
+      // already closed — still broadcast the presence change below
+    }
     const state = await this.ctx.storage.get(ROOM_KEY);
     if (state) this.broadcast(state);
   }

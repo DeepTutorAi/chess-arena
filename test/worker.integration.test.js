@@ -642,4 +642,20 @@ describe('online room Worker', () => {
     hostSocket.close(1000, 'done');
     guestSocket.close(1000, 'done');
   });
+
+  it('still broadcasts presence when echoing an abnormal close code throws', async () => {
+    const created = await createRoom();
+    const stub = roomStub(created.body.roomId);
+    await runInDurableObject(stub, async (instance) => {
+      const broadcasts = [];
+      instance.broadcast = (state) => broadcasts.push(state.roomId);
+      const droppedSocket = {
+        close() { throw new TypeError('Invalid WebSocket close code: 1006'); },
+        deserializeAttachment() { return { role: 'guest', color: 'b' }; },
+      };
+      await instance.webSocketClose(droppedSocket, 1006, '');
+      await instance.webSocketError(droppedSocket);
+      expect(broadcasts).toEqual([created.body.roomId, created.body.roomId]);
+    });
+  });
 });

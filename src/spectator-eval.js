@@ -19,6 +19,7 @@ export class SpectatorEval {
     this.engine = null;
     this.searching = false;
     this.searchedFen = null;
+    this.interrupted = false;
     this.handler = null;
     this._onVisibility = () => {
       if (typeof document !== 'undefined' && document.hidden) this._pause();
@@ -64,6 +65,7 @@ export class SpectatorEval {
     }
     this.handler = null;
     this.searching = false;
+    this.interrupted = false;
   }
 
   _ensureEngine() {
@@ -83,6 +85,11 @@ export class SpectatorEval {
       onInfo: (info) => this._emit(info),
       onBestMove: () => {
         this.searching = false;
+        if (this.interrupted) {
+          // A paused search never completed — its fen must be searchable again.
+          this.interrupted = false;
+          this.searchedFen = null;
+        }
         this._requestCurrent();
       },
       onError: () => {
@@ -90,6 +97,7 @@ export class SpectatorEval {
           engine.quit();
           this.engine = null;
           this.searching = false;
+          this.interrupted = false;
           // The aborted search never produced a result — allow a re-search.
           this.searchedFen = null;
         }
@@ -100,14 +108,20 @@ export class SpectatorEval {
   }
 
   _pause() {
-    if (this.searching && this.engine) this.engine.stop();
+    if (this.searching && this.engine) {
+      // Stockfish still answers a stopped search with bestmove; stay
+      // "searching" until it arrives so no second `go` overlaps it.
+      this.engine.stop();
+      this.interrupted = true;
+      return;
+    }
     this.searching = false;
-    // The stopped search never completed — the fen must be searchable again.
     this.searchedFen = null;
   }
 
   _requestCurrent() {
     if (!this.enabled || !this.engine?.ready || this.searching) return;
+    if (typeof document !== 'undefined' && document?.hidden) return;
     const fen = this.fenProvider();
     if (!fen || fen === this.searchedFen) return;
     this.searchedFen = fen;
@@ -118,7 +132,8 @@ export class SpectatorEval {
 
   /** Engine scores are side-to-move — convert to white perspective for the bar. */
   _emit(info) {
-    if (!this.handler || !info) return;
+    // Info lines from a search stopped by disabling must not redraw the bar.
+    if (!this.enabled || !this.handler || !info) return;
     const turn = (this.searchedFen ?? '').split(' ')[1] === 'b' ? 'b' : 'w';
     let whiteCp;
     let whiteProb;

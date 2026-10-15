@@ -121,6 +121,7 @@ export class Controller {
     this.timeControlId = DEFAULT_TIME_CONTROL;
 
     this._isTimeout = false;
+    this._resigned = false;
     this._timeoutLoser = null;
     this._aiTimer = null;
     this._lastOpts = null;
@@ -169,6 +170,7 @@ export class Controller {
     this._lastOpts = { ...opts };
     this._overPopupShown = false;
     this._isTimeout = false;
+    this._resigned = false;
     this._lowTimePlayed = false; // low-time warning fires once per game
     this._timeoutLoser = null;
     this._assisted = false;
@@ -240,6 +242,7 @@ export class Controller {
     this.dispose();
     this._overPopupShown = false;
     this._isTimeout = false;
+    this._resigned = false;
     this._timeoutLoser = null;
     this.ui.clearLog();
     this.ui.resetMoves();
@@ -545,6 +548,8 @@ export class Controller {
       }
       return;
     }
+    // No human plays in AI vs AI, so there is nobody to resign.
+    if (this.mode === MODES.AI_VS_AI) return;
     if (this._isOver() || this._overPopupShown) return;
     // In analyze both sides are human — the resigning side is the one to move.
     const loser = this.mode === MODES.ANALYZE ? this.game.turn() : this.humanSide;
@@ -553,13 +558,19 @@ export class Controller {
     const text = `ยอมแพ้! ฝ่าย${winnerColor}ชนะ`;
     const detail = `ฝ่าย${loser === 'w' ? 'ขาว' : 'ดำ'}ยอมแพ้ (${winnerCode})`;
 
+    // Resignation ends the game: _isOver() must report it so a pending engine
+    // think, a late bestmove, or a human drag can no longer change the board.
+    this._resigned = true;
+    if (this._aiTimer) { clearTimeout(this._aiTimer); this._aiTimer = null; }
     if (this.engine) this.engine.stop();
     if (this.engineBlack) this.engineBlack.stop();
+    this.engineBusy = false;
     if (this.clock) {
       this.clock.stop();
       this._restoreClockDisplay();
     }
     this.ui.setBusy?.(false);
+    this._syncBoard();
 
     this.ui.setStatus(`จบเกม · ${text}`, 'done');
     this.ui.log(`จบเกม: ${text} (${detail})`, 'sys');
@@ -638,10 +649,22 @@ export class Controller {
       if (this.engine) this.engine.setPosition(this.game.fen());
 
       this.ground.cancelPremove?.();
+      const wasTimeout = this._isTimeout;
       // Reset game over locks so checkmate/loss popup re-triggers properly on next end
       this._overPopupShown = false;
       this._isTimeout = false;
+      this._resigned = false;
       this._timeoutLoser = null;
+      // The game continues: a game-over card still waiting for its delay, an
+      // open card or its minimized pill would announce a result that no longer holds.
+      if (this._gameOverDelayTimer) { clearTimeout(this._gameOverDelayTimer); this._gameOverDelayTimer = null; }
+      this._gameOverOverlay?.close();
+      this._gameOverOverlay = null;
+      this._lastGameOver = null;
+      this.ui.dismissGameOverPill?.();
+      // After a flag-fall the loser sits at 0 ms; restart from the times
+      // recorded at the restored position or the clock flags again at once.
+      if (wasTimeout && this.clock) this._restoreClockTimes(this.game.history().length);
 
       this._syncBoard();
       this.ui.log('ย้อนการเดินแล้ว', 'sys');
@@ -986,6 +1009,9 @@ export class Controller {
     } else if (action === 'resume') {
       if (!this.online.restoreSession(roomId)) throw new Error('ไม่พบ session ของห้องนี้ในเบราว์เซอร์');
       this.onlineRoomId = roomId;
+      // A host's saved session carries the invite links, so Share keeps working.
+      this.onlineInviteToken = this.online.session.inviteToken ?? null;
+      this.onlineWatchInviteToken = this.online.session.watchInviteToken ?? null;
       result = { state: this.online.state };
     } else {
       throw new Error('คำสั่งเปิดห้องออนไลน์ไม่ถูกต้อง');
@@ -1407,6 +1433,18 @@ export class Controller {
       this._clockSnapshots.pop();
     }
     this._clockSnapshots.push({ ply, w: this.clock.times.w, b: this.clock.times.b });
+  }
+
+  /** Rewind the clock to the remaining times recorded after `ply` (initial
+   *  times before the first move) and drop the snapshots past it. */
+  _restoreClockTimes(ply) {
+    while (this._clockSnapshots.length && this._clockSnapshots[this._clockSnapshots.length - 1].ply > ply) {
+      this._clockSnapshots.pop();
+    }
+    const snap = this._clockSnapshots.find((s) => s.ply === ply);
+    this.clock.times = snap
+      ? { w: snap.w, b: snap.b }
+      : { w: this.clock.initialMs, b: this.clock.initialMs };
   }
 
   /** Snapshot the finished game into the mode-agnostic GameHistoryRecord
@@ -2383,7 +2421,7 @@ export class Controller {
   }
 
   _isOver() {
-    return this.game.isGameOver() || this._isTimeout;
+    return this.game.isGameOver() || this._isTimeout || this._resigned;
   }
 
   _announceGameOver() {

@@ -462,3 +462,109 @@ test('rematch reset closes the review summary modal (P2)', async () => {
   assert.deepEqual(closed, ['summary', 'progress', 'stepper', 'bar'], 'no dead modals over the new game');
   controller.dispose();
 });
+
+test('offline resignation ends the game: no engine reply, no further moves, AI vs AI cannot resign', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  globalThis.Worker = FakeWorker;
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+
+  const { controller, calls } = makeHarness();
+  t.after(() => controller.dispose());
+  await controller.start(MODES.HUMAN_VS_AI, { color: 'w', level: 4, timeControlId: 'unlimited' });
+  const engineWorker = FakeWorker.latest;
+
+  await controller.handleUserMove('e2', 'e4');
+  assert.ok(controller._aiTimer, 'engine reply is pending in its think delay');
+
+  controller.resign();
+  assert.equal(controller._isOver(), true, 'resignation is a finished game');
+  assert.equal(controller._aiTimer, null, 'pending engine think is cancelled');
+  assert.equal(calls.ground.at(-1).movable.color, false, 'board is locked after resigning');
+  assert.equal(calls.gameOver[0], 'ยอมแพ้! ฝ่ายดำชนะ');
+  assert.match(calls.gameOver[1], /^ฝ่ายขาวยอมแพ้ \(0-1\)/u);
+
+  const fenAfterResign = controller.game.fen();
+  engineWorker.onmessage({ data: 'bestmove e7e5' }); // late reply to the stopped search
+  assert.equal(controller.game.fen(), fenAfterResign, 'a late engine move is not played');
+  await controller.handleUserMove('d2', 'd4');
+  assert.equal(controller.game.fen(), fenAfterResign, 'the human cannot keep moving');
+
+  // A new game clears the resignation.
+  await controller.start(MODES.ANALYZE, {});
+  assert.equal(controller._isOver(), false);
+
+  await controller.start(MODES.AI_VS_AI, { levelWhite: 2, levelBlack: 2, timeControlId: 'unlimited' });
+  calls.gameOver = undefined;
+  controller.resign();
+  assert.equal(controller._isOver(), false, 'nobody resigns in AI vs AI');
+  assert.equal(calls.gameOver, undefined);
+});
+
+test('undo after a game end cancels the pending game-over card and keeps the game playable', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+
+  const { controller, calls } = makeHarness();
+  t.after(() => controller.dispose());
+  controller._gameOverDelayMs = 30;
+  await controller.start(MODES.ANALYZE, {});
+  for (const [from, to] of [['f2', 'f3'], ['e7', 'e5'], ['g2', 'g4'], ['d8', 'h4']]) {
+    await controller.handleUserMove(from, to);
+  }
+  assert.equal(controller.game.isCheckmate(), true);
+  assert.ok(controller._gameOverDelayTimer, 'the result card is waiting for its delay');
+
+  await controller.undo();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(calls.gameOver, undefined, 'no stale result card pops over the resumed game');
+  assert.equal(controller._isOver(), false);
+  assert.equal(controller._lastGameOver, null);
+});
+
+test('undo after a flag-fall restores the clock instead of flagging again', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+
+  const { controller } = makeHarness();
+  t.after(() => controller.dispose());
+  await controller.start(MODES.ANALYZE, { timeControlId: 'bullet_1_0' });
+  await controller.handleUserMove('e2', 'e4');
+  await controller.handleUserMove('e7', 'e5');
+  const afterWhiteMove = { ...controller._clockSnapshots.find((s) => s.ply === 1) };
+
+  controller.clock.times.w = 0; // white's time drains on move 2...
+  controller.clock._tick(); // ...and the next tick flags it
+  assert.equal(controller._isTimeout, true);
+  assert.ok(controller._gameOverOverlay, 'the timeout card is shown');
+
+  await controller.undo();
+  assert.equal(controller._isOver(), false);
+  assert.equal(controller._gameOverOverlay, null, 'the stale card is closed');
+  assert.equal(controller.clock.times.w, afterWhiteMove.w, 'white gets back the time it had at that position');
+  assert.equal(controller.clock.times.b, afterWhiteMove.b);
+  controller.clock._tick();
+  assert.equal(controller._isTimeout, false, 'the restored clock does not flag immediately');
+  assert.deepEqual(controller._clockSnapshots.map((s) => s.ply), [1], 'snapshots past the restored ply are dropped');
+});
+
+test('resuming a hosted room restores the invite links for Share', async () => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  const { controller, client } = makeHarness();
+  // The saved host session, as OnlineRoomClient.restoreSession loads it.
+  client.restoreSession = (roomId) => {
+    client.session = {
+      sessionToken: TOKEN, role: 'host', color: 'w', inviteToken: 'I'.repeat(43), watchInviteToken: 'W'.repeat(43),
+    };
+    return roomId === ROOM_ID;
+  };
+  await controller.start(MODES.ONLINE, { action: 'resume', roomId: ROOM_ID });
+  assert.equal(controller.onlineInviteToken, 'I'.repeat(43));
+  assert.equal(controller.onlineWatchInviteToken, 'W'.repeat(43));
+  controller.dispose();
+});

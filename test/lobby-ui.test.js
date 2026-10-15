@@ -87,3 +87,56 @@ test('failed refresh labels stale cards and disables room actions', async (t) =>
   assert.equal(window.document.activeElement === roomAction, false);
   view.destroy();
 });
+
+test('lobby filters on the server and pages with nextCursor instead of slicing one page', async (t) => {
+  const window = new Window({ url: 'https://chess.example.test/' });
+  t.after(() => window.close());
+  const root = window.document.createElement('div');
+  window.document.body.appendChild(root);
+  const second = { ...room, roomId: 'bbbbbbbbbbbbbbbb', title: 'Older Open Table', host: { name: 'Carol', avatar: 'king' } };
+  const requests = [];
+  const client = {
+    async listLobby(filters) {
+      requests.push({ ...filters });
+      if (filters.cursor === 'page2') return { rooms: [second], nextCursor: null, serverTime: 5_000 };
+      return { rooms: [room], nextCursor: 'page2', serverTime: 5_000 };
+    },
+  };
+  const view = createLobbyView({
+    root,
+    document: window.document,
+    client,
+    profile: { name: 'Guest', avatar: 'rook' },
+    setTimeoutImpl: () => 1,
+    clearTimeoutImpl: () => {},
+  });
+  t.after(() => view.destroy());
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  await view.ready;
+
+  assert.deepEqual(requests, [{ status: 'all', time: 'all', search: '' }]);
+  const loadMore = root.querySelector('.lobby-load-more-btn');
+  assert.equal(loadMore.hidden, false, 'more pages are offered while the server has a cursor');
+  assert.doesNotMatch(root.textContent, /Older Open Table/u);
+
+  loadMore.click();
+  await settle();
+  assert.deepEqual(requests.slice(1), [
+    { status: 'all', time: 'all', search: '' },
+    { status: 'all', time: 'all', search: '', cursor: 'page2' },
+  ]);
+  assert.match(root.textContent, /Older Open Table/u, 'the second server page is shown');
+  assert.equal(loadMore.hidden, true, 'no more pages after the last cursor');
+
+  requests.length = 0;
+  root.querySelector('[data-tab="open"]').click();
+  await settle();
+  assert.deepEqual(requests, [{ status: 'open', time: 'all', search: '' }], 'tab filter goes to the server and restarts paging');
+
+  requests.length = 0;
+  const time = root.querySelector('.lobby-time-filter');
+  time.value = 'blitz';
+  time.dispatchEvent(new window.Event('change'));
+  await settle();
+  assert.deepEqual(requests, [{ status: 'open', time: 'blitz', search: '' }]);
+});

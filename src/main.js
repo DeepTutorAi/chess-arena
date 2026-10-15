@@ -957,7 +957,7 @@ function openOptionsDialog() {
   );
   resignInfo.append(resignIconWrap, resignTextWrap);
 
-  const canResign = !controller._isOver() && controller.mode !== MODES.SPECTATOR && controller.onlineRole !== 'spectator';
+  const canResign = !controller._isOver() && controller.mode !== MODES.AI_VS_AI && controller.onlineRole !== 'spectator';
   const resignBtn = ui.el('button', 'btn danger', 'ยอมแพ้');
   if (!canResign) {
     resignBtn.disabled = true;

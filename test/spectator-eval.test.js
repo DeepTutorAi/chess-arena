@@ -114,9 +114,43 @@ test('hiding the tab pauses the search; showing it resumes', (t) => {
   window.document.dispatchEvent(new window.Event('visibilitychange'));
   assert.ok(worker.messages.includes('stop'), 'hidden tab stops the search');
 
+  // Stockfish answers the stopped search with bestmove; that must not start a
+  // new search while the tab is still hidden.
+  worker.finish(['e2e4'], 30);
+  assert.equal(goCount(), before, 'no search runs while the tab is hidden');
+
   Object.defineProperty(window.document, 'hidden', { value: false, configurable: true });
   window.document.dispatchEvent(new window.Event('visibilitychange'));
-  assert.equal(goCount(), before + 1, 'visible tab restarts the search');
+  assert.equal(goCount(), before + 1, 'visible tab restarts the search on the same position');
+  ev.destroy();
+});
+
+test('a pause keeps the engine busy until the stopped search reports, so searches never overlap', (t) => {
+  const window = setup(t);
+  let fen = FEN_A;
+  const ev = new SpectatorEval({ fenProvider: () => fen });
+  const seen = [];
+  ev.setHandler((result) => seen.push(result));
+  ev.setEnabled(true);
+  const worker = workers.at(-1);
+  const goCount = () => worker.messages.filter((m) => m.startsWith('go ')).length;
+
+  Object.defineProperty(window.document, 'hidden', { value: true, configurable: true });
+  window.document.dispatchEvent(new window.Event('visibilitychange'));
+  Object.defineProperty(window.document, 'hidden', { value: false, configurable: true });
+  window.document.dispatchEvent(new window.Event('visibilitychange'));
+  fen = FEN_B;
+  ev.notifyPosition();
+  assert.equal(goCount(), 1, 'no second go while the stopped search is still running');
+
+  worker.finish(['e2e4'], 30);
+  assert.equal(goCount(), 2, 'the next search starts once the engine is free');
+  assert.equal(worker.messages.at(-2), `position fen ${FEN_B}`);
+
+  ev.setEnabled(false);
+  seen.length = 0;
+  worker.finish(['g1f3'], 10); // late lines from the search stopped by disabling
+  assert.deepEqual(seen, [], 'a disabled session never redraws the bar');
   ev.destroy();
 });
 

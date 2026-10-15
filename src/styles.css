@@ -2210,6 +2210,8 @@ input[type='range'] {
 .lobby-meta-row { display:flex; justify-content:space-between; padding:15px 3px 11px; color:#9f94ac; font-size:12px; }
 .lobby-alert { box-sizing:border-box; margin-bottom:12px; padding:12px 15px; border:1px solid rgba(245,185,88,.38); border-radius:10px; color:#ffe3a7; background:rgba(95,56,15,.3); }
 .lobby-alert[hidden] { display:none; }
+.live-lobby-overlay .lobby-load-more-btn { display:block; width:min(1240px,100%); min-height:42px; margin:16px auto 0; border:1px solid rgba(255,255,255,.13); border-radius:11px; color:#fff; background:rgba(255,255,255,.07); font-weight:900; letter-spacing:.6px; cursor:pointer; }
+.live-lobby-overlay .lobby-load-more-btn[hidden] { display:none; }
 .live-room-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
 .live-room-card { min-width:0; overflow:hidden; padding:18px; border:1px solid rgba(255,255,255,.1); border-radius:18px; background:linear-gradient(145deg,rgba(52,38,69,.9),rgba(25,20,38,.94)); box-shadow:0 16px 44px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.06); }
 .live-room-card.state-join { border-top:3px solid var(--lobby-green); }

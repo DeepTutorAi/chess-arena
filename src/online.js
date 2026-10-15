@@ -16,13 +16,18 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const INVITE_KEYS = ['inviteToken', 'watchInviteToken'];
+
 function validSession(value) {
   return isRecord(value)
     && CAPABILITY_PATTERN.test(value.sessionToken)
     && (
       (['host', 'guest'].includes(value.role) && ['w', 'b'].includes(value.color))
       || (value.role === 'spectator' && value.color === null)
-    );
+    )
+    // Only the host holds invite capabilities (kept so Share survives a reload).
+    && INVITE_KEYS.every((key) => value[key] === undefined
+      || (value.role === 'host' && CAPABILITY_PATTERN.test(value[key])));
 }
 
 function validProfile(value, { nullable = false } = {}) {
@@ -30,6 +35,16 @@ function validProfile(value, { nullable = false } = {}) {
   return isRecord(value)
     && typeof value.name === 'string'
     && Array.from(value.name.trim()).length > 0
+    && Array.from(value.name.trim()).length <= 40
+    && AVATARS.includes(value.avatar);
+}
+
+/** A seat in a state snapshot. While a room is waiting, the server sends the
+ *  unclaimed guest seat as { name: null, avatar: null }. */
+function validSeat(value, { allowEmpty = false } = {}) {
+  if (!isRecord(value) || typeof value.connected !== 'boolean') return false;
+  if (allowEmpty && value.name === null && value.avatar === null) return true;
+  return typeof value.name === 'string'
     && Array.from(value.name.trim()).length <= 40
     && AVATARS.includes(value.avatar);
 }
@@ -197,16 +212,10 @@ export function validateServerMessage(value) {
     || !['w', 'b'].includes(value.turn)
     || !Array.isArray(value.moves)
     || !isRecord(value.players)
-    || !isRecord(value.players.w)
-    || !isRecord(value.players.b)
-    || typeof value.players.w.name !== 'string'
-    || Array.from(value.players.w.name.trim()).length > 40
-    || !AVATARS.includes(value.players.w.avatar)
-    || typeof value.players.b.name !== 'string'
-    || Array.from(value.players.b.name.trim()).length > 40
-    || !AVATARS.includes(value.players.b.avatar)
-    || typeof value.players.w.connected !== 'boolean'
-    || typeof value.players.b.connected !== 'boolean'
+    || !validSeat(value.players.w, { allowEmpty: value.status === 'waiting' })
+    || !validSeat(value.players.b, { allowEmpty: value.status === 'waiting' })
+    // The host seat is always claimed, so at most one seat may be empty.
+    || (value.players.w.name === null && value.players.b.name === null)
     || !Array.isArray(value.spectators)
     || value.spectators.length > 50
     || !value.spectators.every((profile) => validProfile(profile))
@@ -383,6 +392,9 @@ export class OnlineRoomClient {
       role: value.role,
       color: value.color,
     };
+    for (const key of INVITE_KEYS) {
+      if (value.role === 'host' && value[key] !== undefined) session[key] = value[key];
+    }
     if (!ROOM_PATTERN.test(roomId) || !validSession(session)) throw new Error('ข้อมูล session ห้องไม่ถูกต้อง');
     this.roomId = roomId;
     this.session = session;

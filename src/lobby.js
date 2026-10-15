@@ -97,7 +97,13 @@ export function createLobbyView({
     search: '',
     destroyed: false,
     timer: null,
+    searchTimer: null,
     abortController: null,
+    // Server pages currently shown; "load more" raises it and every refresh
+    // re-reads that many pages so auto-refresh never drops loaded rooms.
+    pages: 1,
+    nextCursor: null,
+    generation: 0,
   };
 
   root.className = 'live-lobby-overlay';
@@ -157,6 +163,7 @@ export function createLobbyView({
       state.tab = value;
       for (const other of tabs.querySelectorAll('button')) other.classList.toggle('active', other === button);
       renderRooms();
+      refilter();
     };
     tabs.appendChild(button);
   }
@@ -164,7 +171,14 @@ export function createLobbyView({
   search.type = 'search';
   search.placeholder = 'ค้นหาชื่อห้องหรือเจ้าของ…';
   search.setAttribute('aria-label', 'ค้นหาห้อง');
-  search.oninput = () => { state.search = search.value; renderRooms(); };
+  search.maxLength = 60; // server rejects longer search terms
+  search.oninput = () => {
+    state.search = search.value;
+    renderRooms();
+    // Debounce the server query; local filtering above reacts instantly.
+    if (state.searchTimer !== null) clearTimeoutImpl(state.searchTimer);
+    state.searchTimer = setTimeoutImpl(() => { state.searchTimer = null; refilter(); }, 300);
+  };
   const time = element(document, 'select', 'lobby-time-filter');
   time.setAttribute('aria-label', 'กรองรูปแบบเวลา');
   for (const [value, label] of Object.entries({ all: 'เวลาทั้งหมด', bullet: 'Bullet', blitz: 'Blitz', rapid: 'Rapid', unlimited: 'Unlimited' })) {
@@ -172,7 +186,7 @@ export function createLobbyView({
     option.value = value;
     time.appendChild(option);
   }
-  time.onchange = () => { state.time = time.value; renderRooms(); };
+  time.onchange = () => { state.time = time.value; renderRooms(); refilter(); };
   const refreshButton = element(document, 'button', 'lobby-refresh-btn', '↻ REFRESH');
   refreshButton.type = 'button';
   controls.append(tabs, search, time, refreshButton);
@@ -186,9 +200,16 @@ export function createLobbyView({
   alert.hidden = true;
   const grid = element(document, 'section', 'live-room-grid');
   grid.setAttribute('aria-live', 'polite');
+  const loadMore = element(document, 'button', 'lobby-load-more-btn', 'โหลดห้องเพิ่ม');
+  loadMore.type = 'button';
+  loadMore.hidden = true;
+  loadMore.onclick = () => {
+    state.pages += 1;
+    refresh();
+  };
   const recent = element(document, 'section', 'lobby-recent-section');
 
-  root.append(topbar, hero, controls, meta, alert, grid, recent);
+  root.append(topbar, hero, controls, meta, alert, grid, loadMore, recent);
 
   function renderSkeletons() {
     grid.innerHTML = '';
@@ -283,30 +304,58 @@ export function createLobbyView({
     }
   }
 
+  /** Filters changed: the server filters and paginates, so start over at the
+   *  first page of the new result set. */
+  function refilter() {
+    state.pages = 1;
+    refresh();
+  }
+
   async function refresh() {
     if (state.destroyed) return;
     state.abortController?.abort();
-    state.abortController = new AbortController();
+    const abortController = new AbortController();
+    state.abortController = abortController;
+    const generation = ++state.generation;
     refreshButton.disabled = true;
     alert.hidden = true;
     try {
-      const result = await client.listLobby({ status: 'all', time: 'all', search: '' }, state.abortController.signal);
-      if (state.destroyed) return;
-      state.rooms = result.rooms;
-      state.serverTime = result.serverTime;
+      const filters = { status: state.tab, time: state.time, search: state.search.trim() };
+      const rooms = new Map();
+      let cursor;
+      let serverTime = state.serverTime;
+      for (let page = 0; page < state.pages; page += 1) {
+        const result = await client.listLobby(
+          cursor ? { ...filters, cursor } : filters,
+          abortController.signal,
+        );
+        if (generation !== state.generation || state.destroyed) return;
+        // A room re-sorted between pages may appear twice; keep one card.
+        for (const room of result.rooms) rooms.set(room.roomId, room);
+        serverTime = result.serverTime;
+        cursor = result.nextCursor;
+        if (!cursor) break;
+      }
+      state.rooms = [...rooms.values()];
+      state.serverTime = serverTime;
+      state.nextCursor = cursor ?? null;
       state.stale = false;
     } catch (error) {
-      if (error?.name === 'AbortError' || state.destroyed) return;
+      if (error?.name === 'AbortError' || state.destroyed || generation !== state.generation) return;
       state.stale = state.rooms.length > 0;
       alert.hidden = false;
       alert.textContent = state.stale
         ? 'เชื่อมต่อ Lobby ไม่สำเร็จ — รายการอาจไม่ใช่สถานะล่าสุด กด Refresh เพื่อลองใหม่'
         : 'โหลด Lobby ไม่สำเร็จ กรุณาตรวจการเชื่อมต่อแล้วลองใหม่';
     } finally {
-      state.loading = false;
-      refreshButton.disabled = false;
-      renderRooms();
-      schedule();
+      // A newer refresh owns the view; this superseded one must not touch it.
+      if (generation === state.generation) {
+        state.loading = false;
+        refreshButton.disabled = false;
+        loadMore.hidden = !state.nextCursor || state.stale;
+        renderRooms();
+        schedule();
+      }
     }
   }
 
@@ -343,6 +392,7 @@ export function createLobbyView({
     destroy() {
       state.destroyed = true;
       if (state.timer !== null) clearTimeoutImpl(state.timer);
+      if (state.searchTimer !== null) clearTimeoutImpl(state.searchTimer);
       state.abortController?.abort();
       document.removeEventListener('visibilitychange', onVisibility);
     },

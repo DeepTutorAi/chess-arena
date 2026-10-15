@@ -13,6 +13,7 @@ import {
   validateLobbyResponse,
   validateServerMessage,
 } from '../src/online.js';
+import { createGameState, joinGameState, toPublicState } from '../worker/game-state.js';
 
 const ROOM_ID = 'abcdefgh23456722';
 const TOKEN = 'A'.repeat(43);
@@ -568,4 +569,78 @@ test('validateServerMessage checks the clock subtree shape and tolerates serverT
     serverTime: 2_000,
   });
   assert.deepEqual(validateServerMessage(withClock), { ok: true, value: withClock });
+});
+
+test('validateServerMessage accepts the real waiting-room snapshot from the server', () => {
+  const now = 1_000;
+  const waiting = createGameState({
+    roomId: ROOM_ID,
+    title: 'Friday Blitz',
+    hostName: 'Host',
+    hostAvatar: 'knight',
+    hostColor: 'w',
+    initialFen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    timeControl: null,
+    expiresAt: 99_999,
+  }, now);
+  const snapshot = (state) => ({
+    ...toPublicState(state, { host: true }),
+    spectators: [],
+    spectatorCount: 0,
+    serverTime: now,
+  });
+
+  const waitingSnapshot = snapshot(waiting);
+  assert.deepEqual(waitingSnapshot.players.b, { name: null, avatar: null, connected: false });
+  assert.equal(validateServerMessage(waitingSnapshot).ok, true);
+
+  const joined = joinGameState(waiting, 'Guest', now + 1, 'rook');
+  assert.equal(validateServerMessage(snapshot(joined.state)).ok, true);
+
+  // An empty seat is only legitimate while waiting, and never for both seats.
+  const activeWithEmptySeat = { ...waitingSnapshot, status: 'active' };
+  assert.equal(validateServerMessage(activeWithEmptySeat).ok, false);
+  const bothEmpty = {
+    ...waitingSnapshot,
+    players: { ...waitingSnapshot.players, w: { name: null, avatar: null, connected: false } },
+  };
+  assert.equal(validateServerMessage(bothEmpty).ok, false);
+});
+
+test('a host session keeps its invite links across a reload; other roles cannot carry them', async () => {
+  const storage = memoryStorage();
+  const invite = 'I'.repeat(43);
+  const watchInvite = 'W'.repeat(43);
+  const client = new OnlineRoomClient({
+    apiUrl: 'https://rooms.example.test',
+    storage,
+    async fetchImpl() {
+      return {
+        ok: true,
+        status: 201,
+        async json() {
+          return {
+            roomId: ROOM_ID, sessionToken: TOKEN, inviteToken: invite, watchInviteToken: watchInvite,
+            role: 'host', color: 'w', state: validState(),
+          };
+        },
+      };
+    },
+  });
+  await client.create({ playerName: 'Host' });
+
+  const reloaded = new OnlineRoomClient({ apiUrl: 'https://rooms.example.test', storage });
+  assert.equal(reloaded.restoreSession(ROOM_ID), true);
+  assert.deepEqual(reloaded.session, {
+    sessionToken: TOKEN, role: 'host', color: 'w', inviteToken: invite, watchInviteToken: watchInvite,
+  });
+
+  assert.throws(
+    () => saveRoomSession(storage, ROOM_ID, { sessionToken: TOKEN, role: 'guest', color: 'b', inviteToken: invite }),
+    /Invalid room session/u,
+  );
+  storage.setItem(`chess-arena-online-session:${ROOM_ID}`, JSON.stringify({
+    sessionToken: TOKEN, role: 'host', color: 'w', inviteToken: 'short',
+  }));
+  assert.equal(loadRoomSession(storage, ROOM_ID), null, 'a malformed invite token invalidates the session');
 });

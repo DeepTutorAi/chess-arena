@@ -830,8 +830,13 @@ export class UI {
     return overlay;
   }
 
-  _spawnGameOverPill(title, detail, onNewGame, onHome, onReview, rematch = null, onRestore = null) {
+  /** Remove the minimized game-over pill (e.g. when undo resumes the game). */
+  dismissGameOverPill() {
     document.querySelectorAll('.gameover-pill').forEach((p) => p.remove());
+  }
+
+  _spawnGameOverPill(title, detail, onNewGame, onHome, onReview, rematch = null, onRestore = null) {
+    this.dismissGameOverPill();
     const pill = this.el('button', 'gameover-pill');
     pill.type = 'button';
     pill.setAttribute('aria-label', 'เปิดการ์ดผลการแข่งขัน (ลากเพื่อย้าย)');
