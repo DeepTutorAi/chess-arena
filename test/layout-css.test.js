@@ -34,7 +34,7 @@ test('the move list cannot push the action strip off-screen in single-column lay
 
 test('full-screen lobby ends in a solid colour so the home screen never shows through', () => {
   const rule = css.match(/\.live-lobby-overlay\s*\{[^}]*\}/u)?.[0] ?? '';
-  assert.match(rule, /background:[^;]*,\s*#[0-9a-f]{6};/iu);
+  assert.match(rule, /background:[^;]*,\s*var\(--bg\);/iu);
 });
 
 test('board coordinates scale with the board, respect the 12px floor and stay inside it', () => {
@@ -76,8 +76,8 @@ const RAW_COLOUR = /#[0-9a-f]{3,8}\b|rgba?\(/giu;
 const NON_TOKEN_FONT_SIZE = /font-size:(?!\s*var\()/gu;
 // Measured on styles.css on 2026-10-15; each screen migration lowers these and
 // the cleanup task sets both to 0.
-const COLOUR_BASELINE = 164;
-const FONT_SIZE_BASELINE = 68;
+const COLOUR_BASELINE = 85;
+const FONT_SIZE_BASELINE = 42;
 
 test('components.css uses tokens only', () => {
   assert.equal(readCss('components.css').match(RAW_COLOUR), null);

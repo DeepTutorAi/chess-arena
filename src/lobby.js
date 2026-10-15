@@ -107,7 +107,7 @@ export function createLobbyView({
     failed: false, // the last refresh did not reach the server
   };
 
-  root.className = 'live-lobby-overlay';
+  root.className = 'live-lobby-overlay screen';
   root.style.setProperty('--lobby-hall-url', `url("${new URL('./assets/lobby/night-tournament-hall.webp', document.baseURI).toString()}")`);
   root.innerHTML = '';
   const topbar = element(document, 'header', 'live-lobby-topbar');
@@ -155,7 +155,7 @@ export function createLobbyView({
   hero.append(heroCopy, profilePill);
 
   const controls = element(document, 'section', 'live-lobby-controls');
-  const tabs = element(document, 'div', 'lobby-tabs');
+  const tabs = element(document, 'div', 'lobby-tabs segmented');
   const tabLabels = { all: 'ALL', open: 'OPEN', watch: 'WATCH' };
   for (const [value, label] of Object.entries(tabLabels)) {
     const button = element(document, 'button', `lobby-filter-tab${value === 'all' ? ' active' : ''}`, label);
@@ -272,11 +272,12 @@ export function createLobbyView({
 
     for (const room of visible) {
       const action = roomAction(room);
-      const card = element(document, 'article', `live-room-card state-${action}`);
+      const card = element(document, 'article', `live-room-card card state-${action}`);
       const head = element(document, 'div', 'live-room-card-head');
       const emblem = avatarEmblem(document, room.host.avatar, 'lobby-emblem');
       const heading = element(document, 'div', 'live-room-heading');
-      heading.append(element(document, 'span', 'room-state-label', action === 'join' ? 'OPEN TABLE' : action === 'watch' ? 'LIVE MATCH' : 'UNAVAILABLE'));
+      const stateChip = action === 'join' ? 'chip--accent' : action === 'watch' ? 'chip--info' : 'chip--neutral';
+      heading.append(element(document, 'span', `room-state-label chip ${stateChip}`, action === 'join' ? 'OPEN TABLE' : action === 'watch' ? 'LIVE MATCH' : 'UNAVAILABLE'));
       heading.appendChild(element(document, 'h3', null, room.title));
       head.append(emblem, heading);
       const host = element(document, 'div', 'live-room-host');
@@ -286,10 +287,10 @@ export function createLobbyView({
       host.appendChild(names);
       const facts = element(document, 'div', 'live-room-facts');
       facts.append(
-        element(document, 'span', null, TIME_LABELS[room.timeControlId] ?? room.timeControlId),
-        element(document, 'span', null, room.guest ? '2/2' : '1/2'),
-        element(document, 'span', null, `ผู้ชม ${room.spectatorCount}`),
-        element(document, 'span', null, formatRoomAge(room.createdAt, state.serverTime)),
+        element(document, 'span', 'chip chip--neutral', TIME_LABELS[room.timeControlId] ?? room.timeControlId),
+        element(document, 'span', 'chip chip--neutral', room.guest ? '2/2' : '1/2'),
+        element(document, 'span', 'chip chip--neutral', `ผู้ชม ${room.spectatorCount}`),
+        element(document, 'span', 'chip chip--neutral', formatRoomAge(room.createdAt, state.serverTime)),
       );
       const button = element(document, 'button', `room-action ${action}`, action === 'join' ? 'JOIN' : action === 'watch' ? 'WATCH' : 'UNAVAILABLE');
       button.type = 'button';

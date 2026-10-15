@@ -198,3 +198,17 @@ test('an unreachable or unconfigured server is never shown as an up-to-date empt
   assert.equal(unconfigured.timers(), 0, 'and no polling loop is started');
   assert.equal(unconfigured.root.querySelector('.lobby-refresh-btn').disabled, true);
 });
+
+test('the lobby is a full screen of static room cards with chip labels and a segmented filter', async (t) => {
+  const { root, view } = setup(t);
+  await view.ready;
+  assert.ok(root.classList.contains('screen'), 'opaque full-screen page');
+  const card = root.querySelector('.live-room-card');
+  assert.ok(card.classList.contains('card'), 'room cards use the shared card surface');
+  assert.equal(card.classList.contains('card--interactive'), false, 'the JOIN/WATCH button is the action, not the card');
+  assert.ok(card.querySelector('.room-state-label').classList.contains('chip'));
+  const facts = [...card.querySelectorAll('.live-room-facts > span')];
+  assert.ok(facts.length >= 3 && facts.every((el) => el.classList.contains('chip')));
+  assert.ok(root.querySelector('.lobby-tabs').classList.contains('segmented'));
+  view.destroy();
+});

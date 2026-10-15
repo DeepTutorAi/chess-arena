@@ -280,7 +280,7 @@ function openJoinDialog(prefillInvite = null) {
     return;
   }
   const spectatorInvite = Boolean(prefillInvite.watchInviteToken);
-  const overlay = ui.el('div', 'join-lobby-overlay');
+  const overlay = ui.el('div', 'join-lobby-overlay screen');
   overlay.innerHTML = `
     <div class="lobby-topbar">
       <button class="lobby-back-btn" id="lobby-back-btn">
