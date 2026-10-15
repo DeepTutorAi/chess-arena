@@ -233,3 +233,13 @@ test('a result is coloured from the player side; games without a player stay neu
     'history-result history-result--loss',
   ]);
 });
+
+test('history row actions are full-size shared buttons (40px hit target)', async (t) => {
+  const { document, store } = setup(t);
+  await store.save({ record: record(), source: 'bot' });
+  const view = createHistoryView({ document, store, onOpen() {}, onPgn() {}, onLink() {}, onImport() {} });
+  await sleep();
+  const actions = [...view.querySelectorAll('.history-row .history-row-actions button')];
+  assert.ok(actions.length >= 4);
+  assert.ok(actions.every((b) => b.classList.contains('btn') && !b.classList.contains('sm')));
+});

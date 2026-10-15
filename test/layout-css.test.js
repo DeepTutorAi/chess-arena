@@ -105,3 +105,12 @@ test('player bars are pinned to the board-size formula and clocks use tabular di
   assert.match(styles, /^\.player-bar\s*\{[^}]*height:\s*calc\(var\(--bars-h\) \/ 2\)[^}]*box-sizing:\s*border-box/mu);
   assert.match(styles, /^\.clock-badge\s*\{[^}]*font-variant-numeric:\s*tabular-nums/mu);
 });
+
+test('history actions keep the 40px button height and the import box keeps a focus ring', () => {
+  const styles = readCss('styles.css');
+  const rowBtn = styles.match(/\.history-row-actions \.btn\s*\{[^}]*\}/u)?.[0] ?? '';
+  assert.doesNotMatch(rowBtn, /min-height|height:/u, 'row buttons inherit the shared 40px min-height');
+  assert.match(readCss('components.css'), /^\.btn\s*\{[^}]*min-height:\s*40px/mu);
+  const importFocus = styles.match(/\.import-text:focus[^{]*\{[^}]*\}/u)?.[0] ?? '';
+  assert.doesNotMatch(importFocus, /outline:\s*none/u);
+});

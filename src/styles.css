@@ -1582,7 +1582,7 @@ square.hint-dest {
 
 .import-text:focus {
   border-color: var(--accent);
-  outline: none;
+  box-shadow: var(--ring-focus);
 }
 
 .import-error {
