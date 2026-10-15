@@ -61,15 +61,15 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 8px 24px;
-  background: #181614;
+  background: var(--bg);
   border-bottom: 1px solid var(--line);
   height: 52px;
   flex-shrink: 0;
 }
 
 .brand {
-  font-size: 20px;
-  font-weight: 800;
+  font-size: var(--fs-xl);
+  font-weight: 700;
   font-family: inherit;
   color: inherit;
   background: none;
@@ -115,7 +115,7 @@ body {
   gap: 10px;
   font-family: inherit;
   color: inherit;
-  background: #2b2926;
+  background: var(--surface-2);
   border: 1px solid var(--line);
   padding: 4px 12px;
   border-radius: 999px;
@@ -125,7 +125,7 @@ body {
 
 .profile-badge-placeholder:hover {
   border-color: var(--accent);
-  background: #33302c;
+  background: var(--surface-3);
 }
 
 .user-avatar {
@@ -146,14 +146,14 @@ body {
 }
 
 .user-name {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   line-height: 1.1;
-  color: #ffffff;
+  color: var(--text);
 }
 
 .user-rating {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent);
   font-weight: 600;
   display: inline-flex;
@@ -202,7 +202,7 @@ body {
   width: 100%;
   margin: 0 auto;
   min-height: calc(100 * var(--vh) - 52px);
-  background: linear-gradient(180deg, rgba(24, 22, 20, 0.75) 0%, rgba(24, 22, 20, 0.95) 100%),
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 75%, transparent) 0%, color-mix(in srgb, var(--bg) 95%, transparent) 100%),
     url('./img/park-bg.webp') center/cover no-repeat;
 }
 
@@ -226,20 +226,20 @@ body {
   max-width: 420px;
   width: 90%;
   height: auto;
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.7));
+  filter: drop-shadow(0 10px 20px color-mix(in srgb, var(--bg) 70%, transparent));
   border-radius: 16px;
 }
 
 .park-logo-sub {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--accent);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 3px;
   margin: 12px 0 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
   padding: 4px 16px;
   border-radius: 999px;
-  border: 1px solid rgba(129, 182, 76, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* PARK HERO CARDS (CREATE GAME / JOIN GAME) */
@@ -252,12 +252,12 @@ body {
   margin: 14px auto 0;
   padding: 10px 20px;
   max-width: 100%;
-  background: rgba(38, 36, 33, 0.85);
+  background: color-mix(in srgb, var(--surface-2) 85%, transparent);
   color: var(--text);
   border: 1px solid var(--accent);
   border-radius: 999px;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--fs-md);
   cursor: pointer;
   backdrop-filter: blur(6px);
 }
@@ -288,18 +288,18 @@ body {
 .park-action-card {
   width: 196px;
   height: 206px;
-  background: linear-gradient(160deg, rgba(28, 48, 22, 0.92) 0%, rgba(14, 24, 12, 0.96) 100%);
-  border: 2px solid rgba(129, 182, 76, 0.45);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--on-accent) 92%, transparent) 0%, color-mix(in srgb, var(--on-accent) 96%, transparent) 100%);
+  border: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  color: #ffffff;
+  color: var(--text);
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(129, 182, 76, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--bg) 65%, transparent), 0 0 24px color-mix(in srgb, var(--accent) 22%, transparent), inset 0 1px 1px color-mix(in srgb, var(--text) 20%, transparent);
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(16px);
@@ -309,29 +309,29 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 15%, rgba(129, 182, 76, 0.25), transparent 65%);
+  background: radial-gradient(circle at 50% 15%, color-mix(in srgb, var(--accent) 25%, transparent), transparent 65%);
   pointer-events: none;
 }
 
 .park-action-card:hover {
   transform: translateY(-8px) scale(1.04);
-  border-color: #81b64c;
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.75), 0 0 36px rgba(129, 182, 76, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  border-color: var(--accent);
+  box-shadow: 0 22px 48px color-mix(in srgb, var(--bg) 75%, transparent), 0 0 36px color-mix(in srgb, var(--accent) 50%, transparent), inset 0 1px 2px color-mix(in srgb, var(--text) 40%, transparent);
 }
 
 .park-action-card.join-card {
-  background: linear-gradient(160deg, rgba(18, 32, 48, 0.92) 0%, rgba(10, 18, 28, 0.96) 100%);
-  border-color: rgba(56, 189, 248, 0.45);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 24px rgba(56, 189, 248, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--surface-2) 92%, transparent) 0%, color-mix(in srgb, var(--bg) 96%, transparent) 100%);
+  border-color: color-mix(in srgb, var(--info) 45%, transparent);
+  box-shadow: 0 16px 36px color-mix(in srgb, var(--bg) 65%, transparent), 0 0 24px color-mix(in srgb, var(--info) 20%, transparent), inset 0 1px 1px color-mix(in srgb, var(--text) 20%, transparent);
 }
 
 .park-action-card.join-card::before {
-  background: radial-gradient(circle at 50% 15%, rgba(56, 189, 248, 0.25), transparent 65%);
+  background: radial-gradient(circle at 50% 15%, color-mix(in srgb, var(--info) 25%, transparent), transparent 65%);
 }
 
 .park-action-card.join-card:hover {
-  border-color: #38bdf8;
-  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.75), 0 0 36px rgba(56, 189, 248, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  border-color: var(--info);
+  box-shadow: 0 22px 48px color-mix(in srgb, var(--bg) 75%, transparent), 0 0 36px color-mix(in srgb, var(--info) 50%, transparent), inset 0 1px 2px color-mix(in srgb, var(--text) 40%, transparent);
 }
 
 .park-action-card .card-icon-3d-wrap {
@@ -343,8 +343,8 @@ body {
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+  border: 2px solid color-mix(in srgb, var(--text) 30%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 55%, transparent);
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
@@ -357,28 +357,28 @@ body {
 
 .park-action-card:hover .card-icon-3d-wrap {
   transform: scale(1.08);
-  border-color: #ffffff;
-  box-shadow: 0 0 24px rgba(255, 255, 255, 0.5), 0 12px 28px rgba(0, 0, 0, 0.7);
+  border-color: var(--text);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--text) 50%, transparent), 0 12px 28px color-mix(in srgb, var(--bg) 70%, transparent);
 }
 
 .park-action-card.join-card:hover .card-icon-3d-wrap {
-  border-color: #38bdf8;
-  box-shadow: 0 0 24px rgba(56, 189, 248, 0.55), 0 12px 28px rgba(0, 0, 0, 0.7);
+  border-color: var(--info);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--info) 55%, transparent), 0 12px 28px color-mix(in srgb, var(--bg) 70%, transparent);
 }
 
 .hero-icon-svg {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+  filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--bg) 35%, transparent));
 }
 
 .park-action-card .card-text {
-  font-size: 17px;
-  font-weight: 900;
+  font-size: var(--fs-lg);
+  font-weight: 700;
   letter-spacing: 0.5px;
   text-align: center;
 }
 
 .park-action-card .card-sub {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   opacity: 0.9;
   font-weight: 700;
 }
@@ -1380,46 +1380,14 @@ square.hint-dest {
   width: 100%;
 }
 
+/* Surface, border, hover and focus come from .card.card--interactive. */
 .chesscom-play-card {
   display: flex;
   align-items: center;
-  gap: 16px;
-  background: linear-gradient(135deg, rgba(35, 32, 29, 0.95) 0%, rgba(24, 22, 20, 0.98) 100%);
-  border: 1.5px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  padding: 10px 16px 10px 10px;
-  cursor: pointer;
-  transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-2);
   position: relative;
   overflow: hidden;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-}
-
-.chesscom-play-card:hover {
-  transform: translateX(6px) scale(1.01);
-  background: linear-gradient(135deg, rgba(46, 42, 38, 0.98) 0%, rgba(32, 29, 26, 0.98) 100%);
-  border-color: rgba(255, 255, 255, 0.3);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
-}
-
-.chesscom-play-card.card-online:hover {
-  border-color: #38bdf8;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.25);
-}
-
-.chesscom-play-card.card-hva:hover {
-  border-color: #81b64c;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6), 0 0 20px rgba(129, 182, 76, 0.25);
-}
-
-.chesscom-play-card.card-aiva:hover {
-  border-color: #f59e0b;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6), 0 0 20px rgba(245, 158, 11, 0.25);
-}
-
-.chesscom-play-card.card-sandbox_direct:hover {
-  border-color: #c084fc;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6), 0 0 20px rgba(168, 85, 247, 0.25);
 }
 
 .c-banner-wrap {
@@ -1429,8 +1397,8 @@ square.hint-dest {
   overflow: hidden;
   position: relative;
   flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--bg) 50%, transparent);
 }
 
 .c-banner-img {
@@ -1448,7 +1416,7 @@ square.hint-dest {
 .c-banner-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.5) 100%);
+  background: linear-gradient(180deg, transparent 40%, color-mix(in srgb, var(--bg) 50%, transparent) 100%);
   pointer-events: none;
 }
 
@@ -1467,38 +1435,7 @@ square.hint-dest {
   margin-bottom: 2px;
 }
 
-.c-tag {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.8px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  text-transform: uppercase;
-}
-
-.tag-cyan {
-  background: rgba(56, 189, 248, 0.18);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.4);
-}
-
-.tag-green {
-  background: rgba(129, 182, 76, 0.18);
-  color: #81b64c;
-  border: 1px solid rgba(129, 182, 76, 0.4);
-}
-
-.tag-amber {
-  background: rgba(245, 158, 11, 0.18);
-  color: #f59e0b;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-}
-
-.tag-purple {
-  background: rgba(168, 85, 247, 0.18);
-  color: #c084fc;
-  border: 1px solid rgba(168, 85, 247, 0.4);
-}
+/* Mode tags are .chip.chip--* (components.css). */
 
 .c-arrow {
   display: inline-flex;
@@ -1508,18 +1445,18 @@ square.hint-dest {
 
 .chesscom-play-card:hover .c-arrow {
   transform: translateX(4px);
-  color: #ffffff;
+  color: var(--text);
 }
 
 .chesscom-play-card .c-title {
-  font-size: 15px;
-  font-weight: 800;
-  color: #ffffff;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text);
   line-height: 1.2;
 }
 
 .chesscom-play-card .c-desc {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
   line-height: 1.35;
   /* Two lines fit every mode description; one line cut most of them off. */
@@ -1535,7 +1472,7 @@ square.hint-dest {
   border: none;
   color: var(--accent);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 700;
   padding: 0;
   text-align: left;
@@ -1551,7 +1488,7 @@ square.hint-dest {
 .dlg-hint {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
@@ -1569,7 +1506,7 @@ square.hint-dest {
   border: 1px solid var(--line);
   border-radius: 999px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1621,7 +1558,7 @@ square.hint-dest {
   justify-content: space-between;
   gap: 10px;
   font-weight: 700;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 .history-result {
@@ -1635,7 +1572,7 @@ square.hint-dest {
 
 .history-sub {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .history-row-actions {
@@ -1647,7 +1584,7 @@ square.hint-dest {
 
 .history-row-actions .btn {
   padding: 5px 12px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .import-text {
@@ -1689,14 +1626,14 @@ square.hint-dest {
 }
 
 .profile-rating-value {
-  font-size: 40px;
-  font-weight: 800;
+  font-size: var(--fs-display);
+  font-weight: 700;
   line-height: 1;
   color: var(--accent);
 }
 
 .profile-rating-label {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
@@ -1716,11 +1653,11 @@ square.hint-dest {
 }
 
 .profile-total b {
-  font-size: 18px;
+  font-size: var(--fs-lg);
 }
 
 .profile-total span {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
@@ -1732,7 +1669,7 @@ square.hint-dest {
 
 .profile-heading {
   margin: 0 0 6px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--muted);
 }
@@ -1743,7 +1680,7 @@ square.hint-dest {
   gap: 12px;
   padding: 6px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .profile-level-score {
@@ -1765,7 +1702,7 @@ square.hint-dest {
 .profile-chip {
   padding: 3px 9px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   background: var(--panel-2);
 }
@@ -1773,33 +1710,7 @@ square.hint-dest {
 .profile-chip.result-win { color: var(--accent); }
 .profile-chip.result-loss { color: var(--red); }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.field-label {
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.field input[type='text'],
-.field input[type='password'],
-.field select,
-.field input:not([type]) {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: #ffffff;
-  padding: 9px 12px;
-  font-size: 14px;
-  width: 100%;
-}
-
-.field input:focus {
-  border-color: var(--accent);
-}
+/* .field, .field-label and field controls live in components.css. */
 
 input[type='range'] {
   width: 100%;
@@ -1826,9 +1737,10 @@ input[type='range'] {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 999px;
+  min-height: 40px;
   padding: 6px 12px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   transition: all 0.15s ease;
 }
 
@@ -1843,7 +1755,7 @@ input[type='range'] {
 .pill:has(input:checked) {
   border-color: var(--accent);
   color: var(--accent);
-  background: rgba(129, 182, 76, 0.12);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .dlg-actions {

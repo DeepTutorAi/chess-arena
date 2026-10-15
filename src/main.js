@@ -451,7 +451,7 @@ function openModeDialog(targetMode = null, { level = null, onBack = null, backLa
         mode: MODES.ONLINE,
         banner: './assets/banners/banner_online.webp',
         tag: 'PVP ONLINE',
-        tagClass: 'tag-cyan',
+        tagClass: 'chip--info',
         title: 'Play Online (ผู้เล่นสองคน)',
         desc: 'สร้างห้อง ส่งลิงก์เชิญ และเล่นผ่านเซิร์ฟเวอร์แบบเรียลไทม์',
       },
@@ -459,7 +459,7 @@ function openModeDialog(targetMode = null, { level = null, onBack = null, backLa
         mode: MODES.HUMAN_VS_AI,
         banner: './assets/banners/banner_bots.webp',
         tag: 'SOLO VS BOT',
-        tagClass: 'tag-green',
+        tagClass: 'chip--accent',
         title: 'Play Bots (เล่น vs Stockfish 18)',
         desc: `ท้าดวล AI 11 ระดับ (Elo ${LEVELS[0].elo} - ${LEVELS[LEVELS.length - 1].elo}) พร้อมเรตติ้งของคุณ`,
       },
@@ -467,7 +467,7 @@ function openModeDialog(targetMode = null, { level = null, onBack = null, backLa
         mode: MODES.AI_VS_AI,
         banner: './assets/banners/banner_arena.webp',
         tag: 'AI ARENA',
-        tagClass: 'tag-amber',
+        tagClass: 'chip--gold',
         title: 'AI vs AI Arena (ชมการประลองสด)',
         desc: 'เปิดสนามประลอง Stockfish ปะทะ Stockfish เต็มอัตราศึก',
       },
@@ -475,14 +475,14 @@ function openModeDialog(targetMode = null, { level = null, onBack = null, backLa
         mode: 'sandbox_direct',
         banner: './assets/banners/banner_sandbox.webp',
         tag: 'BOARD EDITOR',
-        tagClass: 'tag-purple',
+        tagClass: 'chip--neutral',
         title: 'Sandbox (กระดานทดลอง / จัดวางหมาก)',
         desc: 'ปรับแต่งตัวหมาก ออกแบบตำแหน่งหมากรุกตามจินตนาการ',
       },
     ];
 
     for (const opt of options) {
-      const card = ui.el('div', `chesscom-play-card card-${opt.mode}`);
+      const card = ui.el('div', `chesscom-play-card card card--interactive card-${opt.mode}`);
       card.innerHTML = `
         <div class="c-banner-wrap">
           <img src="${opt.banner}" alt="" class="c-banner-img" width="360" height="240" loading="lazy" decoding="async" />
@@ -490,7 +490,7 @@ function openModeDialog(targetMode = null, { level = null, onBack = null, backLa
         </div>
         <div class="c-body">
           <div class="c-header-row">
-            <span class="c-tag ${opt.tagClass}">${opt.tag}</span>
+            <span class="chip ${opt.tagClass}">${opt.tag}</span>
             <span class="c-arrow">${iconArrowRight({ size: 16 })}</span>
           </div>
           <div class="c-title">${opt.title}</div>
