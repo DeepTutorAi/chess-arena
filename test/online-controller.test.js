@@ -79,6 +79,7 @@ function makeHarness() {
     renderMoves(moves) { calls.renderedMoves = moves; },
     setPlayers(top, bottom) { calls.players = [top, bottom]; },
     setAfkWarning(value) { calls.afk = value; },
+    setStatus(text, tone) { calls.status = [text, tone]; },
     setActionStrip(opts) { calls.actionStrip.push(opts); },
     showGameOver(title, detail, onNewGame, onHome, onReview, rematch, onRestore, outcome) {
       calls.gameOver = [title, detail];
@@ -624,4 +625,47 @@ test('the game-over card is coloured from the player side: loss, win, or neutral
   });
   controller._onOnlineState(stateAfter(['e2e4'], { status: 'finished', result: '1-0', reason: 'resignation' }));
   assert.equal(calls.gameOverOutcome, 'win', 'the white host won 1-0');
+});
+
+test('the status bar tone follows the game from the player side', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  globalThis.Worker = FakeWorker;
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+
+  const bot = makeHarness();
+  t.after(() => bot.controller.dispose());
+  await bot.controller.start(MODES.HUMAN_VS_AI, { color: 'w', level: 4, timeControlId: 'unlimited' });
+  await bot.controller.handleUserMove('e2', 'e4');
+  assert.equal(bot.calls.status[1], 'thinking', 'the engine is thinking');
+  bot.controller.resign();
+  assert.equal(bot.calls.status[1], 'loss', 'resigning shows the loss tone');
+
+  const host = makeHarness();
+  t.after(() => host.controller.dispose());
+  await host.controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  // The connect message replaces the status once; the next snapshot restores it.
+  host.controller._onOnlineState(stateAfter([]));
+  assert.equal(host.calls.status[1], 'turn', 'the white host moves first');
+  host.controller._onOnlineState(stateAfter(['e2e4'], { status: 'finished', result: '1-0', reason: 'resignation' }));
+  assert.equal(host.calls.status[1], 'win');
+
+  const drawn = makeHarness();
+  t.after(() => drawn.controller.dispose());
+  await drawn.controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  drawn.controller._onOnlineState(stateAfter(['e2e4'], { status: 'finished', result: '1/2-1/2', reason: 'agreement' }));
+  assert.equal(drawn.calls.status[1], 'draw');
+
+  const sandbox = makeHarness();
+  t.after(() => sandbox.controller.dispose());
+  await sandbox.controller.start(MODES.ANALYZE, {});
+  for (const [from, to] of [['f2', 'f3'], ['e7', 'e5'], ['g2', 'g4'], ['d8', 'h4']]) {
+    await sandbox.controller.handleUserMove(from, to);
+  }
+  assert.equal(sandbox.calls.status[1], '', 'nobody plays from this screen, so no outcome tone');
 });

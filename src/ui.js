@@ -622,8 +622,9 @@ export class UI {
   }
 
   // ---- status pill -------------------------------------------------------
-  setStatus(text, cls = '') {
-    this.refs.status.className = `status-bar ${cls}`;
+  /** tone: '' | 'turn' | 'thinking' | 'win' | 'loss' | 'draw' | 'warn' | 'error' */
+  setStatus(text, tone = '') {
+    this.refs.status.className = tone ? `status-bar tone-${tone}` : 'status-bar';
     this.refs.status.textContent = text;
     this.refs.status.setAttribute('role', 'status');
   }

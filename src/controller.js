@@ -400,7 +400,7 @@ export class Controller {
     } catch (err) {
       const msg = err.message ?? '';
       const hint = /king/i.test(msg) ? ' — ต้องมี King ครบทั้งสองฝ่าย' : ' — กระดานนี้ไม่ถูกต้องตามกฎหมากรุก';
-      this.ui.log(`กระดานยังไม่ถูกต้อง: ${msg}${hint}`, 'err');
+      this.ui.log(`กระดานยังไม่ถูกต้อง: ${msg}${hint}`, 'error');
       return;
     }
 
@@ -459,7 +459,7 @@ export class Controller {
     } catch (err) {
       // Game failed to start (e.g. network) — return to the editor with the
       // custom board intact so the user can retry.
-      this.ui.log(`เริ่มเกมล้มเหลว: ${err.message}`, 'err');
+      this.ui.log(`เริ่มเกมล้มเหลว: ${err.message}`, 'error');
       this.startSandboxSetup({ initialFen: cleanFen });
     }
   }
@@ -522,7 +522,7 @@ export class Controller {
     // movable config and could keep dragging pieces after the flag.
     this._syncBoard();
 
-    this.ui.setStatus(`จบเกม · ${text}`, 'done');
+    this.ui.setStatus(`จบเกม · ${text}`, this._viewerOutcome(winnerCode) ?? '');
     this.ui.setPlayerDone(loser === 'w' ? 'bottom' : 'top');
     this.ui.log(`จบเกม: ${text} (${detail})`, 'sys');
 
@@ -544,7 +544,7 @@ export class Controller {
         this.online.resign(this.onlineState.revision);
         this.ui.log('ส่งคำขอยอมแพ้แล้ว — รอเซิร์ฟเวอร์ยืนยัน', 'sys');
       } catch (err) {
-        this.ui.log(`ยอมแพ้ไม่สำเร็จ: ${err.message}`, 'err');
+        this.ui.log(`ยอมแพ้ไม่สำเร็จ: ${err.message}`, 'error');
       }
       return;
     }
@@ -572,7 +572,7 @@ export class Controller {
     this.ui.setBusy?.(false);
     this._syncBoard();
 
-    this.ui.setStatus(`จบเกม · ${text}`, 'done');
+    this.ui.setStatus(`จบเกม · ${text}`, this._viewerOutcome(winnerCode) ?? '');
     this.ui.log(`จบเกม: ${text} (${detail})`, 'sys');
 
     if (!this._overPopupShown) {
@@ -617,7 +617,7 @@ export class Controller {
         this.online.sendMove(orig, dest, promotion, this.onlineState.revision);
         this.ui.log(`ส่งตาเดิน ${orig}${dest}${promotion ?? ''} — รอเซิร์ฟเวอร์ยืนยัน`, 'sys');
       } catch (err) {
-        this.ui.log(`ส่งตาเดินไม่สำเร็จ: ${err.message}`, 'err');
+        this.ui.log(`ส่งตาเดินไม่สำเร็จ: ${err.message}`, 'error');
       }
       // Chessground already animated the drop. Snap it back to the last
       // canonical snapshot until the server accepts and broadcasts the move.
@@ -732,7 +732,7 @@ export class Controller {
     } else {
       if (!this._isOver()) this.clock?.start(this.game.turn());
       this.ui.setPauseState(false);
-      this.ui.setStatus(`AI (${this.game.turn() === 'w' ? 'ขาว' : 'ดำ'}) กำลังคิด…`, 'busy');
+      this.ui.setStatus(`AI (${this.game.turn() === 'w' ? 'ขาว' : 'ดำ'}) กำลังคิด…`, 'thinking');
       this._maybeStartAiLoop();
     }
   }
@@ -830,7 +830,7 @@ export class Controller {
     );
     // The WASM download is several MB on first load — say so instead of a
     // silent gap between the dialog closing and the engine's first move.
-    this.ui.setStatus(`กำลังโหลดเอนจิน ${ENGINE_NAME}…`, 'busy');
+    this.ui.setStatus(`กำลังโหลดเอนจิน ${ENGINE_NAME}…`, 'thinking');
     this.ui.setActionStrip({ undo: true, resign: false, flip: true, pause: false, hint: true, liveAnalysis: false, options: true });
 
     this.engine = new Stockfish({
@@ -858,9 +858,9 @@ export class Controller {
       },
       onBestMove: (uci, info, lines, searchedFen) => this._onEngineBestMove(uci, lines, searchedFen),
       onError: (msg) => {
-        this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'err');
+        this.ui.log(`เอนจินผิดพลาด: ${msg}`, 'error');
         if (!this.engineReady) {
-          this.ui.setStatus('โหลดเอนจินไม่สำเร็จ — กลับหน้าแรกแล้วเริ่มเกมใหม่อีกครั้ง', 'err');
+          this.ui.setStatus('โหลดเอนจินไม่สำเร็จ — กลับหน้าแรกแล้วเริ่มเกมใหม่อีกครั้ง', 'error');
         }
       },
     });
@@ -918,8 +918,8 @@ export class Controller {
       onReady: () => onWorkerReady('w'),
       onBestMove: (uci) => this._onAiLoopMove('w', uci),
       onError: (msg) => {
-        this.ui.log(`เอนจินขาวผิดพลาด: ${msg}`, 'err');
-        this.ui.setStatus('เอนจินฝ่ายขาวล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'err');
+        this.ui.log(`เอนจินขาวผิดพลาด: ${msg}`, 'error');
+        this.ui.setStatus('เอนจินฝ่ายขาวล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'error');
       },
     });
 
@@ -928,8 +928,8 @@ export class Controller {
       onReady: () => onWorkerReady('b'),
       onBestMove: (uci) => this._onAiLoopMove('b', uci),
       onError: (msg) => {
-        this.ui.log(`เอนจินดำผิดพลาด: ${msg}`, 'err');
-        this.ui.setStatus('เอนจินฝ่ายดำล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'err');
+        this.ui.log(`เอนจินดำผิดพลาด: ${msg}`, 'error');
+        this.ui.setStatus('เอนจินฝ่ายดำล้มเหลว — การประลองเริ่มไม่ได้ ลองเริ่มเกมใหม่', 'error');
       },
     });
 
@@ -966,7 +966,7 @@ export class Controller {
     this.online = this.onlineClientFactory({
       onState: (state) => this._onOnlineState(state),
       onError: (message, detail) => {
-        this.ui.log(`Online: ${message}`, 'err');
+        this.ui.log(`Online: ${message}`, 'error');
         if (detail?.code === 'stale_revision') this.online?.sync();
         // A refused draw / takeback / abort is the player's to know about, not just a log line.
         if (OFFER_ERROR_CODES.has(detail?.code)) {
@@ -979,10 +979,10 @@ export class Controller {
           this.ui.setStatus('เชื่อมต่อห้องออนไลน์แล้ว', '');
           if (this.onlineState) this._syncBoard();
         }
-        else if (state === 'reconnecting') this.ui.setStatus('การเชื่อมต่อขาดหาย — กำลังเชื่อมต่อใหม่…', 'busy');
-        else if (state === 'failed') this.ui.setStatus('เชื่อมต่อห้องไม่ได้ — กลับมาที่แท็บนี้เมื่อเน็ตกลับมาเพื่อลองใหม่อัตโนมัติ', 'err');
+        else if (state === 'reconnecting') this.ui.setStatus('การเชื่อมต่อขาดหาย — กำลังเชื่อมต่อใหม่…', 'warn');
+        else if (state === 'failed') this.ui.setStatus('เชื่อมต่อห้องไม่ได้ — กลับมาที่แท็บนี้เมื่อเน็ตกลับมาเพื่อลองใหม่อัตโนมัติ', 'error');
         else if (state === 'replaced') this.ui.setStatus('ห้องนี้ถูกเปิดจากแท็บอื่น — การเชื่อมต่อแท็บนี้ถูกแทนที่', '');
-        else if (state === 'unauthorized') this.ui.setStatus('session หมดอายุหรือไม่ถูกต้อง — กลับเข้าห้องจาก Lobby หรือลิงก์เชิญอีกครั้ง', 'err');
+        else if (state === 'unauthorized') this.ui.setStatus('session หมดอายุหรือไม่ถูกต้อง — กลับเข้าห้องจาก Lobby หรือลิงก์เชิญอีกครั้ง', 'error');
         else if (state === 'expired') this.ui.setStatus('ห้องนี้หมดอายุแล้ว', '');
       },
     });
@@ -1055,7 +1055,7 @@ export class Controller {
       if (game.fen() !== state.fen) throw new Error('FEN ไม่ตรงกับประวัติการเดิน');
       this.game = game;
     } catch (err) {
-      this.ui.log(`Online snapshot ถูกปฏิเสธ: ${err.message}`, 'err');
+      this.ui.log(`Online snapshot ถูกปฏิเสธ: ${err.message}`, 'error');
       return;
     }
 
@@ -1141,12 +1141,12 @@ export class Controller {
     this._renderOnlineAfk(state);
 
     if (state.status === 'waiting') {
-      this.ui.setStatus(this.onlineRole === 'spectator' ? 'กำลังชมโต๊ะที่รอผู้เล่น' : 'ห้องพร้อมแล้ว — รอผู้เล่นจาก Lobby', 'busy');
+      this.ui.setStatus(this.onlineRole === 'spectator' ? 'กำลังชมโต๊ะที่รอผู้เล่น' : 'ห้องพร้อมแล้ว — รอผู้เล่นจาก Lobby', 'thinking');
     } else if (state.status === 'active') {
-      if (this.onlineRole === 'spectator') this.ui.setStatus('กำลังรับชมการแข่งขันแบบสด', 'busy');
+      if (this.onlineRole === 'spectator') this.ui.setStatus('กำลังรับชมการแข่งขันแบบสด', 'thinking');
       else this.ui.setStatus(
           state.turn === this.onlineSide ? 'ถึงตาของคุณ' : 'รอคู่แข่งเดิน…',
-          state.turn === this.onlineSide ? '' : 'busy',
+          state.turn === this.onlineSide ? 'turn' : 'thinking',
         );
     } else {
       this._announceOnlineResult(state);
@@ -1219,7 +1219,7 @@ export class Controller {
     try {
       this.online[method](this.onlineState.revision);
     } catch (err) {
-      this.ui.log(`ส่งคำสั่งไม่สำเร็จ: ${err.message}`, 'err');
+      this.ui.log(`ส่งคำสั่งไม่สำเร็จ: ${err.message}`, 'error');
       return false;
     }
     return true;
@@ -1406,7 +1406,7 @@ export class Controller {
       unlimited_afk_strikes: 'AFK ครบ 3 ครั้ง',
     };
     const detail = aborted ? reasons.aborted : `${reasons[state.reason] ?? 'เกมจบแล้ว'} (${state.result})`;
-    this.ui.setStatus(`จบเกม · ${title}`, 'done');
+    this.ui.setStatus(`จบเกม · ${title}`, this._viewerOutcome(state.result) ?? '');
     this.ui.log(`จบเกมออนไลน์: ${title} — ${detail}`, 'sys');
     this.turnAlert?.notify(`จบเกม · ${title}`);
 
@@ -1756,7 +1756,7 @@ export class Controller {
       engine_timeout: 'เอนจินวิเคราะห์ไม่ตอบสนอง — ลองใหม่อีกครั้ง',
     };
     const detail = known[err?.message] ?? `เกิดข้อผิดพลาดระหว่างวิเคราะห์: ${err?.message ?? 'ไม่ทราบสาเหตุ'}`;
-    this.ui.log(`รีวิวล้มเหลว: ${detail}`, 'err');
+    this.ui.log(`รีวิวล้มเหลว: ${detail}`, 'error');
     this._reshowGameOver();
     this.ui.showFloatingToast?.({
       title: 'รีวิวเกมไม่สำเร็จ',
@@ -2184,7 +2184,7 @@ export class Controller {
       this._engineTurn();
     } else if (this.mode === MODES.HUMAN_VS_AI) {
       // The engine's "thinking…" status must not outlive its move.
-      this.ui.setStatus('ถึงตาของคุณ', '');
+      this.ui.setStatus('ถึงตาของคุณ', 'turn');
       this.turnAlert?.notify('ถึงตาคุณ');
     } else if (this.mode === MODES.AI_VS_AI) {
       this._maybeStartAiLoop();
@@ -2239,7 +2239,7 @@ export class Controller {
     if (!this.engine || !this.engineReady || this.engineBusy || this._isOver()) return;
     this.engineBusy = true;
     this.ui.setBusy?.(true);
-    this.ui.setStatus('เอนจินกำลังคิด…', 'busy');
+    this.ui.setStatus('เอนจินกำลังคิด…', 'thinking');
     const cfg = LEVELS[this.levelIndex];
     // The level's own movetime is the search ceiling: kept in full whenever the
     // clock affords it (so strength doesn't change with the time control) and
@@ -2304,7 +2304,7 @@ export class Controller {
     const promotion = uci.length > 4 ? uci[4] : undefined;
     const move = this.game.move({ from: orig, to: dest, promotion });
     if (!move) {
-      this.ui.log(`เอนจินส่งการเดินผิดกฎ: ${uci}`, 'err');
+      this.ui.log(`เอนจินส่งการเดินผิดกฎ: ${uci}`, 'error');
       return;
     }
     this.ui.log(`${this.botStyle === 'standard' ? 'Stockfish' : 'บอท'} เดิน ${move.san}`, 'engine');
@@ -2319,7 +2319,7 @@ export class Controller {
     if (!uci) {
       // Stockfish answers (none) for illegal/custom positions — don't stall silently.
       if (!this._isOver()) {
-        this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}): กระดานไม่ถูกต้อง — เอนจินไม่มีหมากให้เดิน`, 'err');
+        this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}): กระดานไม่ถูกต้อง — เอนจินไม่มีหมากให้เดิน`, 'error');
       }
       return;
     }
@@ -2329,7 +2329,7 @@ export class Controller {
     const promotion = uci.length > 4 ? uci[4] : undefined;
     const move = this.game.move({ from: orig, to: dest, promotion });
     if (!move) {
-      this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}) ส่งการเดินผิดกฎ: ${uci}`, 'err');
+      this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}) ส่งการเดินผิดกฎ: ${uci}`, 'error');
       return;
     }
     this.ui.log(`AI (${side === 'w' ? 'ขาว' : 'ดำ'}) เดิน ${move.san}`, 'engine');
@@ -2347,7 +2347,7 @@ export class Controller {
     this.hintBusy = true;
     this._assisted = true;
     this.ui.setBusy?.(true);
-    this.ui.setStatus('บอท GM กำลังคิดคำใบ้…', 'busy');
+    this.ui.setStatus('บอท GM กำลังคิดคำใบ้…', 'thinking');
     if (!this.hintEngine) {
       this.hintEngine = new Stockfish({
         workerUrl: getStrongEnginePreference() && isCrossOriginIsolated() ? ENGINE_MULTI_URL : ENGINE_HINT_URL,
@@ -2374,7 +2374,7 @@ export class Controller {
     if (this._hintTimer) { clearTimeout(this._hintTimer); this._hintTimer = null; }
     if (this.hintEngine) { this.hintEngine.quit(); this.hintEngine = null; }
     this.ui.setBusy?.(false);
-    this.ui.log(logMessage, 'err');
+    this.ui.log(logMessage, 'error');
     this.ui.setStatus('คำใบ้ใช้ไม่ได้ตอนนี้ — ลองอีกครั้ง', '');
   }
 
@@ -2423,7 +2423,7 @@ export class Controller {
     this.ui.setBusy?.(true);
     const { delay, search } = this._thinkTime();
     const cfg = turn === 'w' ? LEVELS[this.aivaLevelW] : LEVELS[this.aivaLevelB];
-    this.ui.setStatus(`AI (${turn === 'w' ? 'ขาว' : 'ดำ'}) กำลังคิด…`, 'busy');
+    this.ui.setStatus(`AI (${turn === 'w' ? 'ขาว' : 'ดำ'}) กำลังคิด…`, 'thinking');
     const fen = this.game.fen();
     this._aiTimer = setTimeout(() => {
       if (this._isOver() || !activeEngine || !this.engineReady) return;
@@ -2468,7 +2468,8 @@ export class Controller {
         : this.game.isStalemate() ? 'stalemate' : 'draw',
     });
 
-    this.ui.setStatus(`จบเกม · ${title}`, 'done');
+    // The record captured just above carries the final result.
+    this.ui.setStatus(`จบเกม · ${title}`, this._viewerOutcome(this._lastGameRecord?.result) ?? '');
     this.ui.log(`จบเกม: ${title} (${detail})`, 'sys');
 
     if (!this._overPopupShown) {
@@ -2532,7 +2533,7 @@ export class Controller {
         if (!replayed.move({ from: mv.from, to: mv.to, promotion: mv.promotion || undefined })) throw new Error('illegal');
       }
     } catch {
-      this.ui.log('เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา', 'err');
+      this.ui.log('เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา', 'error');
       return { ok: false, error: 'เกมนี้เปิดไม่ได้: มีตาเดินที่ผิดกติกา' };
     }
     await this.start(MODES.ANALYZE, { initialFen: record.initialFen || undefined });

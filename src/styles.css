@@ -627,21 +627,7 @@ square.hint-dest {
 
 /* States passed by controller.setStatus: engine thinking / game decided /
    recoverable failure. */
-.status-bar.busy {
-  color: var(--amber);
-  border-color: rgba(245, 158, 11, 0.35);
-}
-
-.status-bar.done {
-  color: var(--accent);
-  border-color: rgba(129, 182, 76, 0.45);
-  font-weight: 700;
-}
-
-.status-bar.err {
-  color: var(--red);
-  border-color: rgba(250, 65, 65, 0.45);
-}
+/* Status tones (.tone-*) live in components.css. */
 
 /* ---- SIDEBAR (CHESS.COM RIGHT SIDE) ---- */
 
