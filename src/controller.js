@@ -1885,6 +1885,7 @@ export class Controller {
     this._reviewDisconnectNotified = true;
     const name = state.players[disconnected[0]]?.name || 'คู่แข่ง';
     this.ui.showFloatingToast({
+      tone: 'warn',
       title: `${name} ออกจากห้องแล้ว`,
       detail: 'คุณรีวิวเกมต่อได้ตามปกติ — ประวัติการเดินถูกเก็บไว้ในเครื่องแล้ว',
       actions: [['รู้แล้ว', () => {}]],

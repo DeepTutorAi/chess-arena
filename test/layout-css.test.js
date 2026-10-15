@@ -76,8 +76,8 @@ const RAW_COLOUR = /#[0-9a-f]{3,8}\b|rgba?\(/giu;
 const NON_TOKEN_FONT_SIZE = /font-size:(?!\s*var\()/gu;
 // Measured on styles.css on 2026-10-15; each screen migration lowers these and
 // the cleanup task sets both to 0.
-const COLOUR_BASELINE = 181;
-const FONT_SIZE_BASELINE = 78;
+const COLOUR_BASELINE = 164;
+const FONT_SIZE_BASELINE = 68;
 
 test('components.css uses tokens only', () => {
   assert.equal(readCss('components.css').match(RAW_COLOUR), null);

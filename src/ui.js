@@ -798,10 +798,10 @@ export class UI {
   confirm({ title, message, confirmLabel, cancelLabel = 'ยกเลิก', danger = false, onConfirm }) {
     const body = this.el('div', 'confirm-dialog');
     body.appendChild(this.el('p', 'dlg-hint', message));
-    const row = this.el('div', 'dlg-actions');
+    const row = this.el('div', 'modal-actions');
     const cancel = this.el('button', 'btn', cancelLabel);
     cancel.type = 'button';
-    const confirm = this.el('button', danger ? 'btn primary danger' : 'btn primary', confirmLabel);
+    const confirm = this.el('button', danger ? 'btn danger' : 'btn primary', confirmLabel);
     confirm.type = 'button';
     row.append(cancel, confirm);
     body.appendChild(row);
@@ -824,7 +824,7 @@ export class UI {
     if (outcome) big.classList.add(`gameover-title--${outcome}`);
     const sub = this.el('div', 'gameover-detail', detail);
     body.append(big, sub);
-    const row = this.el('div', 'dlg-actions');
+    const row = this.el('div', 'dlg-actions modal-actions');
 
     // Online rematch (roadmap B) — the card is the handshake surface.
     if (rematch?.mode === 'accept') {
@@ -963,9 +963,9 @@ export class UI {
    *  (opponent disconnect, future rematch offers). Never covers the board. */
   /** channel: toasts replace only others in their own channel, so a pending
    *  question (channel "offer") is not wiped by an unrelated notice. */
-  showFloatingToast({ title, detail = '', actions = [], autoCloseMs = 0, channel = 'default' } = {}) {
+  showFloatingToast({ title, detail = '', actions = [], autoCloseMs = 0, channel = 'default', tone = 'info' } = {}) {
     document.querySelectorAll('.floating-toast').forEach((t) => { if (t.dataset.channel === channel) t.remove(); });
-    const toast = this.el('div', 'floating-toast');
+    const toast = this.el('div', `floating-toast toast toast--${tone}`);
     toast.dataset.channel = channel;
     toast.setAttribute('role', 'status');
     toast.append(

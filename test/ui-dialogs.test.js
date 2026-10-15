@@ -114,3 +114,22 @@ test('openModal reports every way it closes exactly once', (t) => {
   modal.close();
   assert.equal(closed, 1, 'Escape closes and reports once; a later close() is a no-op');
 });
+
+test('confirmations put their buttons in the sticky action bar; danger is outlined, not primary', (t) => {
+  const { ui } = setup(t);
+  ui.confirm({ title: 'T', message: 'M', confirmLabel: 'ยอมแพ้', cancelLabel: 'เล่นต่อ', danger: true, onConfirm() {} });
+  const actions = document.querySelector('.confirm-dialog .modal-actions');
+  assert.ok(actions, 'buttons live in .modal-actions');
+  const danger = [...actions.querySelectorAll('button')].find((b) => b.textContent === 'ยอมแพ้');
+  assert.ok(danger.classList.contains('btn') && danger.classList.contains('danger'));
+  assert.equal(danger.classList.contains('primary'), false);
+});
+
+test('a toast takes a tone and defaults to info', (t) => {
+  const { ui } = setup(t);
+  const warn = ui.showFloatingToast({ title: 'Bob ออกจากห้องแล้ว', tone: 'warn', channel: 'a' });
+  assert.ok(warn.classList.contains('toast') && warn.classList.contains('toast--warn'));
+  const info = ui.showFloatingToast({ title: 'ส่งข้อเสนอเสมอแล้ว', channel: 'b' });
+  assert.ok(info.classList.contains('toast--info'));
+  assert.ok(info.classList.contains('floating-toast'), 'the positioning class stays');
+});
