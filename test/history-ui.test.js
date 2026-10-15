@@ -216,3 +216,20 @@ test('copyText uses the clipboard API, falls back to selection copy, and reports
 test('shareUrl puts the token in the hash of the current page', () => {
   assert.equal(shareUrl('d.abc', { origin: 'https://x.test', pathname: '/arena/' }), 'https://x.test/arena/#g=d.abc');
 });
+
+test('a result is coloured from the player side; games without a player stay neutral', async (t) => {
+  const { document, store } = setup(t);
+  await store.save({ record: record('Bot', 'Me', { result: '1-0', humanColor: 'b' }), source: 'bot' });
+  await store.save({ record: record('Me', 'Bot', { result: '1-0', humanColor: 'w' }), source: 'bot' });
+  await store.save({ record: record('Me', 'Bot', { result: '1/2-1/2', humanColor: 'w' }), source: 'bot' });
+  await store.save({ record: record('SF', 'SF', { result: '1-0' }), source: 'arena' });
+  const view = createHistoryView({ document, store, onOpen() {}, onPgn() {}, onLink() {}, onImport() {} });
+  await sleep();
+  const classes = [...view.querySelectorAll('.history-result')].map((el) => el.className);
+  assert.deepEqual(classes, [
+    'history-result',
+    'history-result history-result--draw',
+    'history-result history-result--win',
+    'history-result history-result--loss',
+  ]);
+});

@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HISTORY_LIMIT, createHistoryStore, createIdbAdapter, createMemoryAdapter, summarize } from '../src/history.js';
+import { HISTORY_LIMIT, createHistoryStore, createIdbAdapter, createMemoryAdapter, resultOutcome, summarize } from '../src/history.js';
 
 // ---- a minimal IndexedDB double (only what history.js uses) --------------------------
 
@@ -239,4 +239,13 @@ test('no IndexedDB at all: the adapter is null and the store still works', async
   } finally {
     if (saved !== undefined) globalThis.indexedDB = saved;
   }
+});
+
+test('resultOutcome reads a result from one side and stays null without a player', () => {
+  assert.equal(resultOutcome('1-0', 'w'), 'win');
+  assert.equal(resultOutcome('1-0', 'b'), 'loss');
+  assert.equal(resultOutcome('0-1', 'b'), 'win');
+  assert.equal(resultOutcome('1/2-1/2', 'w'), 'draw');
+  assert.equal(resultOutcome('*', 'w'), null);
+  assert.equal(resultOutcome('1-0', null), null);
 });

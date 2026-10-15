@@ -31,3 +31,31 @@ test('sandbox, review eval bar and landscape phones have their own sizing rules'
 test('the move list cannot push the action strip off-screen in single-column layout', () => {
   assert.match(css, /@media \(max-width: 1000px\)[\s\S]*?\.sidebar-content\s*\{\s*max-height:/u);
 });
+
+test('full-screen lobby ends in a solid colour so the home screen never shows through', () => {
+  const rule = css.match(/\.live-lobby-overlay\s*\{[^}]*\}/u)?.[0] ?? '';
+  assert.match(rule, /background:[^;]*,\s*#[0-9a-f]{6};/iu);
+});
+
+test('board coordinates scale with the board and stay inside it', () => {
+  assert.match(css, /\.board-wrap\.cg-wrap coords\s*\{[^}]*font-size:\s*clamp\([^)]*var\(--board-size\)[^}]*opacity:\s*1/u);
+  assert.match(css, /\.board-wrap\.cg-wrap coords\.files\s*\{\s*left:\s*0;/u);
+});
+
+test('mode descriptions wrap to two lines instead of being cut to one', () => {
+  const rule = css.match(/\.chesscom-play-card \.c-desc\s*\{[^}]*\}/u)?.[0] ?? '';
+  assert.match(rule, /-webkit-line-clamp:\s*2/u);
+  assert.doesNotMatch(rule, /white-space:\s*nowrap/u);
+});
+
+test('game-over and history results are neutral unless the viewer won, lost or drew', () => {
+  assert.match(css, /\.gameover-title\s*\{[^}]*color:\s*var\(--text\)/u);
+  for (const outcome of ['win', 'loss', 'draw']) {
+    assert.ok(css.includes(`.gameover-title--${outcome} {`), `.gameover-title--${outcome}`);
+    assert.ok(css.includes(`.history-result--${outcome} {`), `.history-result--${outcome}`);
+  }
+});
+
+test('the review summary keeps its close button visible while scrolling', () => {
+  assert.match(css, /\.review-summary-modal \.review-modal-close\s*\{[^}]*position:\s*sticky/u);
+});

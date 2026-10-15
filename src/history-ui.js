@@ -2,6 +2,8 @@
 // data and callbacks as arguments: no globals, everything from outside (names,
 // PGN text) goes in through textContent.
 
+import { resultOutcome } from './history.js';
+
 const RESULT_TEXT = { '1-0': '1–0', '0-1': '0–1', '1/2-1/2': '½–½', '*': '—' };
 const SOURCE_TEXT = { bot: 'เล่นกับบอท', online: 'ออนไลน์', arena: 'บอทสู้กัน', import: 'นำเข้า' };
 
@@ -73,9 +75,11 @@ export function createHistoryView({ document, store, onOpen, onPgn, onLink, onIm
       const row = make(document, 'li', 'history-row');
       row.dataset.id = g.id;
       const main = make(document, 'div', 'history-main');
+      // Colour the result from the player's side (a 1–0 is a loss when you had Black).
+      const outcome = resultOutcome(g.result, g.humanColor);
       main.append(
         make(document, 'span', 'history-players', `${g.white || 'ขาว'} vs ${g.black || 'ดำ'}`),
-        make(document, 'span', 'history-result', RESULT_TEXT[g.result] ?? '—'),
+        make(document, 'span', outcome ? `history-result history-result--${outcome}` : 'history-result', RESULT_TEXT[g.result] ?? '—'),
       );
       const bits = [formatDate(g.savedAt, now()), SOURCE_TEXT[g.source] ?? g.source, `${Math.ceil(g.plies / 2)} ตา`];
       if (g.opening) bits.push(g.opening);

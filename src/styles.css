@@ -460,6 +460,25 @@ body {
   height: 100%;
 }
 
+/* chessground's 9px coordinates at 80% opacity disappear on a large board:
+   scale them with the board and keep them fully opaque. Files sit in the
+   bottom-right corner of their square and stay inside the board (the default
+   24px offset pushed the last label past its edge on phones). */
+.board-wrap.cg-wrap coords {
+  font-size: clamp(10px, calc(var(--board-size) * 0.022), 14px);
+  font-weight: 700;
+  opacity: 1;
+}
+
+.board-wrap.cg-wrap coords.files {
+  left: 0;
+}
+
+.board-wrap.cg-wrap coords.files coord {
+  text-align: right;
+  padding-right: 0.3em;
+}
+
 /* PLAYER BARS (TOP & BOTTOM) */
 
 .player-bar,
@@ -1605,9 +1624,12 @@ square.hint-dest {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.35;
-  white-space: nowrap;
+  /* Two lines fit every mode description; one line cut most of them off. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .btn-back-link {
@@ -1705,9 +1727,13 @@ square.hint-dest {
 }
 
 .history-result {
-  color: var(--accent);
+  color: var(--text);
   white-space: nowrap;
 }
+
+.history-result--win { color: var(--accent); }
+.history-result--loss { color: var(--red); }
+.history-result--draw { color: var(--muted); }
 
 .history-sub {
   color: var(--muted);
@@ -2055,11 +2081,16 @@ input[type='range'] {
   padding: 10px 0 0;
 }
 
+/* Neutral unless the viewer played: green only ever means "you won". */
 .gameover-title {
   font-size: 24px;
   font-weight: 800;
-  color: var(--accent);
+  color: var(--text);
 }
+
+.gameover-title--win { color: var(--accent); }
+.gameover-title--loss { color: var(--red); }
+.gameover-title--draw { color: var(--muted); }
 
 .gameover-detail {
   color: var(--muted);
@@ -2175,7 +2206,8 @@ input[type='range'] {
   overflow-y: auto;
   padding: 24px clamp(18px, 4vw, 64px) 64px;
   color: #f7f4ff;
-  background: radial-gradient(circle at 15% 10%, rgba(90,54,138,.4), transparent 38%), radial-gradient(circle at 85% 0%, rgba(61,115,100,.28), transparent 34%), linear-gradient(145deg, rgba(12,11,24,.97), rgba(24,17,38,.96));
+  /* The final solid layer keeps the home screen underneath from showing through. */
+  background: radial-gradient(circle at 15% 10%, rgba(90,54,138,.4), transparent 38%), radial-gradient(circle at 85% 0%, rgba(61,115,100,.28), transparent 34%), linear-gradient(145deg, rgba(12,11,24,.97), rgba(24,17,38,.96)), #0c0b18;
 }
 .live-lobby-overlay::before { content:''; position:fixed; inset:0; pointer-events:none; opacity:.16; background-image:radial-gradient(circle,rgba(255,255,255,.8) 1px,transparent 1px); background-size:34px 34px; mask-image:linear-gradient(to bottom,#000,transparent 70%); }
 .live-lobby-topbar,.live-lobby-hero,.live-lobby-controls,.lobby-meta-row,.live-room-grid,.lobby-recent-section,.lobby-alert { position:relative; width:min(1240px,100%); margin-inline:auto; }
@@ -2358,7 +2390,17 @@ input[type='range'] {
 .accuracy-gauge:last-child .gauge-fill { stroke: #b8bcc4; filter: drop-shadow(0 0 6px rgba(200, 210, 225, 0.5)); }
 .gauge-pct { fill: #fff; font-size: 17px; font-weight: 800; text-anchor: middle; }
 .gauge-side { fill: var(--muted); font-size: 9.5px; text-anchor: middle; }
-.gauge-name { font-size: 11.5px; color: var(--muted); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gauge-name { font-size: 11.5px; color: var(--muted); max-width: 150px; text-align: center; line-height: 1.3; overflow-wrap: anywhere; }
+
+/* The summary scrolls on short screens; keep its close button reachable. */
+.review-summary-modal .review-modal-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  z-index: 2;
+  margin: -6px -6px 0 0;
+  background: rgba(30, 32, 38, 0.95);
+}
 @keyframes gauge-in { from { stroke-dashoffset: 327; } }
 
 /* Move stats breakdown */

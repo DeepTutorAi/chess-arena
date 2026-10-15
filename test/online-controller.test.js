@@ -80,9 +80,10 @@ function makeHarness() {
     setPlayers(top, bottom) { calls.players = [top, bottom]; },
     setAfkWarning(value) { calls.afk = value; },
     setActionStrip(opts) { calls.actionStrip.push(opts); },
-    showGameOver(title, detail, onNewGame, onHome, onReview, rematch) {
+    showGameOver(title, detail, onNewGame, onHome, onReview, rematch, onRestore, outcome) {
       calls.gameOver = [title, detail];
       calls.gameOverRematch = rematch;
+      calls.gameOverOutcome = outcome;
       calls.gameOverRenders = (calls.gameOverRenders ?? 0) + 1;
       const overlay = { body: { isConnected: true }, close() { overlay.body.isConnected = false; } };
       return overlay;
@@ -567,4 +568,60 @@ test('resuming a hosted room restores the invite links for Share', async () => {
   assert.equal(controller.onlineInviteToken, 'I'.repeat(43));
   assert.equal(controller.onlineWatchInviteToken, 'W'.repeat(43));
   controller.dispose();
+});
+
+test('leaving mid-game warns only when something is at stake', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  globalThis.Worker = FakeWorker;
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+
+  const { controller } = makeHarness();
+  t.after(() => controller.dispose());
+
+  await controller.start(MODES.HUMAN_VS_AI, { color: 'w', level: 4, timeControlId: 'unlimited' });
+  assert.equal(controller.leaveGameWarning(), null, 'no move played yet: nothing to lose');
+  await controller.handleUserMove('e2', 'e4');
+  assert.ok(controller.leaveGameWarning(), 'a started bot game warns before it is abandoned');
+  controller.resign();
+  assert.equal(controller.leaveGameWarning(), null, 'a finished game can be left freely');
+
+  await controller.start(MODES.AI_VS_AI, { levelWhite: 2, levelBlack: 2, timeControlId: 'unlimited' });
+  assert.equal(controller.leaveGameWarning(), null, 'watching AI vs AI costs nothing');
+
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  assert.match(controller.leaveGameWarning(), /ออกจากห้อง/u, 'an active online seat warns');
+  controller._onOnlineState(stateAfter(['e2e4'], { status: 'finished', result: '1-0', reason: 'resignation' }));
+  assert.equal(controller.leaveGameWarning(), null);
+});
+
+test('the game-over card is coloured from the player side: loss, win, or neutral', async (t) => {
+  globalThis.requestAnimationFrame = (callback) => { callback(); return 1; };
+  globalThis.Worker = FakeWorker;
+  const originalPlay = sounds.play;
+  sounds.play = () => {};
+  t.after(() => { sounds.play = originalPlay; });
+
+  const { controller, calls } = makeHarness();
+  t.after(() => controller.dispose());
+
+  await controller.start(MODES.HUMAN_VS_AI, { color: 'w', level: 4, timeControlId: 'unlimited' });
+  await controller.handleUserMove('e2', 'e4');
+  controller.resign();
+  assert.equal(calls.gameOverOutcome, 'loss', 'resigning is shown as a loss, not in winner green');
+
+  await controller.start(MODES.ANALYZE, {});
+  for (const [from, to] of [['f2', 'f3'], ['e7', 'e5'], ['g2', 'g4'], ['d8', 'h4']]) {
+    await controller.handleUserMove(from, to);
+  }
+  assert.equal(calls.gameOverOutcome, null, 'sandbox play has no "you", so the card stays neutral');
+
+  await controller.start(MODES.ONLINE, {
+    action: 'create', playerName: 'Host', title: 'Test', color: 'w', timeControlId: 'unlimited',
+  });
+  controller._onOnlineState(stateAfter(['e2e4'], { status: 'finished', result: '1-0', reason: 'resignation' }));
+  assert.equal(calls.gameOverOutcome, 'win', 'the white host won 1-0');
 });

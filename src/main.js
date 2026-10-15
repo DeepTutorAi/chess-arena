@@ -7,7 +7,7 @@ import 'chessground/assets/chessground.brown.css';
 import 'chessground/assets/chessground.cburnett.css';
 import './styles.css';
 
-import { UI } from './ui.js';
+import { UI, makeActivatable } from './ui.js';
 import { Controller, MODES } from './controller.js';
 import { LEVELS, TIME_CONTROLS, HUMAN_NAME, getRooms, saveRoom, isCrossOriginIsolated, getStrongEnginePreference, setStrongEnginePreference } from './config.js';
 import {
@@ -227,7 +227,13 @@ function openLiveLobby() {
     },
     recentRooms,
     onClose: close,
-    onCreate: () => { close(); openModeDialog(MODES.ONLINE); },
+    onCreate: (profile) => {
+      // Carry what was typed in the lobby into the create form.
+      if (profile?.name) storeLocal(PLAYER_NAME_KEY, profile.name);
+      if (profile?.avatar) storeLocal('chess-arena-player-avatar', profile.avatar);
+      close();
+      openModeDialog(MODES.ONLINE, { onBack: openLiveLobby, backLabel: '← กลับไป Lobby' });
+    },
     onJoin: async (room, profile) => {
       storeLocal('chess-arena-player-avatar', profile.avatar);
       try {
@@ -423,7 +429,7 @@ function openJoinDialog(prefillInvite = null) {
 }
 
 // 2-STEP CREATE ROOM DIALOG FLOW (CHESS.COM PLAY CHESS STYLE)
-function openModeDialog(targetMode = null, { level = null } = {}) {
+function openModeDialog(targetMode = null, { level = null, onBack = null, backLabel = '← ย้อนกลับไปเลือกโหมด' } = {}) {
   const modal = ui.openModal('Play Chess (เล่น / เลือกโหมด)');
   const body = modal.body;
 
@@ -471,7 +477,7 @@ function openModeDialog(targetMode = null, { level = null } = {}) {
       const card = ui.el('div', `chesscom-play-card card-${opt.mode}`);
       card.innerHTML = `
         <div class="c-banner-wrap">
-          <img src="${opt.banner}" alt="${opt.title}" class="c-banner-img" width="360" height="240" loading="lazy" decoding="async" />
+          <img src="${opt.banner}" alt="" class="c-banner-img" width="360" height="240" loading="lazy" decoding="async" />
           <div class="c-banner-overlay"></div>
         </div>
         <div class="c-body">
@@ -483,14 +489,14 @@ function openModeDialog(targetMode = null, { level = null } = {}) {
           <div class="c-desc">${opt.desc}</div>
         </div>
       `;
-      card.onclick = () => {
+      makeActivatable(card, () => {
         if (opt.mode === 'sandbox_direct') {
           modal.close();
           controller.startSandboxSetup();
         } else {
           renderStep2(opt.mode);
         }
-      };
+      });
       cardsVertical.appendChild(card);
     }
 
@@ -500,8 +506,9 @@ function openModeDialog(targetMode = null, { level = null } = {}) {
   const renderStep2 = (mode) => {
     body.innerHTML = '';
 
-    const backBtn = ui.el('button', 'btn-back-link', '← ย้อนกลับไปเลือกโหมด');
-    backBtn.onclick = () => renderStep1();
+    // Opened from the lobby, "back" returns there rather than to the mode list.
+    const backBtn = ui.el('button', 'btn-back-link', backLabel);
+    backBtn.onclick = onBack ? () => { modal.close(); onBack(); } : () => renderStep1();
     body.appendChild(backBtn);
 
     if (mode === MODES.HUMAN_VS_AI) {
@@ -765,7 +772,7 @@ function openModeDialog(targetMode = null, { level = null } = {}) {
 
 // ---- Event Wiring -----------------------------------------------------------
 
-ui.refs.brandHome.onclick = () => controller.goHome();
+ui.refs.brandHome.onclick = () => requestGoHome();
 ui.refs.profileBtn.onclick = () => {
   const { stats } = controller;
   stats.reload(); // another tab may have played since this one loaded
@@ -905,19 +912,32 @@ ui.refs.btnResign.onclick = () => openResignDialog();
 ui.refs.btnOptions.onclick = () => openOptionsDialog();
 
 function openResignDialog() {
-  const body = ui.el('p', 'dlg-hint', 'คุณแน่ใจหรือไม่ว่าต้องการยอมแพ้?');
-  const row = ui.el('div', 'dlg-actions');
-  const keepPlaying = ui.el('button', 'btn', 'เล่นต่อ');
-  const confirmResign = ui.el('button', 'btn primary danger', 'ยอมแพ้');
-  const modal = ui.openModal('ยืนยันการยอมแพ้', body);
-  keepPlaying.onclick = () => modal.close();
-  confirmResign.onclick = () => {
-    modal.close();
-    controller.resign();
-  };
-  row.append(keepPlaying, confirmResign);
-  body.appendChild(row);
-  confirmResign.focus();
+  ui.confirm({
+    title: 'ยืนยันการยอมแพ้',
+    message: 'คุณแน่ใจหรือไม่ว่าต้องการยอมแพ้?',
+    confirmLabel: 'ยอมแพ้',
+    cancelLabel: 'เล่นต่อ',
+    danger: true,
+    onConfirm: () => controller.resign(),
+  });
+}
+
+/** Leaving mid-game can cost the game (a bot loss, an abandoned online seat),
+ *  so ask first; with nothing at stake go straight home. */
+function requestGoHome() {
+  const warning = controller.leaveGameWarning();
+  if (!warning) {
+    controller.goHome();
+    return;
+  }
+  ui.confirm({
+    title: 'ออกจากเกม?',
+    message: warning,
+    confirmLabel: 'ออกจากเกม',
+    cancelLabel: 'เล่นต่อ',
+    danger: true,
+    onConfirm: () => controller.goHome(),
+  });
 }
 
 function openOptionsDialog() {
@@ -1047,7 +1067,7 @@ ui.refs.btnShare.onclick = () => {
   }
   ui.openModal('แชร์ห้องออนไลน์', body);
 };
-ui.refs.btnHome.onclick = () => controller.goHome();
+ui.refs.btnHome.onclick = () => requestGoHome();
 ui.refs.btnFlip.onclick = () => controller.flip();
 ui.refs.btnPause.onclick = () => controller.togglePause();
 ui.refs.btnHint.onclick = () => controller.showHint();

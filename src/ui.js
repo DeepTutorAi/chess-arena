@@ -50,6 +50,20 @@ export function pieceMarkup(role, color = 'white', className = '') {
   return `<span class="cg-wrap piece-icon ${className}" aria-hidden="true"><piece class="${color} ${role}"></piece></span>`;
 }
 
+/** Make a clickable block (a card holding block-level layout, which a <button>
+ *  may not contain) reachable and operable from the keyboard like a button. */
+export function makeActivatable(element, onActivate) {
+  element.setAttribute('role', 'button');
+  element.tabIndex = 0;
+  element.addEventListener('click', onActivate);
+  element.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault(); // Space would otherwise scroll the dialog
+    onActivate(event);
+  });
+  return element;
+}
+
 export class UI {
   constructor(root) {
     this._activeModalClose = null;
@@ -750,10 +764,35 @@ export class UI {
     };
   }
 
+  /** Yes/no confirmation. A destructive (danger) action never gets the initial
+   *  focus, so a stray Enter or Space keeps the safe choice. */
+  confirm({ title, message, confirmLabel, cancelLabel = 'ยกเลิก', danger = false, onConfirm }) {
+    const body = this.el('div', 'confirm-dialog');
+    body.appendChild(this.el('p', 'dlg-hint', message));
+    const row = this.el('div', 'dlg-actions');
+    const cancel = this.el('button', 'btn', cancelLabel);
+    cancel.type = 'button';
+    const confirm = this.el('button', danger ? 'btn primary danger' : 'btn primary', confirmLabel);
+    confirm.type = 'button';
+    row.append(cancel, confirm);
+    body.appendChild(row);
+    const modal = this.openModal(title, body);
+    cancel.onclick = () => modal.close();
+    confirm.onclick = () => {
+      modal.close();
+      onConfirm?.();
+    };
+    (danger ? cancel : confirm).focus();
+    return modal;
+  }
+
   // ---- game over popup ---------------------------------------------------
-  showGameOver(title, detail = '', onNewGame, onHome, onReview, rematch = null, onRestore = null) {
+  /** outcome: 'win' | 'loss' | 'draw' from the viewer's side, or null when the
+   *  viewer did not play (AI vs AI, sandbox, spectating). */
+  showGameOver(title, detail = '', onNewGame, onHome, onReview, rematch = null, onRestore = null, outcome = null) {
     const body = this.el('div', 'gameover');
     const big = this.el('div', 'gameover-title', title);
+    if (outcome) big.classList.add(`gameover-title--${outcome}`);
     const sub = this.el('div', 'gameover-detail', detail);
     body.append(big, sub);
     const row = this.el('div', 'dlg-actions');

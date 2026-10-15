@@ -14,7 +14,7 @@ import { bookPlies, getBotBook } from './botbook.js';
 import { HUMAN_LINES, HUMAN_STYLES, annotateLines, pickHumanMove } from './humanbot.js';
 import { createTurnAlert } from './turnalert.js';
 import { MIN_RATED_PLIES, createStatsStore } from './stats.js';
-import { createHistoryStore } from './history.js';
+import { createHistoryStore, resultOutcome } from './history.js';
 import { createMistakeBank, gameKey, practiceAnalysis } from './mistakes.js';
 import { onlineActionAvailability } from './online-actions.js';
 import { ImportError, decodeShareToken, encodeShareToken, parseImport, recordToPgn } from './pgn.js';
@@ -1819,7 +1819,9 @@ export class Controller {
    *  final position first — game-over sounds already played immediately. */
   _showGameOverSoon(title, detail, delayMs = this._gameOverDelayMs) {
     if (this._statsNote) detail = `${detail}\n${this._statsNote}`;
-    this._lastGameOver = { title, detail };
+    // Every caller captures the game record first, so its result is final here.
+    const outcome = this._viewerOutcome(this._lastGameRecord?.result);
+    this._lastGameOver = { title, detail, outcome };
     const open = () => {
       if (this._gameOverOverlay?.body?.isConnected) return;
       this._gameOverOverlay = this.ui.showGameOver(
@@ -1830,6 +1832,7 @@ export class Controller {
         () => this.startReview(),
         this._onlineRematchActions(),
         () => this._reshowGameOver(),
+        outcome,
       );
       this._rematchCardKey = this._rematchStateKey();
     };
@@ -1854,8 +1857,17 @@ export class Controller {
       () => this.startReview(),
       this._onlineRematchActions(),
       () => this._reshowGameOver(),
+      this._lastGameOver.outcome ?? null,
     );
     this._rematchCardKey = this._rematchStateKey();
+  }
+
+  /** The result from the side of the person at this screen, if they played. */
+  _viewerOutcome(result) {
+    const side = this.mode === MODES.HUMAN_VS_AI ? this.humanSide
+      : this.mode === MODES.ONLINE && this.onlineRole !== 'spectator' ? this.onlineSide
+        : null;
+    return resultOutcome(result, side);
   }
 
   /** Identity of the rematch state the open card was rendered from — a change
@@ -2643,6 +2655,23 @@ export class Controller {
       ? { title: 'คัดลอกลิงก์แล้ว', detail: 'ส่งให้ใครก็เปิดดูและรีวิวเกมนี้ได้', autoCloseMs: 2500 }
       : { title: 'คัดลอกอัตโนมัติไม่ได้', detail: link, actions: [['ตกลง']] });
     return ok;
+  }
+
+  /** What leaving the current game right now would cost the player, or null
+   *  when nothing is at stake (finished game, spectating, AI vs AI, sandbox). */
+  leaveGameWarning() {
+    if (this._isOver() || this._overPopupShown) return null;
+    if (this.mode === MODES.HUMAN_VS_AI) {
+      const plies = this.game.history().length;
+      if (plies === 0) return null;
+      return plies >= MIN_RATED_PLIES && !this._statsRecorded
+        ? 'ออกตอนนี้จะนับเป็นแพ้และบันทึกลงสถิติของคุณ'
+        : 'เกมที่เล่นค้างอยู่จะถูกยกเลิก';
+    }
+    if (this.mode === MODES.ONLINE && this.onlineRole !== 'spectator' && this.onlineState?.status === 'active') {
+      return 'คุณจะออกจากห้องระหว่างเกม ถ้าไม่กลับมา จะแพ้เมื่อหมดเวลาเดินหรือถูกนับ AFK';
+    }
+    return null;
   }
 
   goHome() {

@@ -140,3 +140,61 @@ test('lobby filters on the server and pages with nextCursor instead of slicing o
   await settle();
   assert.deepEqual(requests, [{ status: 'open', time: 'blitz', search: '' }]);
 });
+
+test('create hands the profile typed in the lobby to the create flow', async (t) => {
+  const window = new Window({ url: 'https://chess.example.test/' });
+  t.after(() => window.close());
+  const root = window.document.createElement('div');
+  window.document.body.appendChild(root);
+  const created = [];
+  const view = createLobbyView({
+    root,
+    document: window.document,
+    client: { async listLobby() { return { rooms: [], nextCursor: null, serverTime: 5_000 }; } },
+    profile: { name: '', avatar: 'knight' },
+    onCreate: (profile) => created.push(profile),
+    setTimeoutImpl: () => 1,
+    clearTimeoutImpl: () => {},
+  });
+  t.after(() => view.destroy());
+  await view.ready;
+  const name = root.querySelector('.lobby-profile-name');
+  name.value = '  Carol ';
+  root.querySelector('.lobby-avatar-select').value = 'rook';
+  root.querySelector('.live-lobby-topbar .lobby-create-btn').click();
+  assert.deepEqual(created, [{ name: 'Carol', avatar: 'rook' }]);
+});
+
+test('an unreachable or unconfigured server is never shown as an up-to-date empty lobby', async (t) => {
+  const window = new Window({ url: 'https://chess.example.test/' });
+  t.after(() => window.close());
+  const make = (client) => {
+    const root = window.document.createElement('div');
+    window.document.body.appendChild(root);
+    let timers = 0;
+    const view = createLobbyView({
+      root,
+      document: window.document,
+      client,
+      profile: { name: 'Guest', avatar: 'rook' },
+      setTimeoutImpl: () => { timers += 1; return timers; },
+      clearTimeoutImpl: () => {},
+    });
+    t.after(() => view.destroy());
+    return { root, view, timers: () => timers };
+  };
+
+  const offline = make({ async listLobby() { throw new Error('offline'); } });
+  await offline.view.ready;
+  assert.match(offline.root.querySelector('.lobby-alert').textContent, /โหลด Lobby ไม่สำเร็จ/u);
+  assert.equal(offline.root.querySelector('.lobby-updated').textContent, '', 'no "updated just now" after a failure');
+  assert.doesNotMatch(offline.root.textContent, /ยังไม่มีห้องสาธารณะ/u, 'no false "no public rooms" claim');
+
+  let asked = 0;
+  const unconfigured = make({ apiUrl: '', async listLobby() { asked += 1; return { rooms: [], nextCursor: null, serverTime: 1 }; } });
+  await unconfigured.view.ready;
+  assert.match(unconfigured.root.querySelector('.lobby-alert').textContent, /VITE_ONLINE_API_URL/u);
+  assert.equal(asked, 0, 'there is no server to ask');
+  assert.equal(unconfigured.timers(), 0, 'and no polling loop is started');
+  assert.equal(unconfigured.root.querySelector('.lobby-refresh-btn').disabled, true);
+});

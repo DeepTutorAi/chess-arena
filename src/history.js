@@ -13,6 +13,16 @@ export const HISTORY_LIMIT = 200;
 const META = 'meta';
 const GAMES = 'games';
 
+/** 'win' | 'loss' | 'draw' for the player of `side`, or null when there is no
+ *  such player (arena, import, spectating) or no decisive result. */
+export function resultOutcome(result, side) {
+  if (side !== 'w' && side !== 'b') return null;
+  if (result === '1/2-1/2') return 'draw';
+  if (result === '1-0') return side === 'w' ? 'win' : 'loss';
+  if (result === '0-1') return side === 'b' ? 'win' : 'loss';
+  return null;
+}
+
 /** Summary shown in the list — never the full move list or analysis. */
 export function summarize(entry) {
   const { record, analysis } = entry;

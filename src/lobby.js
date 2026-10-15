@@ -104,6 +104,7 @@ export function createLobbyView({
     pages: 1,
     nextCursor: null,
     generation: 0,
+    failed: false, // the last refresh did not reach the server
   };
 
   root.className = 'live-lobby-overlay';
@@ -120,7 +121,7 @@ export function createLobbyView({
   );
   const create = element(document, 'button', 'lobby-create-btn', '+ CREATE ROOM');
   create.type = 'button';
-  create.onclick = onCreate;
+  create.onclick = () => onCreate(readProfile());
   topbar.append(close, identity, create);
 
   const hero = element(document, 'section', 'live-lobby-hero');
@@ -150,6 +151,7 @@ export function createLobbyView({
     profileGlyph.style.backgroundPosition = AVATAR_ATLAS[profileAvatar.value];
   };
   profilePill.append(profileGlyph, profileName, profileAvatar);
+  const readProfile = () => ({ name: profileName.value.trim(), avatar: profileAvatar.value });
   hero.append(heroCopy, profilePill);
 
   const controls = element(document, 'section', 'live-lobby-controls');
@@ -242,8 +244,12 @@ export function createLobbyView({
     if (state.loading) { renderSkeletons(); return; }
     const visible = filterLobbyRooms(state.rooms, state);
     grid.innerHTML = '';
-    roomCount.textContent = `${state.rooms.length} ห้องจากเซิร์ฟเวอร์`;
-    updated.textContent = state.stale ? 'รายการอาจไม่ใช่สถานะล่าสุด' : 'อัปเดตล่าสุดเมื่อสักครู่';
+    // Never claim a fresh, empty server list when the server was not reached.
+    const unreached = state.failed && !state.stale;
+    roomCount.textContent = unreached ? 'ยังไม่มีข้อมูลจากเซิร์ฟเวอร์' : `${state.rooms.length} ห้องจากเซิร์ฟเวอร์`;
+    updated.textContent = unreached ? ''
+      : state.stale ? 'รายการอาจไม่ใช่สถานะล่าสุด' : 'อัปเดตล่าสุดเมื่อสักครู่';
+    if (unreached) return; // the alert explains; "no public rooms" would be untrue
     if (!visible.length) {
       const empty = element(document, 'div', 'lobby-empty-state');
       const emptyArt = element(document, 'img', 'lobby-empty-art');
@@ -258,7 +264,7 @@ export function createLobbyView({
       );
       const button = element(document, 'button', 'lobby-create-btn', '+ CREATE ROOM');
       button.type = 'button';
-      button.onclick = onCreate;
+      button.onclick = () => onCreate(readProfile());
       empty.appendChild(button);
       grid.appendChild(empty);
       return;
@@ -289,7 +295,7 @@ export function createLobbyView({
       button.type = 'button';
       button.disabled = state.stale || action === 'unavailable';
       button.onclick = () => {
-        const currentProfile = { name: profileName.value.trim(), avatar: profileAvatar.value };
+        const currentProfile = readProfile();
         if (!currentProfile.name) {
           profileName.focus();
           alert.hidden = false;
@@ -313,6 +319,17 @@ export function createLobbyView({
 
   async function refresh() {
     if (state.destroyed) return;
+    if (client.apiUrl === '') {
+      // A build without VITE_ONLINE_API_URL has no server to ask: say so once
+      // instead of retrying every few seconds with a misleading network error.
+      state.loading = false;
+      state.failed = true;
+      alert.hidden = false;
+      alert.textContent = 'ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์ห้องออนไลน์ (VITE_ONLINE_API_URL) — Lobby และการเล่นออนไลน์ใช้ไม่ได้ในเวอร์ชันนี้';
+      refreshButton.disabled = true;
+      renderRooms();
+      return;
+    }
     state.abortController?.abort();
     const abortController = new AbortController();
     state.abortController = abortController;
@@ -340,8 +357,10 @@ export function createLobbyView({
       state.serverTime = serverTime;
       state.nextCursor = cursor ?? null;
       state.stale = false;
+      state.failed = false;
     } catch (error) {
       if (error?.name === 'AbortError' || state.destroyed || generation !== state.generation) return;
+      state.failed = true;
       state.stale = state.rooms.length > 0;
       alert.hidden = false;
       alert.textContent = state.stale
