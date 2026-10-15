@@ -10,9 +10,8 @@ import { Window } from 'happy-dom';
 import { UI } from '../src/ui.js';
 import * as icons from '../src/icons.js';
 
-const root = new URL('..', import.meta.url).pathname;
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8');
-const srcFiles = readdirSync(`${root}src`).filter((f) => f.endsWith('.js'));
+const srcFiles = readdirSync(new URL('../src', import.meta.url)).filter((f) => f.endsWith('.js'));
 
 test('every icon in icons.js is used somewhere (no dead or duplicate icons)', () => {
   const others = srcFiles.filter((f) => f !== 'icons.js').map((f) => read(`src/${f}`)).join('\n');

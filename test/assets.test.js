@@ -5,9 +5,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, basename } from 'node:path';
+import { dirname, join, relative, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const assetsDir = join(root, 'public', 'assets');
 const RASTER = /\.(jpe?g|png|webp|avif|gif)$/iu;
 const MAX_BYTES = 200 * 1024;
