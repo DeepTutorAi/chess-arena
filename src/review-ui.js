@@ -156,8 +156,8 @@ export class ReviewUI {
     const overlay = document.createElement('div');
     overlay.className = 'review-modal-overlay';
     overlay.innerHTML = `
-      <div class="review-modal review-progress-modal" role="dialog" aria-modal="true" aria-label="กำลังวิเคราะห์เกม">
-        <button class="review-modal-close" type="button" aria-label="ยกเลิกการวิเคราะห์">${iconClose({ size: 16 })}</button>
+      <div class="review-modal review-progress-modal modal modal--sm" role="dialog" aria-modal="true" aria-label="กำลังวิเคราะห์เกม">
+        <button class="review-modal-close modal-close" type="button" aria-label="ยกเลิกการวิเคราะห์">${iconClose({ size: 16 })}</button>
         <div class="review-progress-icon">${iconBarChart({ size: 28 })}</div>
         <div class="review-progress-title">กำลังวิเคราะห์รูปเกม…</div>
         <div class="review-progress-sub" data-sub>เตรียมเอนจิน</div>
@@ -198,9 +198,11 @@ export class ReviewUI {
     const blackAcc = analysis.accuracy.b ?? null;
     const runCount = analysis.plies.filter((p) => RETRYABLE_TIERS.has(p.tier) && p.bestMove).length;
     overlay.innerHTML = `
-      <div class="review-modal review-summary-modal" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
-        <button class="review-modal-close" type="button" aria-label="ปิด">${iconClose({ size: 16 })}</button>
-        <div class="review-summary-title">Game Review · การรีวิวเกม</div>
+      <div class="review-modal review-summary-modal modal modal--lg" role="dialog" aria-modal="true" aria-label="สรุปการรีวิวเกม">
+        <div class="modal-head">
+          <div class="review-summary-title">Game Review · การรีวิวเกม</div>
+          <button class="review-modal-close modal-close" type="button" aria-label="ปิด">${iconClose({ size: 16 })}</button>
+        </div>
         ${analysis.opening ? `<div class="review-opening">${glyph(iconBook, 14)} ${escapeHtml(analysis.opening.eco)} · ${escapeHtml(analysis.opening.name)}</div>` : ''}
 
         <div class="review-section-label">ACCURACY SECTION</div>
@@ -225,7 +227,7 @@ export class ReviewUI {
           <button class="btn primary review-step-btn" type="button" data-step>
             ${glyph(iconSearch, 16)} ดูตาเดิน
           </button>
-          ${runCount ? `<button class="btn primary review-puzzle-btn" type="button" data-puzzle-run>${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด (${runCount} ตา)</button>` : ''}
+          ${runCount ? `<button class="btn review-puzzle-btn" type="button" data-puzzle-run>${glyph(iconTarget, 16)} ฝึกแก้ตาพลาด (${runCount} ตา)</button>` : ''}
           <button class="btn" type="button" data-again>${glyph(iconRefresh, 16)} เล่นใหม่</button>
           ${share ? `<button class="btn" type="button" data-pgn>${glyph(iconBook, 16)} บันทึก PGN</button>
           <button class="btn" type="button" data-link>${glyph(iconShare, 16)} คัดลอกลิงก์</button>` : ''}
@@ -341,8 +343,8 @@ export class ReviewUI {
       <svg class="advantage-graph-svg" viewBox="0 0 ${W} ${H + 22}" preserveAspectRatio="none" role="img" aria-label="กราฟความได้เปรียบ">
         <defs>
           <linearGradient id="adv-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#2fd6c3" stop-opacity="0.35"></stop>
-            <stop offset="100%" stop-color="#2fd6c3" stop-opacity="0.02"></stop>
+            <stop offset="0%" style="stop-color: var(--accent); stop-opacity: 0.35"></stop>
+            <stop offset="100%" style="stop-color: var(--accent); stop-opacity: 0.02"></stop>
           </linearGradient>
         </defs>
         <line class="adv-centerline" x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}"></line>

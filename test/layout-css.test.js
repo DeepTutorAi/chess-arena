@@ -58,7 +58,10 @@ test('game-over and history results are neutral unless the viewer won, lost or d
 });
 
 test('the review summary keeps its close button visible while scrolling', () => {
-  assert.match(css, /\.review-summary-modal \.review-modal-close\s*\{[^}]*position:\s*sticky/u);
+  // The close button sits in the summary's .modal-head, which components.css makes sticky.
+  assert.match(css, /\.review-summary-modal \.modal-head\s*\{/u);
+  const components = readFileSync(new URL('../src/components.css', import.meta.url), 'utf8');
+  assert.match(components, /\.modal-head\s*\{[^}]*position:\s*sticky/u);
 });
 
 test('the night board replaces the brown theme', () => {
@@ -76,8 +79,8 @@ const RAW_COLOUR = /#[0-9a-f]{3,8}\b|rgba?\(/giu;
 const NON_TOKEN_FONT_SIZE = /font-size:(?!\s*var\()/gu;
 // Measured on styles.css on 2026-10-15; each screen migration lowers these and
 // the cleanup task sets both to 0.
-const COLOUR_BASELINE = 85;
-const FONT_SIZE_BASELINE = 42;
+const COLOUR_BASELINE = 19;
+const FONT_SIZE_BASELINE = 12;
 
 test('components.css uses tokens only', () => {
   assert.equal(readCss('components.css').match(RAW_COLOUR), null);

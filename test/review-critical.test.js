@@ -86,3 +86,15 @@ test('games without critical moments render no critical section (backward compat
   assert.equal(document.querySelector('[data-critical]'), null);
   assert.equal(document.querySelector('.adv-cm-dot'), null);
 });
+
+test('the summary is a large shared modal whose close button lives in its sticky header', (t) => {
+  setup(t);
+  const ui = new ReviewUI();
+  ui.showReviewSummaryModal(analysisWithMoments(), () => {}, () => {}, () => {});
+  const dialog = document.querySelector('.review-summary-modal');
+  assert.ok(dialog.classList.contains('modal') && dialog.classList.contains('modal--lg'));
+  const head = dialog.querySelector('.modal-head');
+  assert.ok(head, 'header row');
+  assert.ok(head.querySelector('.review-modal-close'), 'close button sits in the header');
+  assert.ok(head.querySelector('.review-summary-title'), 'title sits in the header');
+});
